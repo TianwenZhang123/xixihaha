@@ -1,0 +1,42 @@
+# P-Flow Default Configuration
+# Paper: "P-Flow: Prompting Visual Effects Generation" (arXiv:2603.22091)
+
+# Video generation model settings
+model:
+  name: "Wan-AI/Wan2.1-T2V-14B"  # Wan 2.1 14B text-to-video model
+  dtype: "bfloat16"
+  device: "cuda"
+  
+# Video settings
+video:
+  height: 480
+  width: 832
+  num_frames: 81
+  fps: 16
+  guidance_scale: 5.0
+  num_inference_steps: 50
+
+# Noise Prior Enhancement settings
+noise_prior:
+  alpha: 0.001            # Noise blending weight (Eq. 10)
+  rho_s: 0.1             # Spatial SVD retention ratio (keep 10% spatial)
+  rho_m: 0.9             # Temporal SVD retention ratio (keep 90% temporal)
+  inversion_steps: 50    # Number of steps for flow matching inversion
+
+# Prompt Optimization settings
+prompt_optimization:
+  max_iterations: 10     # Maximum optimization iterations (i_max)
+  vlm_model: "gemini-1.5-pro"  # VLM model for prompt refinement
+  temperature: 0.7       # VLM temperature
+  max_tokens: 2048       # VLM max output tokens
+  
+# Historical Trajectory settings
+trajectory:
+  max_videos_to_vlm: 3   # Max videos sent to VLM (ref, prev, current)
+  keep_all_text: true     # Keep all text history for context
+
+# Output settings
+output:
+  save_intermediate: true  # Save intermediate generated videos
+  save_prompts: true       # Save prompt history
+  output_dir: "outputs"
