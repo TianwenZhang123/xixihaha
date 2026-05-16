@@ -14,7 +14,7 @@ setup(
         "transformers>=4.40.0",
         "accelerate>=0.28.0",
         "safetensors>=0.4.0",
-        "google-generativeai>=0.8.0",
+        "openai>=1.12.0",
         "opencv-python>=4.8.0",
         "numpy>=1.24.0",
         "scipy>=1.11.0",
@@ -26,7 +26,7 @@ setup(
         "einops>=0.7.0",
     ],
     extras_require={
-        "eval": ["decord>=0.6.0"],
+        "eval": ["eva-decord>=0.6.0"],
     },
     entry_points={
         "console_scripts": [

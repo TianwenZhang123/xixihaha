@@ -88,7 +88,19 @@ def parse_args():
         "--vlm_api_key",
         type=str,
         default=None,
-        help="Gemini API key (or set GOOGLE_API_KEY env var).",
+        help="API key for VLM relay (or set OPENAI_API_KEY env var).",
+    )
+    parser.add_argument(
+        "--vlm_base_url",
+        type=str,
+        default=None,
+        help="Base URL for OpenAI-compatible API relay (e.g., https://api.linkapi.org/v1).",
+    )
+    parser.add_argument(
+        "--vlm_model",
+        type=str,
+        default=None,
+        help="Override VLM model name (e.g., 'gemini-2.0-flash', 'gemini-1.5-pro').",
     )
     
     # Mode flags
@@ -126,6 +138,8 @@ def build_config_overrides(args) -> dict:
     
     if args.max_iterations is not None:
         overrides.setdefault("prompt_optimization", {})["max_iterations"] = args.max_iterations
+    if args.vlm_model is not None:
+        overrides.setdefault("prompt_optimization", {})["vlm_model"] = args.vlm_model
     
     if args.alpha is not None:
         overrides.setdefault("noise_prior", {})["alpha"] = args.alpha
@@ -172,6 +186,7 @@ def main():
         device=args.device,
         use_mock_vlm=args.mock,
         vlm_api_key=args.vlm_api_key,
+        vlm_base_url=args.vlm_base_url,
     )
     
     # Run pipeline

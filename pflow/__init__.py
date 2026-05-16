@@ -12,6 +12,7 @@ from .pipeline import PFlowPipeline
 from .noise_prior import NoisePriorEnhancement
 from .prompt_optimizer import PromptOptimizer
 from .vista_optimizer import VISTAOptimizer
+from .vlm_client import VLMClient, MockVLMClient
 from .trajectory import TrajectoryManager
 
 __version__ = "0.1.0"
@@ -20,5 +21,7 @@ __all__ = [
     "NoisePriorEnhancement",
     "PromptOptimizer",
     "VISTAOptimizer",
+    "VLMClient",
+    "MockVLMClient",
     "TrajectoryManager",
 ]

@@ -70,6 +70,7 @@ class PFlowPipeline:
         dtype: torch.dtype = torch.bfloat16,
         use_mock_vlm: bool = False,
         vlm_api_key: Optional[str] = None,
+        vlm_base_url: Optional[str] = None,
     ):
         """
         Initialize the P-Flow pipeline.
@@ -81,7 +82,8 @@ class PFlowPipeline:
             device: Computation device.
             dtype: Model dtype (bfloat16 recommended for Wan 2.1).
             use_mock_vlm: Use mock VLM for testing.
-            vlm_api_key: API key for Gemini VLM.
+            vlm_api_key: API key for VLM relay service.
+            vlm_base_url: Base URL for OpenAI-compatible API relay.
         """
         self.device = device
         self.dtype = dtype
@@ -94,13 +96,14 @@ class PFlowPipeline:
         self._pipe = None
         self._model_name = model_name
         
-        # Initialize VLM client
+        # Initialize VLM client (via OpenAI-compatible relay)
         if use_mock_vlm:
             self.vlm_client = MockVLMClient()
         else:
             self.vlm_client = VLMClient(
                 model_name=self.config["prompt_optimization"]["vlm_model"],
                 api_key=vlm_api_key,
+                base_url=vlm_base_url,
                 temperature=self.config["prompt_optimization"]["temperature"],
                 max_tokens=self.config["prompt_optimization"]["max_tokens"],
             )
@@ -135,7 +138,7 @@ class PFlowPipeline:
             },
             "prompt_optimization": {
                 "max_iterations": 10,
-                "vlm_model": "gemini-1.5-pro",
+                "vlm_model": "gemini-2.0-flash",
                 "temperature": 0.7,
                 "max_tokens": 2048,
             },

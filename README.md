@@ -41,7 +41,7 @@ videofake/
 - Python >= 3.10
 - PyTorch >= 2.1
 - diffusers (for Wan 2.1 model)
-- google-generativeai (for Gemini VLM)
+- openai (for VLM via LinkAPI relay)
 - opencv-python
 - numpy, scipy
 

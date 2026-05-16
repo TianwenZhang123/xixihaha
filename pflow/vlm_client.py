@@ -1,32 +1,34 @@
 """
 VLM (Vision-Language Model) Client for P-Flow.
 
-This module handles interaction with Gemini 1.5 Pro (or compatible VLM)
-for test-time prompt optimization. The VLM receives composite videos
-showing reference and generated results, and outputs structured
-analysis with refined prompts.
+This module handles interaction with VLMs for test-time prompt optimization.
+The VLM receives video frames (extracted as images) showing reference and
+generated results, and outputs structured analysis with refined prompts.
+
+Uses OpenAI-compatible API format via proxy/relay service (e.g., LinkAPI),
+which supports Gemini, GPT-4o, Claude, etc. through a unified interface.
 
 Reference: Section 3.4 and Appendix A of the paper.
 """
 
 import json
 import base64
-import tempfile
 import os
+import io
 from typing import Optional, Dict, List, Any
 from pathlib import Path
 
 try:
-    import google.generativeai as genai
-    HAS_GENAI = True
+    import openai
+    HAS_OPENAI = True
 except ImportError:
-    HAS_GENAI = False
+    HAS_OPENAI = False
 
 
 # System instruction template for the VLM (from paper's Appendix A)
 SYSTEM_INSTRUCTION = """You are a professional video generation prompt engineer. Your task is to analyze the differences between a reference video and a generated video, then provide an improved prompt that better captures the visual effects shown in the reference.
 
-You will receive a composite video with the reference on the left and the generated result on the right (or specified otherwise). You also receive the history of previous prompts and analyses.
+You will receive key frames from a composite video with the reference on the left and the generated result on the right (or specified otherwise). You also receive the history of previous prompts and analyses.
 
 Your analysis should focus on:
 1. **Motion patterns**: Speed, direction, trajectories, oscillation, acceleration
@@ -55,58 +57,60 @@ Guidelines:
 
 class VLMClient:
     """
-    Client for interacting with Vision-Language Models (Gemini 1.5 Pro).
+    VLM client using OpenAI-compatible API (via proxy/relay).
     
-    Handles:
-    - Video upload and processing
-    - Structured prompt engineering
-    - Response parsing and validation
+    Supports any model accessible through OpenAI-format API, including:
+    - Gemini 2.0 Flash / 1.5 Pro (via LinkAPI or similar relay)
+    - GPT-4o / GPT-4o-mini (via OpenAI directly or relay)
+    - Claude 3.5 Sonnet (via relay)
+    
+    Video analysis is done by extracting key frames and sending them
+    as base64 images to the vision model.
     """
     
     def __init__(
         self,
-        model_name: str = "gemini-1.5-pro",
+        model_name: str = "gemini-2.0-flash",
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 2048,
     ):
         """
         Args:
-            model_name: VLM model identifier.
-            api_key: API key for Gemini. If None, reads from GOOGLE_API_KEY env var.
+            model_name: Model identifier (e.g., "gemini-2.0-flash", "gpt-4o").
+            api_key: API key for the relay service.
+                     If None, reads from OPENAI_API_KEY env var.
+            base_url: API base URL (e.g., "https://api.linkapi.org/v1").
+                      If None, reads from OPENAI_BASE_URL env var or defaults
+                      to OpenAI official endpoint.
             temperature: Sampling temperature for VLM.
             max_tokens: Maximum output tokens.
         """
+        if not HAS_OPENAI:
+            raise ImportError(
+                "openai is required. Install with: pip install openai"
+            )
+        
         self.model_name = model_name
         self.temperature = temperature
         self.max_tokens = max_tokens
         
-        if not HAS_GENAI:
-            raise ImportError(
-                "google-generativeai is required. Install with: "
-                "pip install google-generativeai"
-            )
-        
-        # Configure API
-        api_key = api_key or os.environ.get("GOOGLE_API_KEY")
+        api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise ValueError(
-                "Gemini API key required. Set GOOGLE_API_KEY environment variable "
+                "API key required. Set OPENAI_API_KEY environment variable "
                 "or pass api_key parameter."
             )
-        genai.configure(api_key=api_key)
         
-        # Initialize model
-        self.model = genai.GenerativeModel(
-            model_name=model_name,
-            system_instruction=SYSTEM_INSTRUCTION,
-            generation_config=genai.GenerationConfig(
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-                response_mime_type="application/json",
-            ),
-        )
+        base_url = base_url or os.environ.get("OPENAI_BASE_URL")
         
+        client_kwargs = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        
+        self.client = openai.OpenAI(**client_kwargs)
+    
     def analyze_and_refine(
         self,
         composite_video_path: str,
@@ -115,7 +119,10 @@ class VLMClient:
         user_description: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Send composite video to VLM and get refined prompt.
+        Analyze composite video (via extracted frames) and refine prompt.
+        
+        Extracts key frames from the video and sends them as images to
+        the VLM for analysis.
         
         Args:
             composite_video_path: Path to the side-by-side composite video.
@@ -127,37 +134,36 @@ class VLMClient:
             Dictionary with 'analysis', 'improvements', 'refined_prompt',
             'confidence', and 'key_differences'.
         """
-        # Build the text prompt for VLM
+        # Extract key frames from the composite video
+        frames_base64 = self._extract_frames_base64(composite_video_path, num_frames=8)
+        
+        # Build messages
         text_prompt = self._build_prompt(current_prompt, history, user_description)
         
-        # Upload video
-        video_file = genai.upload_file(composite_video_path)
+        # Build content with images
+        content = [{"type": "text", "text": text_prompt}]
+        for frame_b64 in frames_base64:
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{frame_b64}",
+                    "detail": "high",
+                }
+            })
         
-        # Wait for video processing
-        import time
-        while video_file.state.name == "PROCESSING":
-            time.sleep(2)
-            video_file = genai.get_file(video_file.name)
-            
-        if video_file.state.name == "FAILED":
-            raise RuntimeError(f"Video processing failed: {video_file.state.name}")
-        
-        # Generate response
-        response = self.model.generate_content(
-            [video_file, text_prompt],
-            request_options={"timeout": 120},
+        # Call VLM
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": SYSTEM_INSTRUCTION},
+                {"role": "user", "content": content},
+            ],
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
         )
         
-        # Parse response
-        result = self._parse_response(response.text)
-        
-        # Clean up uploaded file
-        try:
-            genai.delete_file(video_file.name)
-        except Exception:
-            pass
-            
-        return result
+        response_text = response.choices[0].message.content
+        return self._parse_response(response_text)
     
     def analyze_with_frames(
         self,
@@ -168,8 +174,7 @@ class VLMClient:
         user_description: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Alternative: Send key frames as images instead of video.
-        Useful when video upload is not supported or too slow.
+        Send key frames as images for analysis.
         
         Args:
             reference_frames: List of paths to reference video key frames.
@@ -188,26 +193,81 @@ class VLMClient:
             "Analyze the visual effect differences between them."
         )
         
-        # Build content parts
-        content_parts = [text_prompt]
+        content = [{"type": "text", "text": text_prompt}]
         
-        content_parts.append("\n--- REFERENCE VIDEO FRAMES ---\n")
+        # Add reference frames
+        content.append({"type": "text", "text": "--- REFERENCE VIDEO FRAMES ---"})
         for frame_path in reference_frames:
-            img_file = genai.upload_file(frame_path)
-            content_parts.append(img_file)
-            
-        content_parts.append("\n--- GENERATED VIDEO FRAMES ---\n")
-        for frame_path in generated_frames:
-            img_file = genai.upload_file(frame_path)
-            content_parts.append(img_file)
+            frame_b64 = self._encode_image(frame_path)
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}", "detail": "high"}
+            })
         
-        # Generate response
-        response = self.model.generate_content(
-            content_parts,
-            request_options={"timeout": 120},
+        # Add generated frames
+        content.append({"type": "text", "text": "--- GENERATED VIDEO FRAMES ---"})
+        for frame_path in generated_frames:
+            frame_b64 = self._encode_image(frame_path)
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}", "detail": "high"}
+            })
+        
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": SYSTEM_INSTRUCTION},
+                {"role": "user", "content": content},
+            ],
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
         )
         
-        return self._parse_response(response.text)
+        response_text = response.choices[0].message.content
+        return self._parse_response(response_text)
+    
+    def _extract_frames_base64(self, video_path: str, num_frames: int = 8) -> List[str]:
+        """
+        Extract evenly-spaced frames from video and encode as base64 JPEG.
+        
+        Args:
+            video_path: Path to the video file.
+            num_frames: Number of frames to extract (default 8 for good temporal coverage).
+            
+        Returns:
+            List of base64-encoded JPEG strings.
+        """
+        import numpy as np
+        
+        try:
+            from decord import VideoReader, cpu
+            vr = VideoReader(video_path, ctx=cpu(0))
+            total_frames = len(vr)
+            indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+            frames = vr.get_batch(indices).asnumpy()
+        except (ImportError, Exception):
+            import imageio.v3 as iio
+            all_frames = iio.imread(video_path, plugin="pyav")
+            total_frames = len(all_frames)
+            indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+            frames = all_frames[indices]
+        
+        # Encode each frame as JPEG base64
+        from PIL import Image
+        
+        frames_b64 = []
+        for frame in frames:
+            img = Image.fromarray(frame)
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=85)
+            frames_b64.append(base64.b64encode(buffer.getvalue()).decode("utf-8"))
+        
+        return frames_b64
+    
+    def _encode_image(self, image_path: str) -> str:
+        """Encode a single image file to base64."""
+        with open(image_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
     
     def _build_prompt(
         self,
@@ -247,7 +307,9 @@ class VLMClient:
         
         parts.append(
             "## Task\n"
-            "The video shows the REFERENCE (left/first) and GENERATED (right/second) results. "
+            "The images show key frames from the composite video with "
+            "REFERENCE (left half) and GENERATED (right half) results side by side. "
+            "Frames are ordered chronologically to show temporal progression.\n"
             "Analyze the differences in visual effects and provide an improved prompt.\n"
             "Focus on: motion patterns, visual appearance, spatial distribution, "
             "temporal dynamics, and effect interactions.\n"
@@ -261,13 +323,9 @@ class VLMClient:
         Parse VLM response into structured format.
         
         Handles potential JSON formatting issues gracefully.
-        
-        Args:
-            response_text: Raw response text from VLM.
-            
-        Returns:
-            Parsed dictionary with analysis results.
         """
+        import re
+        
         # Try direct JSON parse
         try:
             result = json.loads(response_text)
@@ -276,7 +334,6 @@ class VLMClient:
             pass
         
         # Try to extract JSON from markdown code blocks
-        import re
         json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response_text, re.DOTALL)
         if json_match:
             try:
