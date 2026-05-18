@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pflow",
-    version="0.1.0",
+    version="0.2.0",
     description="P-Flow: Training-Free Framework for Customizing Dynamic Visual Effects via Test-Time Prompt Optimization",
     packages=find_packages(),
     python_requires=">=3.10",
@@ -15,6 +15,7 @@ setup(
         "accelerate>=0.28.0",
         "safetensors>=0.4.0",
         "openai>=1.12.0",
+        "dashscope>=1.25.8",
         "opencv-python>=4.8.0",
         "numpy>=1.24.0",
         "scipy>=1.11.0",
@@ -24,13 +25,12 @@ setup(
         "tqdm>=4.66.0",
         "pyyaml>=6.0",
         "einops>=0.7.0",
+        "eva-decord>=0.6.0",
     ],
-    extras_require={
-        "eval": ["eva-decord>=0.6.0"],
-    },
     entry_points={
         "console_scripts": [
             "pflow=scripts.run_pflow:main",
+            "pflow-api=scripts.run_pflow_api:main",
         ],
     },
 )
