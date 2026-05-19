@@ -489,14 +489,30 @@ class PFlowPipeline:
         return video
 
     def _encode_prompt(self, prompt: str) -> torch.Tensor:
-        """Encode a text prompt to embeddings."""
+        """Encode a text prompt to embeddings (compatible with Wan Pipeline)."""
+        import inspect
+
         if hasattr(self.pipe, "encode_prompt"):
-            prompt_embeds = self.pipe.encode_prompt(
-                prompt=prompt,
-                device=self.device,
-                num_images_per_prompt=1,
-                do_classifier_free_guidance=False,
-            )
+            # Inspect the signature to pass only supported parameters
+            sig = inspect.signature(self.pipe.encode_prompt)
+            params = sig.parameters
+
+            kwargs = {"prompt": prompt}
+
+            # Wan Pipeline uses 'device' but some versions don't
+            if "device" in params:
+                kwargs["device"] = self.device
+            # SD-style pipelines use num_images_per_prompt
+            if "num_images_per_prompt" in params:
+                kwargs["num_images_per_prompt"] = 1
+            # Wan Pipeline uses num_videos_per_prompt
+            if "num_videos_per_prompt" in params:
+                kwargs["num_videos_per_prompt"] = 1
+            # Some pipelines accept do_classifier_free_guidance
+            if "do_classifier_free_guidance" in params:
+                kwargs["do_classifier_free_guidance"] = False
+
+            prompt_embeds = self.pipe.encode_prompt(**kwargs)
             if isinstance(prompt_embeds, tuple):
                 prompt_embeds = prompt_embeds[0]
         else:
