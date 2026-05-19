@@ -1,13 +1,16 @@
-# P-Flow Default Configuration
+# P-Flow Default Configuration (Paper-Faithful)
 # Paper: "P-Flow: Prompting Visual Effects Generation" (arXiv:2603.22091)
+#
+# NOTE: This config is designed for AutoDL 4090 with local Wan 2.1-T2V-1.3B.
+# API key should be set via environment variable DASHSCOPE_API_KEY, NOT here.
 
 # Video generation model settings
 model:
-  name: "Wan-AI/Wan2.1-T2V-14B"  # Wan 2.1 14B text-to-video model
+  path: "/root/autodl-tmp/models/Wan2.1-T2V-1.3B"
   dtype: "bfloat16"
   device: "cuda"
-  
-# Video settings
+
+# Video settings (paper: 480x832, 81 frames)
 video:
   height: 480
   width: 832
@@ -16,27 +19,39 @@ video:
   guidance_scale: 5.0
   num_inference_steps: 50
 
-# Noise Prior Enhancement settings
+# Noise Prior Enhancement settings (paper Eq. 3-10)
 noise_prior:
   alpha: 0.001            # Noise blending weight (Eq. 10)
-  rho_s: 0.1             # Spatial SVD retention ratio (keep 10% spatial)
-  rho_m: 0.9             # Temporal SVD retention ratio (keep 90% temporal)
-  inversion_steps: 50    # Number of steps for flow matching inversion
+  rho_s: 0.1             # Spatial SVD ratio: REMOVE top 10% spatial components
+  rho_m: 0.9             # Temporal SVD ratio: KEEP top 90% temporal dynamics
+  inversion_steps: 50    # Flow matching inversion steps
 
-# Prompt Optimization settings
-prompt_optimization:
-  max_iterations: 10     # Maximum optimization iterations (i_max)
-  vlm_model: "gemini-1.5-pro"  # VLM model for prompt refinement
-  temperature: 0.7       # VLM temperature
-  max_tokens: 2048       # VLM max output tokens
-  
-# Historical Trajectory settings
+# Optimization settings (paper Algorithm 1)
+optimization:
+  i_max: 3              # Fixed iterations (paper uses 10, reduced for 1.3B model)
+                         # NO early stopping — paper limitation explicitly stated
+
+# VLM settings (Qwen3-VL-Flash via DashScope)
+# API key is read from DASHSCOPE_API_KEY environment variable
+vlm:
+  model_name: "qwen-vl-max"    # Qwen3-VL-Flash on DashScope
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  temperature: 0.7
+  max_tokens: 2048
+
+# Historical trajectory settings (paper Section 3.5)
 trajectory:
-  max_videos_to_vlm: 3   # Max videos sent to VLM (ref, prev, current)
-  keep_all_text: true     # Keep all text history for context
+  max_videos_to_vlm: 3   # V_ref, V_{i-1}, V_i (vertical composite)
 
 # Output settings
 output:
-  save_intermediate: true  # Save intermediate generated videos
-  save_prompts: true       # Save prompt history
-  output_dir: "outputs"
+  save_all_videos: true   # Save ALL iteration videos for offline evaluation
+  save_composites: true   # Save VLM composite videos
+  output_dir: "/root/autodl-tmp/outputs"
+
+# Dataset paths (AutoDL)
+dataset:
+  root: "/root/autodl-tmp/data/moviegen_bench"
+  prompts_file: "MovieGenVideoBench.txt"
+  prompts_csv: "MovieGenVideoBenchWithTag.csv"
+  videos_dir: "water_mark_out"
