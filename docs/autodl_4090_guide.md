@@ -39,9 +39,10 @@
 
 | 配置项 | 值 |
 |--------|-----|
-| 来源 | HuggingFace `facebookresearch/MovieGenBench` |
+| 视频来源 | CloudFront CDN (`MovieGenVideoBench.tar.gz`，约 15GB) |
+| Prompt 文件 | GitHub `facebookresearch/MovieGenBench` 仓库 |
 | 视频数量 | 1003 个 |
-| Prompt 文件 | `MovieGenVideoBench.txt`（每行一个 prompt，0-indexed 对应视频文件名） |
+| 文件命名 | `{index}.mp4`（0-indexed，对应 txt 文件行号） |
 
 ---
 
@@ -98,17 +99,40 @@ mkdir -p /root/autodl-tmp/outputs
 export HF_ENDPOINT=https://hf-mirror.com
 
 # 下载 Wan 2.1-T2V-1.3B 模型（约 5GB）
-huggingface-cli download Wan-AI/Wan2.1-T2V-1.3B \
+hf download Wan-AI/Wan2.1-T2V-1.3B \
     --local-dir /root/autodl-tmp/models/Wan2.1-T2V-1.3B
 ```
+
+> 注意：新版 huggingface_hub 使用 `hf` 命令而非 `huggingface-cli`。
+> 如果 `hf` 不可用，尝试 `pip install -U huggingface_hub` 后重试。
 
 #### Step 6: 下载 MovieGenBench 数据集
 
 ```bash
-huggingface-cli download facebookresearch/MovieGenBench \
-    --repo-type dataset \
-    --local-dir /root/autodl-tmp/data/moviegen_bench
+# 6a. 下载视频压缩包（约 15GB，CloudFront CDN）
+mkdir -p /root/autodl-tmp/data
+cd /root/autodl-tmp/data
+wget -c https://d14whct5a0wtwm.cloudfront.net/moviegen/MovieGenVideoBench.tar.gz
+
+# 6b. 解压（解压后约 16GB）
+tar -xzf MovieGenVideoBench.tar.gz
+mv MovieGenVideoBench moviegen_bench
+
+# 6c. 下载 Prompt 文件
+cd /root/autodl-tmp/data/moviegen_bench
+wget https://raw.githubusercontent.com/facebookresearch/MovieGenBench/main/benchmark/MovieGenVideoBench.txt
+wget https://raw.githubusercontent.com/facebookresearch/MovieGenBench/main/benchmark/MovieGenVideoBenchWithTag.csv
+
+# 6d. 验证
+ls water_mark_out/ | wc -l  # 应该是 1003
+head -3 MovieGenVideoBench.txt
 ```
+
+> 如果 GitHub raw 文件下载慢，可加代理：
+> ```bash
+> wget https://ghproxy.com/https://raw.githubusercontent.com/facebookresearch/MovieGenBench/main/benchmark/MovieGenVideoBench.txt
+> wget https://ghproxy.com/https://raw.githubusercontent.com/facebookresearch/MovieGenBench/main/benchmark/MovieGenVideoBenchWithTag.csv
+> ```
 
 #### Step 7: 验证环境
 
@@ -205,13 +229,18 @@ mkdir -p /root/autodl-tmp/outputs
 
 # 下载模型
 export HF_ENDPOINT=https://hf-mirror.com
-huggingface-cli download Wan-AI/Wan2.1-T2V-1.3B \
+hf download Wan-AI/Wan2.1-T2V-1.3B \
     --local-dir /root/autodl-tmp/models/Wan2.1-T2V-1.3B
 
-# 下载数据集
-huggingface-cli download facebookresearch/MovieGenBench \
-    --repo-type dataset \
-    --local-dir /root/autodl-tmp/data/moviegen_bench
+# 下载数据集（视频约 15GB）
+mkdir -p /root/autodl-tmp/data
+cd /root/autodl-tmp/data
+wget -c https://d14whct5a0wtwm.cloudfront.net/moviegen/MovieGenVideoBench.tar.gz
+tar -xzf MovieGenVideoBench.tar.gz
+mv MovieGenVideoBench moviegen_bench
+cd moviegen_bench
+wget https://raw.githubusercontent.com/facebookresearch/MovieGenBench/main/benchmark/MovieGenVideoBench.txt
+wget https://raw.githubusercontent.com/facebookresearch/MovieGenBench/main/benchmark/MovieGenVideoBenchWithTag.csv
 
 # Mock 验证
 python scripts/run_pflow_paper.py --video_index 0 --mock
@@ -333,6 +362,12 @@ pip install "numpy<2"
 ### Q: HuggingFace 下载慢
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
+```
+
+### Q: `huggingface-cli` 提示 deprecated
+新版 huggingface_hub 改用 `hf` 命令：
+```bash
+hf download Wan-AI/Wan2.1-T2V-1.3B --local-dir /root/autodl-tmp/models/Wan2.1-T2V-1.3B
 ```
 
 ### Q: 关机后数据还在吗
