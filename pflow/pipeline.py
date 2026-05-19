@@ -195,9 +195,10 @@ class PFlowPipeline:
                 self._model_path,
                 torch_dtype=self.dtype,
             )
-            pipe = pipe.to(self.device)
 
-            # Enable memory optimizations for 4090
+            # Use CPU offload for memory efficiency on 4090 (24GB).
+            # Do NOT call pipe.to(device) before this — model stays on CPU
+            # and components are moved to GPU on-demand during inference.
             pipe.enable_model_cpu_offload()
 
         except ImportError:
@@ -207,7 +208,7 @@ class PFlowPipeline:
                 self._model_path,
                 torch_dtype=self.dtype,
             )
-            pipe = pipe.to(self.device)
+            pipe.enable_model_cpu_offload()
 
         print("Model loaded successfully.")
         return pipe
