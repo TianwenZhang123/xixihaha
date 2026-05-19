@@ -16,7 +16,7 @@ Usage:
 
     # Run with explicit video + prompt:
     python scripts/run_pflow_paper.py \
-        --reference_video /root/autodl-tmp/data/moviegen_bench/water_mark_out/23.mp4 \
+        --reference_video /root/autodl-tmp/data/moviegen_bench/23.mp4 \
         --prompt "A cat waking up its sleeping owner demanding breakfast..." \
         --output_dir /root/autodl-tmp/outputs/test_023 \
         --seed 42
@@ -182,8 +182,8 @@ def resolve_video_and_prompt(args):
     if args.video_index is not None:
         dataset_dir = args.dataset_dir
         
-        # Resolve video path
-        video_path = os.path.join(dataset_dir, "water_mark_out", f"{args.video_index}.mp4")
+        # Resolve video path (videos are directly in dataset_dir)
+        video_path = os.path.join(dataset_dir, f"{args.video_index}.mp4")
         if args.reference_video:
             video_path = args.reference_video
         

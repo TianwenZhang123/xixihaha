@@ -29,8 +29,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "pflow=scripts.run_pflow:main",
-            "pflow-api=scripts.run_pflow_api:main",
+            "pflow-paper=scripts.run_pflow_paper:main",
         ],
     },
 )

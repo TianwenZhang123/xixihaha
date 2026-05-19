@@ -326,53 +326,6 @@ def create_vertical_composite(
     return composite
 
 
-def create_composite_video(
-    videos: List[torch.Tensor],
-    labels: Optional[List[str]] = None,
-    padding: int = 4,
-    label_height: int = 30,
-) -> torch.Tensor:
-    """
-    Create a side-by-side (horizontal) composite video.
-
-    KEPT for backward compatibility with API mode (run_pflow_api.py).
-    The paper-faithful code uses create_vertical_composite() instead.
-
-    Args:
-        videos: List of video tensors, each (C, F, H, W) in [0, 1].
-        labels: Optional text labels for each video.
-        padding: Pixels of padding between videos.
-        label_height: Height reserved for labels.
-
-    Returns:
-        Composite video tensor (C, F, H, W_total) with horizontal layout.
-    """
-    num_frames = min(v.shape[1] for v in videos)
-    height = videos[0].shape[2]
-
-    processed_videos = []
-    for v in videos:
-        if v.shape[1] > num_frames:
-            indices = torch.linspace(0, v.shape[1] - 1, num_frames).long()
-            v = v[:, indices]
-        if v.shape[2] != height:
-            v = resize_video(v, height, v.shape[3])
-        processed_videos.append(v)
-
-    total_width = sum(v.shape[3] for v in processed_videos) + padding * (len(videos) - 1)
-
-    C = processed_videos[0].shape[0]
-    composite = torch.zeros(C, num_frames, height, total_width)
-
-    x_offset = 0
-    for i, v in enumerate(processed_videos):
-        w = v.shape[3]
-        composite[:, :, :, x_offset:x_offset + w] = v
-        x_offset += w + padding
-
-    return composite
-
-
 def extract_key_frames(
     video: torch.Tensor,
     num_frames: int = 8,

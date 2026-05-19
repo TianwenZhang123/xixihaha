@@ -50,8 +50,8 @@ output:
   output_dir: "/root/autodl-tmp/outputs"
 
 # Dataset paths (AutoDL)
+# Videos (0.mp4 ~ 1002.mp4) and prompts files are directly inside root dir.
 dataset:
   root: "/root/autodl-tmp/data/moviegen_bench"
   prompts_file: "MovieGenVideoBench.txt"
   prompts_csv: "MovieGenVideoBenchWithTag.csv"
-  videos_dir: "water_mark_out"
