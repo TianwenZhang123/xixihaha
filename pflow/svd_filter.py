@@ -80,6 +80,11 @@ class SVDFilter:
         """
         C, F, H, W = noise_inv.shape
         
+        # SVD requires float32 (BFloat16 not supported by CUDA SVD kernel)
+        original_dtype = noise_inv.dtype
+        if noise_inv.dtype == torch.bfloat16 or noise_inv.dtype == torch.float16:
+            noise_inv = noise_inv.float()
+        
         # Stage 1: Spatial Filtering
         # Reshape to (C*F, H*W) - each row is a spatial map
         noise_spatial = noise_inv.reshape(C * F, H * W)
@@ -116,6 +121,10 @@ class SVDFilter:
         
         # Reshape back to (C, F, H, W)
         noise_temporal_filtered = noise_temporal_filtered.reshape(C, F, H, W)
+        
+        # Convert back to original dtype
+        if noise_temporal_filtered.dtype != original_dtype:
+            noise_temporal_filtered = noise_temporal_filtered.to(original_dtype)
         
         return noise_temporal_filtered
     
@@ -155,6 +164,11 @@ class SVDFilter:
         """
         C, F, H, W = noise_inv.shape
         
+        # SVD requires float32 (BFloat16 not supported by CUDA SVD kernel)
+        original_dtype = noise_inv.dtype
+        if noise_inv.dtype == torch.bfloat16 or noise_inv.dtype == torch.float16:
+            noise_inv = noise_inv.float()
+        
         # Stage 1: Spatial Filtering with randomized SVD
         noise_spatial = noise_inv.reshape(C * F, H * W)
         k_s = max(1, int(self.rho_s * min(C * F, H * W)))
@@ -189,6 +203,10 @@ class SVDFilter:
             noise_temporal_filtered = U_m @ torch.diag(S_m) @ V_m.T
         
         noise_temporal_filtered = noise_temporal_filtered.reshape(C, F, H, W)
+        
+        # Convert back to original dtype
+        if noise_temporal_filtered.dtype != original_dtype:
+            noise_temporal_filtered = noise_temporal_filtered.to(original_dtype)
         
         return noise_temporal_filtered
 
