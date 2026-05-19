@@ -179,7 +179,7 @@ def save_video_tensor(
         video = video[0]
 
     # (C, F, H, W) -> (F, H, W, C)
-    frames = video.permute(1, 2, 3, 0).cpu().numpy()
+    frames = video.permute(1, 2, 3, 0).cpu().float().numpy()
     frames = (frames * 255).clip(0, 255).astype(np.uint8)
 
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
@@ -214,7 +214,7 @@ def save_frame(
     if frame.dim() == 4:
         frame = frame[0]
 
-    frame_np = frame.permute(1, 2, 0).cpu().numpy()  # (H, W, C)
+    frame_np = frame.permute(1, 2, 0).cpu().float().numpy()  # (H, W, C)
     frame_np = (frame_np * 255).clip(0, 255).astype(np.uint8)
 
     img = Image.fromarray(frame_np)
@@ -376,7 +376,7 @@ def video_to_pil_frames(
 
     pil_frames = []
     for idx in indices:
-        frame = video[:, idx].permute(1, 2, 0).cpu().numpy()  # (H, W, C)
+        frame = video[:, idx].permute(1, 2, 0).cpu().float().numpy()  # (H, W, C)
         frame = (frame * 255).clip(0, 255).astype(np.uint8)
         pil_frames.append(Image.fromarray(frame))
 
