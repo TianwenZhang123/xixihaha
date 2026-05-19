@@ -105,7 +105,12 @@ class NoisePriorEnhancement:
         
         # Step 4: Noise Blending (Eq. 10)
         # η = √α · η_temporal + √(1-α) · η_new
-        eta_new = torch.randn_like(eta_temporal, generator=generator)
+        # Note: torch.randn_like() does not accept 'generator' kwarg in some PyTorch versions.
+        # Use torch.randn() with explicit shape/dtype/device instead.
+        eta_new = torch.randn(
+            eta_temporal.shape, dtype=eta_temporal.dtype,
+            device=eta_temporal.device, generator=generator
+        )
         
         eta_enhanced = (
             torch.sqrt(torch.tensor(self.alpha, device=self.device)) * eta_temporal
