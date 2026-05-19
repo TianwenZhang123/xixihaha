@@ -243,7 +243,11 @@ def encode_video_to_latents(
         # Wan 2.1 VAE expects (B, C, F, H, W)
         video_tensor = video_tensor.to(device=device, dtype=pipe.vae.dtype)
         latents = pipe.vae.encode(video_tensor).latent_dist.sample()
-        latents = latents * pipe.vae.config.scaling_factor
+        # Get scaling factor (Wan 2.1 VAE may not have it in config)
+        scaling_factor = getattr(pipe.vae.config, 'scaling_factor', None)
+        if scaling_factor is None:
+            scaling_factor = getattr(pipe, 'vae_scaling_factor', 0.18215)
+        latents = latents * scaling_factor
     return latents
 
 
@@ -265,7 +269,11 @@ def decode_latents_to_video(
     """
     with torch.no_grad():
         latents = latents.to(device=device, dtype=pipe.vae.dtype)
-        latents = latents / pipe.vae.config.scaling_factor
+        # Get scaling factor (Wan 2.1 VAE may not have it in config)
+        scaling_factor = getattr(pipe.vae.config, 'scaling_factor', None)
+        if scaling_factor is None:
+            scaling_factor = getattr(pipe, 'vae_scaling_factor', 0.18215)
+        latents = latents / scaling_factor
         video = pipe.vae.decode(latents).sample
         video = (video + 1.0) / 2.0  # [-1, 1] -> [0, 1]
         video = video.clamp(0, 1)
