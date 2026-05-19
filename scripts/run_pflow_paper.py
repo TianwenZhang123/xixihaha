@@ -76,8 +76,8 @@ def parse_args():
         help="Path to YAML configuration file.",
     )
     parser.add_argument(
-        "--model_path", type=str, default="/root/autodl-tmp/models/Wan2.1-T2V-1.3B",
-        help="Local path to Wan 2.1-T2V-1.3B model.",
+        "--model_path", type=str, default="/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers",
+        help="Local path to Wan 2.1-T2V-1.3B model (diffusers format).",
     )
     parser.add_argument(
         "--seed", type=int, default=42,
