@@ -70,6 +70,48 @@ class NoisePriorEnhancement:
         self.svd_filter = SVDFilter(rho_s=rho_s, rho_m=rho_m)
         
     @torch.no_grad()
+    def compute_temporal_prior(
+        self,
+        video_latents: torch.Tensor,
+        prompt_embeds: torch.Tensor,
+        negative_prompt_embeds: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Compute the temporal noise prior η_temporal (Algorithm 1, lines 2-3).
+        
+        This performs:
+            1. Flow Matching Inversion: x_1 → η_inv
+            2. Two-stage SVD Projection: η_inv → η_temporal
+        
+        The blending with random noise happens PER ITERATION in the main loop,
+        NOT here. This ensures each iteration has fresh exploration noise.
+        
+        Args:
+            video_latents: Reference video encoded to latent space (B, C, F, H, W).
+            prompt_embeds: Text embeddings (P_0) for conditioning the inversion.
+            negative_prompt_embeds: Negative text embeddings.
+            
+        Returns:
+            Temporal noise prior η_temporal of shape (B, C, F, H, W).
+        """
+        # Step 1: Flow Matching Inversion (Algorithm 1, line 2)
+        # x_1 (video latents) → x_0 (inverted noise η_inv)
+        eta_inv = self.inverter.invert(
+            video_latents=video_latents,
+            prompt_embeds=prompt_embeds,
+            negative_prompt_embeds=negative_prompt_embeds,
+        )
+        
+        # Step 2: Two-stage SVD Projection (Algorithm 1, line 3)
+        # η_inv → η_temporal
+        if self.use_efficient_svd:
+            eta_temporal = self.svd_filter.filter_efficient(eta_inv)
+        else:
+            eta_temporal = self.svd_filter.filter(eta_inv)
+        
+        return eta_temporal
+
+    @torch.no_grad()
     def enhance(
         self,
         video_latents: torch.Tensor,
@@ -78,7 +120,10 @@ class NoisePriorEnhancement:
         generator: Optional[torch.Generator] = None,
     ) -> torch.Tensor:
         """
-        Perform the complete noise prior enhancement.
+        Perform the complete noise prior enhancement (legacy interface).
+        
+        NOTE: For paper-faithful usage, prefer compute_temporal_prior() + per-iteration
+        blending in the main loop. This method performs all steps in one call.
         
         Args:
             video_latents: Reference video encoded to latent space (B, C, F, H, W).
@@ -89,24 +134,15 @@ class NoisePriorEnhancement:
         Returns:
             Enhanced noise prior η of shape (B, C, F, H, W).
         """
-        # Step 1: Flow Matching Inversion
-        # x_1 (video latents) → x_0 (inverted noise η_inv)
-        eta_inv = self.inverter.invert(
+        # Compute temporal prior
+        eta_temporal = self.compute_temporal_prior(
             video_latents=video_latents,
             prompt_embeds=prompt_embeds,
             negative_prompt_embeds=negative_prompt_embeds,
         )
         
-        # Step 2 & 3: SVD Filtering (Spatial + Temporal)
-        if self.use_efficient_svd:
-            eta_temporal = self.svd_filter.filter_efficient(eta_inv)
-        else:
-            eta_temporal = self.svd_filter.filter(eta_inv)
-        
-        # Step 4: Noise Blending (Eq. 10)
+        # Noise Blending (Eq. 7)
         # η = √α · η_temporal + √(1-α) · η_new
-        # Note: torch.randn_like() does not accept 'generator' kwarg in some PyTorch versions.
-        # Use torch.randn() with explicit shape/dtype/device instead.
         eta_new = torch.randn(
             eta_temporal.shape, dtype=eta_temporal.dtype,
             device=eta_temporal.device, generator=generator

@@ -283,7 +283,10 @@ class PFlowPipeline:
         ref_normalized = normalize_video(reference_video).unsqueeze(0)
         ref_latents = encode_video_to_latents(self.pipe, ref_normalized, self.device)
 
-        # Step 2: Noise Prior Enhancement
+        # Step 2: Noise Prior Enhancement (Section 3.3)
+        # Paper: η_inv ← FlowMatchingInversion(V_ref, P_0, I, G)
+        # Then: η_temporal ← ProjectNoiseTemporally(η_inv)
+        # Blending happens INSIDE the loop (Algorithm 1, line 6-7)
         print("\n[Step 2] Computing Noise Prior Enhancement...")
         noise_enhancer = NoisePriorEnhancement(
             pipe=self.pipe,
@@ -294,15 +297,15 @@ class PFlowPipeline:
             device=self.device,
         )
 
-        prompt_embeds_inv = self._encode_prompt("")
-        enhanced_noise = noise_enhancer.enhance(
+        # Paper uses P_0 as condition for inversion, not empty prompt
+        prompt_embeds_inv = self._encode_prompt(prompt)
+        eta_temporal = noise_enhancer.compute_temporal_prior(
             video_latents=ref_latents,
             prompt_embeds=prompt_embeds_inv,
             negative_prompt_embeds=prompt_embeds_inv,
-            generator=generator,
         )
-        print(f"  Noise prior shape: {enhanced_noise.shape}")
-        print(f"  Noise prior stats: mean={enhanced_noise.mean():.4f}, std={enhanced_noise.std():.4f}")
+        print(f"  η_temporal shape: {eta_temporal.shape}")
+        print(f"  η_temporal stats: mean={eta_temporal.mean():.4f}, std={eta_temporal.std():.4f}")
 
         # Step 3: Initialize trajectory and prompt optimizer
         print("\n[Step 3] Initializing optimization components...")
@@ -332,11 +335,23 @@ class PFlowPipeline:
             print(f"  Prompt: {current_prompt[:100]}...")
             print(f"{'='*50}")
 
-            # 4a: Generate video with current prompt and enhanced noise
-            print(f"  [4a] Generating video...")
+            # 4a: Sample fresh noise and blend (Algorithm 1, line 6-7)
+            # η_new ~ N(0, I)
+            # η = √α · η_temporal + √(1-α) · η_new
+            print(f"  [4a] Sampling noise & generating video...")
+            alpha = self.config["noise_prior"]["alpha"]
+            eta_new = torch.randn(
+                eta_temporal.shape, dtype=eta_temporal.dtype,
+                device=eta_temporal.device, generator=generator
+            )
+            eta = (
+                torch.sqrt(torch.tensor(alpha, device=self.device)) * eta_temporal
+                + torch.sqrt(torch.tensor(1.0 - alpha, device=self.device)) * eta_new
+            )
+
             generated_video = self._generate_video(
                 prompt=current_prompt,
-                latents=enhanced_noise,
+                latents=eta,
                 generator=generator,
             )
 
@@ -539,6 +554,10 @@ class PFlowPipeline:
         """
         Run only noise prior enhancement (no prompt optimization).
         Useful for ablation experiments.
+
+        Uses paper-faithful logic:
+        - Inversion conditioned on P_0
+        - Single blend with random noise
         """
         generator = None
         if seed is not None:
@@ -564,7 +583,8 @@ class PFlowPipeline:
             device=self.device,
         )
 
-        prompt_embeds = self._encode_prompt("")
+        # Paper: use P_0 as condition for inversion
+        prompt_embeds = self._encode_prompt(prompt)
         enhanced_noise = noise_enhancer.enhance(
             video_latents=ref_latents,
             prompt_embeds=prompt_embeds,
