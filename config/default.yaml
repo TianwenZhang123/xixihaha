@@ -12,11 +12,11 @@ model:
 
 # Video settings (paper: 480x832, 81 frames)
 # num_frames must satisfy 4n+1 rule: 81(5s), 121(7.5s), 161(10s), 241(15s)
-# Testing 121 frames to see if 4090 can handle it with CPU offload
+# Original reference video is 10.9s, use 161 frames (~10s @16fps) to match
 video:
   height: 480
   width: 832
-  num_frames: 121
+  num_frames: 161
   fps: 16
   guidance_scale: 5.0
   num_inference_steps: 50
