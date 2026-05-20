@@ -121,16 +121,35 @@ class PromptOptimizer:
         )
 
         # Call VLM for analysis and refinement
-        result = self.vlm_client.analyze_and_refine(
-            composite_video_path=str(composite_path),
-            current_prompt=current_prompt,
-            iteration=iteration,
-            desired_visual_effect=desired_visual_effect or current_prompt,
-            subject=subject,
-            environment=environment,
-            last_text_prompt=last_text_prompt,
-            history=history,
-        )
+        # Wrap in try-except to handle DashScope content moderation errors gracefully
+        try:
+            result = self.vlm_client.analyze_and_refine(
+                composite_video_path=str(composite_path),
+                current_prompt=current_prompt,
+                iteration=iteration,
+                desired_visual_effect=desired_visual_effect or current_prompt,
+                subject=subject,
+                environment=environment,
+                last_text_prompt=last_text_prompt,
+                history=history,
+            )
+        except Exception as e:
+            error_msg = str(e)
+            if "data_inspection_failed" in error_msg or "inappropriate" in error_msg.lower():
+                print(f"  WARNING: VLM content moderation triggered (iter {iteration}). "
+                      f"Keeping current prompt and continuing.")
+                result = {
+                    "analysis": {
+                        "reference_description": "[SKIPPED: content moderation]",
+                        "last_generated_description": "[SKIPPED]",
+                        "new_generated_description": "[SKIPPED]",
+                        "comparison": f"[SKIPPED: DashScope content filter triggered at iteration {iteration}]",
+                    },
+                    "refined_prompt": current_prompt,  # Keep current prompt unchanged
+                }
+            else:
+                # Re-raise non-moderation errors
+                raise
 
         # Save iteration results
         self._save_iteration_results(iteration, current_prompt, result)
