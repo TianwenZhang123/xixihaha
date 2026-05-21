@@ -105,8 +105,8 @@ class PFlowPipeline:
         """Load configuration with defaults."""
         default_config = {
             "model": {
-                "t2v_path": "/root/autodl-tmp/models/Wan2.1-T2V-14B",
-                "i2v_path": "/root/autodl-tmp/models/Wan2.1-I2V-14B",
+                "t2v_path": "/root/autodl-tmp/models/Wan2.1-T2V-14B-Diffusers",
+                "i2v_path": "/root/autodl-tmp/models/Wan2.1-I2V-14B-Diffusers",
                 "dtype": "bfloat16",
             },
             "video": {

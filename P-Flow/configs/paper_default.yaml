@@ -7,9 +7,9 @@
 # ============================================================
 model:
   # Text-to-Video model: Wan 2.1-14B
-  t2v_path: "/root/autodl-tmp/models/Wan2.1-T2V-14B"
+  t2v_path: "/root/autodl-tmp/models/Wan2.1-T2V-14B-Diffusers"
   # Image-to-Video model: Wan 2.1-14B I2V
-  i2v_path: "/root/autodl-tmp/models/Wan2.1-I2V-14B"
+  i2v_path: "/root/autodl-tmp/models/Wan2.1-I2V-14B-Diffusers"
   dtype: "bfloat16"
   # Single A800 with enable_model_cpu_offload
   # 14B model (~28GB bfloat16), peak VRAM ~40-50GB with cpu offload
