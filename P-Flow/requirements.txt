@@ -1,0 +1,52 @@
+# P-Flow Full Reproduction Requirements
+# Target: Single A800 (80GB) with CPU offload
+
+# Core dependencies
+torch>=2.2.0
+torchvision>=0.17.0
+torchaudio>=2.2.0
+
+# Video generation model (Wan 2.1-14B)
+diffusers>=0.31.0
+transformers>=4.44.0
+accelerate>=0.30.0
+safetensors>=0.4.0
+
+# VLM client (DashScope Qwen-VL via OpenAI-compatible API)
+openai>=1.12.0
+
+# Video processing
+opencv-python>=4.8.0
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.9
+eva-decord>=0.6.0               # Fast video decoding
+av>=12.0.0                      # PyAV for video I/O
+
+# Evaluation metrics
+pytorch-fid>=0.3.0              # FID computation
+scipy>=1.11.0                   # For FVD computation
+scikit-learn>=1.3.0
+lpips>=0.1.4                    # Perceptual similarity
+
+# VBench evaluation
+# pip install vbench (separate, has its own deps)
+
+# Numeric & utilities
+numpy>=1.24.0
+pandas>=2.0.0
+Pillow>=10.0.0
+tqdm>=4.66.0
+pyyaml>=6.0
+einops>=0.7.0
+omegaconf>=2.3.0
+
+# Experiment tracking (optional)
+# wandb>=0.16.0
+# tensorboard>=2.15.0
+
+# Data management
+huggingface-hub>=0.20.0         # Model/dataset downloading
+gdown>=5.0.0                    # Google Drive downloads (for Open-VFX)
+
+# Optional: Human evaluation UI
+# gradio>=4.0.0                 # For building annotation interface

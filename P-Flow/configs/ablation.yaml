@@ -1,0 +1,104 @@
+# P-Flow Ablation Study Configurations (Table 3 & Table 4)
+# Each section defines ONE ablation variant
+
+# ============================================================
+# Ablation 1: No Noise-Enhance, No Logic-Context, No Visual-Context
+# (Prompt optimization only, random noise)
+# ============================================================
+ablation_baseline:
+  noise_prior:
+    enabled: false          # Disable noise enhancement entirely
+  optimization:
+    i_max: 10
+  trajectory:
+    include_logic_context: false   # No history context to VLM
+    include_visual_context: false  # No V_{i-1} in composite
+
+# ============================================================
+# Ablation 2: With Noise-Enhance, No Logic-Context, No Visual-Context
+# ============================================================
+ablation_noise_only:
+  noise_prior:
+    enabled: true
+    alpha: 0.001
+    rho_s: 0.1
+    rho_m: 0.9
+  optimization:
+    i_max: 10
+  trajectory:
+    include_logic_context: false
+    include_visual_context: false
+
+# ============================================================
+# Ablation 3: With Noise-Enhance + Visual-Context(i-1), No Logic-Context
+# ============================================================
+ablation_noise_visual:
+  noise_prior:
+    enabled: true
+    alpha: 0.001
+    rho_s: 0.1
+    rho_m: 0.9
+  optimization:
+    i_max: 10
+  trajectory:
+    include_logic_context: false
+    include_visual_context: true   # Include V_{i-1} in VLM input
+
+# ============================================================
+# Ablation 4: Full Model (all components)
+# ============================================================
+ablation_full:
+  noise_prior:
+    enabled: true
+    alpha: 0.001
+    rho_s: 0.1
+    rho_m: 0.9
+  optimization:
+    i_max: 10
+  trajectory:
+    include_logic_context: true    # Full history context
+    include_visual_context: true   # V_{i-1} in composite
+
+# ============================================================
+# Table 4: Noise Prior Component Analysis
+# ============================================================
+
+# w/o SVD Projection (ρ_s=0.0, ρ_m=1.0)
+noise_ablation_no_svd:
+  noise_prior:
+    enabled: true
+    alpha: 0.001
+    rho_s: 0.0   # No spatial suppression
+    rho_m: 1.0   # Keep everything temporal
+  optimization:
+    i_max: 10
+
+# Random Noise Only (α=0.0)
+noise_ablation_random_only:
+  noise_prior:
+    enabled: true
+    alpha: 0.0    # Pure random noise, no temporal prior
+    rho_s: 0.1
+    rho_m: 0.9
+  optimization:
+    i_max: 10
+
+# Enhanced Noise (α=0.001) — Default
+noise_ablation_default:
+  noise_prior:
+    enabled: true
+    alpha: 0.001
+    rho_s: 0.1
+    rho_m: 0.9
+  optimization:
+    i_max: 10
+
+# Enhanced Noise (α=0.01) — Higher blending
+noise_ablation_alpha_high:
+  noise_prior:
+    enabled: true
+    alpha: 0.01
+    rho_s: 0.1
+    rho_m: 0.9
+  optimization:
+    i_max: 10
