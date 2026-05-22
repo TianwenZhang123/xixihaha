@@ -1,16 +1,14 @@
 """
-Main P-Flow Pipeline - Full Paper Reproduction (Algorithm 1).
+Video Reproduction Pipeline - Iterative Prompt Optimization with Noise Prior.
 
-Paper: arXiv:2603.22091
-Target: Wan 2.1-14B on single A800 (80GB) with CPU offload
+Goal: Given a reference video, iteratively optimize a T2V prompt so that the
+generated video faithfully reproduces the reference video's content, motion,
+composition, and style.
 
-Algorithm 1:
-    Input: Reference video V_ref, user prompt P_user, video model G
-    Output: All generated videos V_1...V_{i_max}
-
+Approach (adapted from P-Flow Algorithm 1):
     1. Encode V_ref to latent space
     2. Flow matching inversion -> eta_inv
-    3. SVD filtering -> eta_temporal
+    3. SVD filtering -> eta_temporal (preserves motion dynamics)
     4. For i = 1 to i_max (fixed, NO early stopping):
        a. Blend: eta = sqrt(alpha)*eta_temporal + sqrt(1-alpha)*eta_new
        b. Generate V_i = G(P_i, eta)
@@ -18,6 +16,11 @@ Algorithm 1:
        d. VLM analysis -> refined prompt P_{i+1}
        e. Update trajectory
     5. Return all {V_i, P_i, A_i} for offline evaluation
+
+Key difference from P-Flow:
+- P-Flow: transfers visual EFFECTS from reference to new content
+- This: reproduces the ENTIRE reference video content via prompt optimization
+- alpha is larger (0.1 vs 0.001) to provide stronger motion guidance
 
 Hardware: Single A800-80GB with enable_model_cpu_offload()
 VLM: DashScope Qwen-VL (qwen-vl-max)
@@ -49,14 +52,16 @@ logger = logging.getLogger(__name__)
 
 class PFlowPipeline:
     """
-    P-Flow: Training-Free Visual Effects Customization via Test-Time Prompt Optimization.
+    Video Reproduction via Test-Time Prompt Optimization + Noise Prior.
 
-    Full reproduction with:
-    - Wan 2.1-14B (T2V or I2V) on single A800 with CPU offload
-    - DashScope Qwen-VL (qwen-vl-max)
-    - Paper-exact parameters (alpha=0.001, rho_s=0.1, rho_m=0.9, i_max=10)
-    - Both T2V and I2V generation modes
-    - Sequential processing: one video at a time
+    Two complementary mechanisms:
+    1. Noise Prior: provides motion trajectory guidance from reference video
+    2. Prompt Optimization: iteratively refines text description via VLM feedback
+
+    Supports configurable alpha:
+    - alpha=0.001 (P-Flow default): minimal motion hint, maximum diversity
+    - alpha=0.1~0.3 (recommended for reproduction): stronger motion guidance
+    - alpha=0.5+: very strong motion guidance, less diversity
     """
 
     def __init__(
@@ -118,7 +123,7 @@ class PFlowPipeline:
                 "num_inference_steps": 50,
             },
             "noise_prior": {
-                "alpha": 0.001,
+                "alpha": 0.1,  # Larger than P-Flow (0.001) for stronger motion guidance
                 "rho_s": 0.1,
                 "rho_m": 0.9,
                 "inversion_steps": 50,
@@ -139,7 +144,7 @@ class PFlowPipeline:
                 "keep_all_text_history": True,
             },
             "output": {
-                "base_dir": "/data/outputs/pflow",
+                "base_dir": "/root/autodl-tmp/outputs/video_reproduction",
                 "save_all_iterations": True,
                 "save_composites": True,
             },
@@ -186,28 +191,28 @@ class PFlowPipeline:
         prompt: str,
         output_dir: Optional[str] = None,
         seed: Optional[int] = None,
-        desired_visual_effect: str = "",
-        subject: str = "",
-        environment: str = "",
+        video_description: str = "",
         mode: str = "t2v",
         reference_image_path: Optional[str] = None,
+        alpha_override: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Run the complete P-Flow pipeline (Algorithm 1).
+        Run the video reproduction pipeline.
 
         Fixed i_max iterations. No early stopping.
         Best video selected offline by evaluation metrics.
 
         Args:
-            reference_video_path: Path to reference video.
-            prompt: User's text prompt.
+            reference_video_path: Path to reference video to reproduce.
+            prompt: Initial text prompt describing the video content.
             output_dir: Output directory.
             seed: Random seed.
-            desired_visual_effect: Target effect description.
-            subject: Main subject.
-            environment: Scene environment.
+            video_description: Optional detailed description of reference video
+                               (helps VLM understand the target).
             mode: "t2v" for text-to-video, "i2v" for image-to-video.
             reference_image_path: First frame for I2V mode.
+            alpha_override: Override noise prior blending weight.
+                           Higher = more motion guidance from reference.
 
         Returns:
             Dict with all iteration results.
@@ -224,14 +229,15 @@ class PFlowPipeline:
             generator = None
 
         i_max = self.config["optimization"]["i_max"]
-        alpha = self.config["noise_prior"]["alpha"]
+        alpha = alpha_override if alpha_override is not None else self.config["noise_prior"]["alpha"]
 
         logger.info("=" * 60)
-        logger.info("P-Flow: Test-Time Prompt Optimization (Full Reproduction)")
+        logger.info("Video Reproduction: Iterative Prompt Optimization + Noise Prior")
         logger.info("=" * 60)
         logger.info(f"Reference video: {reference_video_path}")
         logger.info(f"Initial prompt: {prompt}")
         logger.info(f"Iterations: {i_max} (fixed, NO early stopping)")
+        logger.info(f"Noise prior alpha: {alpha} (motion guidance strength)")
         logger.info(f"Mode: {mode}")
         logger.info(f"Model: Wan 2.1-14B (single GPU + CPU offload)")
         logger.info(f"VLM: {self.config['vlm']['model_name']}")
@@ -260,6 +266,7 @@ class PFlowPipeline:
 
         # Step 2: Noise Prior Enhancement (computed ONCE)
         logger.info("[Step 2] Computing Noise Prior Enhancement...")
+        logger.info(f"  alpha={alpha}: {'strong' if alpha >= 0.1 else 'weak'} motion guidance")
         noise_enhancer = NoisePriorEnhancement(
             pipe=self.pipe,
             alpha=alpha,
@@ -305,7 +312,7 @@ class PFlowPipeline:
             logger.info(f"\n--- Iteration {iteration}/{i_max} ---")
             logger.info(f"  Prompt: {current_prompt[:100]}...")
 
-            # 4a: Blend noise (Eq. 7)
+            # 4a: Blend noise (motion prior + random exploration)
             eta = noise_enhancer.blend_noise(eta_temporal, generator)
 
             # 4b: Generate video
@@ -332,9 +339,9 @@ class PFlowPipeline:
                 reference_video=reference_video,
                 generated_video=generated_video,
                 iteration=iteration,
-                desired_visual_effect=desired_visual_effect or prompt,
-                subject=subject,
-                environment=environment,
+                desired_visual_effect=video_description or prompt,
+                subject="",
+                environment="",
                 last_text_prompt=last_prompt,
                 previous_video=prev_video,
                 history=trajectory.get_text_history(),
@@ -379,27 +386,33 @@ class PFlowPipeline:
 
         # Save timing and metadata
         metadata = {
+            "task": "video_reproduction",
+            "reference_video": reference_video_path,
             "initial_prompt": prompt,
             "final_prompt": current_prompt,
             "all_prompts": trajectory.get_all_prompts(),
             "total_iterations": i_max,
+            "noise_prior_alpha": alpha,
             "total_time_seconds": total_time,
             "timing_stats": timing_stats,
             "config": self.config,
-            "note": "Best video selected offline by FID-VID/FVD metrics",
+            "note": "Compare generated videos with reference to find best reproduction. "
+                    "Higher alpha provides stronger motion guidance.",
         }
         with open(output_path / "experiment_metadata.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False, default=str)
 
         logger.info(f"  Videos saved: {output_path}/generated_iter_*.mp4")
-        logger.info(f"  Run evaluation scripts to select best iteration.")
+        logger.info(f"  Review videos to find the best reproduction of the reference.")
 
         return {
             "output_dir": str(output_path),
+            "reference_video": reference_video_path,
             "initial_prompt": prompt,
             "final_prompt": current_prompt,
             "all_prompts": trajectory.get_all_prompts(),
             "num_iterations": i_max,
+            "noise_prior_alpha": alpha,
             "total_time": total_time,
             "trajectory": trajectory_data,
             "video_paths": [
@@ -497,14 +510,24 @@ class PFlowPipeline:
         prompt: str,
         output_path: str = "output_noise_prior.mp4",
         seed: Optional[int] = None,
+        alpha_override: Optional[float] = None,
     ) -> str:
         """
         Run only noise prior enhancement (no prompt optimization).
-        Useful for ablation experiments.
+        Useful for testing how much motion guidance alpha provides.
+
+        Args:
+            reference_video_path: Path to reference video.
+            prompt: Text prompt.
+            output_path: Output video path.
+            seed: Random seed.
+            alpha_override: Override alpha for this run.
         """
         generator = None
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
+
+        alpha = alpha_override if alpha_override is not None else self.config["noise_prior"]["alpha"]
 
         reference_video = load_video(
             reference_video_path,
@@ -519,7 +542,7 @@ class PFlowPipeline:
 
         noise_enhancer = NoisePriorEnhancement(
             pipe=self.pipe,
-            alpha=self.config["noise_prior"]["alpha"],
+            alpha=alpha,
             rho_s=self.config["noise_prior"]["rho_s"],
             rho_m=self.config["noise_prior"]["rho_m"],
             num_inversion_steps=self.config["noise_prior"]["inversion_steps"],
@@ -539,3 +562,94 @@ class PFlowPipeline:
         save_video_tensor(video, output_path, fps=self.config["video"]["fps"])
 
         return output_path
+
+    def generate_initial_prompt(
+        self,
+        reference_video_path: str,
+        user_hint: str = "",
+    ) -> str:
+        """
+        Use VLM to generate an initial detailed prompt from the reference video.
+
+        This gives a much better starting point than a manual prompt.
+
+        Args:
+            reference_video_path: Path to reference video.
+            user_hint: Optional hint about the video content.
+
+        Returns:
+            Detailed text prompt describing the reference video.
+        """
+        import base64
+        import io
+        import numpy as np
+
+        logger.info("Generating initial prompt from reference video via VLM...")
+
+        # Extract frames
+        frames_b64 = []
+        try:
+            from decord import VideoReader, cpu as decord_cpu
+            vr = VideoReader(reference_video_path, ctx=decord_cpu(0))
+            total_frames = len(vr)
+            indices = np.linspace(0, total_frames - 1, 8, dtype=int)
+            frames = vr.get_batch(indices).asnumpy()
+        except (ImportError, Exception):
+            import imageio.v3 as iio
+            all_frames = iio.imread(reference_video_path, plugin="pyav")
+            total_frames = len(all_frames)
+            indices = np.linspace(0, total_frames - 1, 8, dtype=int)
+            frames = all_frames[indices]
+
+        from PIL import Image
+        for frame in frames:
+            img = Image.fromarray(frame)
+            max_dim = 1280
+            if max(img.size) > max_dim:
+                ratio = max_dim / max(img.size)
+                new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+                img = img.resize(new_size, Image.LANCZOS)
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=85)
+            frames_b64.append(base64.b64encode(buffer.getvalue()).decode("utf-8"))
+
+        # Call VLM for initial description
+        system_msg = """You are a professional video description expert. Given key frames from a video, provide a detailed text-to-video prompt that could be used to recreate this video using an AI video generation model.
+
+Your description should cover:
+1. Main subject(s): appearance, clothing, features, position
+2. Action/Motion: what's happening, movement direction, speed, sequence of events
+3. Scene/Background: setting, location, objects, depth
+4. Camera: angle, shot type, any camera movement
+5. Lighting: direction, color, intensity, time of day
+6. Style/Mood: color palette, atmosphere, artistic style
+
+Output a single, self-contained prompt paragraph (no JSON, no bullet points). Write it as a direct T2V prompt that video generation models respond well to. Be specific and vivid."""
+
+        user_msg = f"These are 8 evenly-spaced key frames from a video. Describe what happens in this video in detail for video generation."
+        if user_hint:
+            user_msg += f"\n\nAdditional context from user: {user_hint}"
+
+        content = [{"type": "text", "text": user_msg}]
+        for frame_b64 in frames_b64:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}
+            })
+
+        try:
+            response = self.vlm_client.client.chat.completions.create(
+                model=self.vlm_client.model_name,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": content},
+                ],
+                temperature=0.3,
+                max_tokens=1024,
+            )
+            initial_prompt = response.choices[0].message.content.strip()
+            logger.info(f"  Generated initial prompt: {initial_prompt[:100]}...")
+            return initial_prompt
+        except Exception as e:
+            logger.warning(f"Failed to generate initial prompt: {e}")
+            return user_hint or "A video scene."

@@ -1,9 +1,9 @@
-# P-Flow Paper-Faithful Configuration
-# Paper: "P-Flow: Prompting Visual Effects Generation" (arXiv:2603.22091)
+# Video Reproduction Configuration
+# Adapted from P-Flow (arXiv:2603.22091) for video reproduction task
 # Target: Single A800 (80GB) with CPU offload
 
 # ============================================================
-# Model Configuration (Section 3.6)
+# Model Configuration
 # ============================================================
 model:
   # Text-to-Video model: Wan 2.1-14B
@@ -15,31 +15,49 @@ model:
   # 14B model (~28GB bfloat16), peak VRAM ~40-50GB with cpu offload
 
 # ============================================================
-# Video Generation Settings (Section 3.6)
+# Video Generation Settings
 # ============================================================
 video:
   height: 480
   width: 832
-  num_frames: 81       # Paper: 81 frames
-  fps: 16              # 81 frames / 16fps ~ 5s
+  num_frames: 81       # 81 frames / 16fps ~ 5s
+  fps: 16
   guidance_scale: 5.0
   num_inference_steps: 50
 
 # ============================================================
-# Noise Prior Enhancement (Section 3.3, Eq. 4-7)
+# Noise Prior Enhancement
 # ============================================================
+# The noise prior encodes motion dynamics from the reference video.
+# It provides directional guidance so the generated video's motion
+# trajectory resembles the reference.
+#
+# Key parameter: alpha (blending weight)
+#   eta = sqrt(alpha) * eta_temporal + sqrt(1-alpha) * eta_random
+#
+# alpha controls how much motion guidance the reference provides:
+#   - 0.001 (P-Flow original): 0.03% motion hint, 99.97% random
+#     → Suitable for effect transfer where you want diversity
+#   - 0.1 (recommended for reproduction): ~32% motion, ~95% random
+#     → Good balance of guidance and generation quality
+#   - 0.3: stronger motion guidance, may constrain generation
+#   - 0.5+: very strong guidance, risk of artifacts
+#
+# Try different values: start with 0.1, increase if motion doesn't match
 noise_prior:
-  alpha: 0.001         # Blending weight (Eq. 7), paper: 0.001
-  rho_s: 0.1           # Spatial SVD energy threshold (Eq. 4)
-  rho_m: 0.9           # Temporal SVD energy threshold (Eq. 6)
+  alpha: 0.1           # Reproduction default (P-Flow uses 0.001)
+  rho_s: 0.1           # Spatial SVD energy threshold
+  rho_m: 0.9           # Temporal SVD energy threshold
   inversion_steps: 50  # Flow matching inversion steps
   guidance_scale: 1.0  # No guidance during inversion
 
 # ============================================================
-# Optimization Settings (Algorithm 1)
+# Optimization Settings
 # ============================================================
 optimization:
-  i_max: 10            # Paper: fixed 10 iterations (NO early stopping)
+  i_max: 10            # Fixed 10 iterations (NO early stopping)
+  # Each iteration: generate video → VLM compares → refine prompt
+  # Later iterations produce progressively better reproductions
 
 # ============================================================
 # VLM Settings (DashScope Qwen-VL)
@@ -53,46 +71,20 @@ vlm:
   max_retries: 3
 
 # ============================================================
-# Historical Trajectory (Section 3.5)
+# Historical Trajectory
 # ============================================================
 trajectory:
   max_videos_to_vlm: 3    # V_ref, V_{i-1}, V_i (vertical composite)
   keep_all_text_history: true
-  composite_layout: "vertical"  # Paper: vertical stacking
-
-# ============================================================
-# Dataset Configuration (Section 4.1)
-# ============================================================
-dataset:
-  name: "Open-VFX"
-  root: "/root/autodl-tmp/datasets/Open-VFX"
-  # Open-VFX dataset structure:
-  #   videos/: Reference videos organized by effect category
-  #   splits/: train.json, test.json
-  #   metadata.json: Effect categories, video-prompt pairs
-
-# ============================================================
-# Evaluation Settings (Section 4.1)
-# ============================================================
-evaluation:
-  metrics:
-    - "FID-VID"          # Frechet Inception Distance for Video
-    - "FVD"              # Frechet Video Distance
-    - "Dynamic_Degree"   # Motion/visual transformation degree
-  human_eval:
-    num_annotators: 15
-    num_samples: 100
-    effects_types: 15
-    protocol: "pairwise_comparison"
+  composite_layout: "vertical"
 
 # ============================================================
 # Output Settings
 # ============================================================
 output:
-  base_dir: "/root/autodl-tmp/outputs/pflow"
+  base_dir: "/root/autodl-tmp/outputs/video_reproduction"
   save_all_iterations: true
   save_composites: true
-  save_metrics_per_sample: true
 
 # ============================================================
 # Hardware Configuration (Single A800)

@@ -1,15 +1,16 @@
 """
-VLM (Vision-Language Model) Client for P-Flow.
+VLM (Vision-Language Model) Client for Video Reproduction.
 
-Uses DashScope API (Qwen-VL) for visual analysis, consistent with the
-original pflow/ implementation.
+Uses DashScope API (Qwen-VL) for visual analysis.
 
-Implements Listing 1 structured instruction from the paper:
+Goal: Compare a reference video with generated videos to iteratively
+refine the T2V prompt until the generated video faithfully reproduces
+the reference video's content, motion, composition, and style.
+
+Implements structured instruction for video reproduction:
 - Receives composite video key frames (vertical: ref/prev/current)
 - Outputs structured JSON with analysis + refined prompt
-- NO confidence score (paper does NOT use confidence-based stopping)
-
-Reference: Section 3.4, Listing 1, and Appendix A of the paper.
+- NO confidence score (fixed iteration count)
 """
 
 import json
@@ -30,66 +31,66 @@ except ImportError:
 
 
 # =============================================================================
-# Paper Listing 1: VLM Structured Instruction
+# VLM Structured Instruction for Video Reproduction
 # =============================================================================
 
-SYSTEM_INSTRUCTION = """You are a professional visual effects video prompt engineer. Your task is to compare a reference video with generated videos and produce a refined text-to-video prompt that better captures the visual effects shown in the reference.
+SYSTEM_INSTRUCTION = """You are a professional video description and prompt engineering expert. Your task is to compare a reference video with generated videos and produce a refined text-to-video prompt that makes the generated video as close to the reference video as possible.
 
 You will receive key frames extracted from a composite video arranged vertically:
-- Panel A (top): Reference video - the target visual effect to reproduce
+- Panel A (top): Reference video - the target video to reproduce
 - Panel B (middle): Previously generated video (from last iteration, may be absent in iteration 1)
 - Panel C (bottom): Newly generated video (from current iteration)
 
 You also receive structured metadata about the current optimization state.
 
-Your goal: Analyze visual effect differences and output an improved prompt that makes the T2V model generate videos closer to the reference's visual effects.
+Your goal: Analyze ALL differences between the reference and generated video, then output an improved prompt that makes the T2V model generate a video that is as faithful as possible to the reference.
 
-Focus on these aspects of visual effects:
-1. Motion patterns: speed, direction, trajectories, oscillation, acceleration
-2. Visual appearance: colors, textures, opacity, glow, particles, shapes
-3. Spatial distribution: where effects appear, density, spread patterns
-4. Temporal dynamics: how effects evolve over time, periodicity, onset/offset
-5. Interactions: how effects interact with the scene/subject
+Focus on these aspects for faithful reproduction:
+1. Subject/Object: what the main subjects are, their appearance, clothing, colors, features, quantity
+2. Motion/Action: what movements are happening, speed, direction, trajectories, gestures, interactions
+3. Scene/Background: setting, location, lighting, weather, time of day, depth, perspective
+4. Composition/Framing: camera angle, shot type (close-up/wide/medium), camera movement
+5. Style/Atmosphere: color palette, contrast, saturation, mood, artistic style
+6. Temporal dynamics: how the scene evolves over time, sequence of events, pacing
 
 Output ONLY a valid JSON object (no markdown, no extra text) with this exact structure:
 {
     "analysis": {
-        "reference_description": "Describe the visual effects observed in the reference video (Panel A)",
-        "last_generated_description": "Describe the visual effects in the previous generation (Panel B), or 'N/A' if first iteration",
-        "new_generated_description": "Describe the visual effects in the current generation (Panel C)",
-        "comparison": "Detailed comparison of differences between reference and current generation, identifying specific aspects to improve"
+        "reference_description": "Comprehensive description of what happens in the reference video (Panel A)",
+        "last_generated_description": "Description of the previous generation (Panel B), or 'N/A' if first iteration",
+        "new_generated_description": "Description of the current generation (Panel C)",
+        "comparison": "Detailed comparison identifying specific differences between reference and current generation across all aspects (subject, motion, scene, composition, style, timing)"
     },
-    "refined_prompt": "The complete, self-contained improved prompt for the T2V model. Must include ALL necessary details to reproduce the reference effect. Do not reference previous prompts."
+    "refined_prompt": "The complete, self-contained improved prompt for the T2V model. Must describe EXACTLY what happens in the reference video with maximum precision and detail. Do not reference previous prompts."
 }
 
 Guidelines:
-- Be specific and quantitative (e.g., "particles move 2x faster", "glow radius is 30% smaller")
-- The refined_prompt must be self-contained — include every detail needed
-- Focus on visual effect characteristics, not general scene content
+- Be extremely specific and detailed (e.g., "a golden retriever running left to right across a grassy field" not just "a dog running")
+- Describe temporal sequence clearly (e.g., "first... then... finally...")
+- Include camera information if visible (e.g., "static wide shot", "slow zoom in", "tracking shot following the subject")
+- Describe lighting precisely (e.g., "warm sunset backlighting", "harsh overhead fluorescent")
+- The refined_prompt must be self-contained — include EVERY detail needed to recreate the reference video
+- Each iteration should make targeted improvements based on what's still different
+- Prioritize the most visually prominent differences first
 - Use vivid, precise language that video generation models respond well to
-- Each iteration should make targeted improvements based on the comparison
 """
 
 
 def _build_user_message(
-    desired_visual_effect: str,
-    subject: str,
-    environment: str,
     current_prompt: str,
     last_text_prompt: str,
     iteration: int,
     i_max: int,
     history_summary: str,
+    video_description: str = "",
 ) -> str:
     """
-    Build the structured user message following paper's Listing 1 placeholder format.
+    Build the structured user message for video reproduction.
     """
     msg = f"""## Optimization State
 
 - Iteration: {iteration}/{i_max}
-- Desired visual effect: {desired_visual_effect}
-- Subject: {subject}
-- Environment: {environment}
+- Goal: Generate a video that faithfully reproduces the reference video
 
 ## Current T2V Prompt (to improve)
 {current_prompt}
@@ -97,16 +98,21 @@ def _build_user_message(
 ## Previous Iteration Prompt
 {last_text_prompt if last_text_prompt else "N/A (first iteration)"}
 
+## Additional Context
+{video_description if video_description else "No additional description provided."}
+
 ## Optimization History Summary
 {history_summary if history_summary else "First iteration - no history yet."}
 
 ## Instructions
 The images below are key frames from the composite video (vertical layout):
-- Top section (Panel A): REFERENCE video - the target visual effect
-- Middle section (Panel B): PREVIOUS generated video (last iteration)
+- Top section (Panel A): REFERENCE video - this is what we want to reproduce exactly
+- Middle section (Panel B): PREVIOUS generated video (last iteration, may be absent)
 - Bottom section (Panel C): CURRENT generated video (this iteration)
 
-Analyze the visual effect differences and provide a refined prompt as JSON."""
+Carefully analyze ALL differences between the reference (Panel A) and current generation (Panel C).
+Then provide a refined prompt that will make the next generation closer to the reference.
+Focus on the biggest remaining differences first. Output as JSON."""
     return msg
 
 
@@ -114,13 +120,11 @@ class VLMClient:
     """
     VLM client using DashScope API (Qwen-VL).
 
-    This is the primary VLM client, consistent with the original pflow/ code.
     Uses OpenAI-compatible API endpoint for DashScope.
 
-    Implements paper's VLM interaction:
+    Implements iterative video reproduction:
     - Receives composite video key frames (vertical: ref/prev/current)
-    - Outputs structured analysis + refined prompt
-    - NO confidence score
+    - Outputs structured analysis + refined prompt for faithful reproduction
     """
 
     def __init__(
@@ -177,30 +181,31 @@ class VLMClient:
         environment: str = "",
         last_text_prompt: str = "",
         history: Optional[List[Dict[str, Any]]] = None,
+        video_description: str = "",
     ) -> Dict[str, Any]:
         """
-        Analyze composite video frames and produce refined prompt.
+        Analyze composite video and produce refined prompt for video reproduction.
 
-        Follows paper Algorithm 1 step 6c-6d:
-        - Send composite [V_ref | V_{i-1} | V_i] to VLM with history
-        - Get refined prompt P_{i+1} and analysis A_i
+        Extracts 8 evenly-spaced key frames from the composite video and sends
+        them to Qwen-VL for comparison and prompt refinement.
 
         Args:
             composite_video_path: Path to vertical composite video.
             current_prompt: Current prompt P_i.
             iteration: Current iteration number (1-indexed).
             i_max: Total iterations.
-            desired_visual_effect: User's target effect description.
-            subject: Main subject description.
-            environment: Scene/background description.
+            desired_visual_effect: (legacy, can be used as additional context)
+            subject: (legacy, can be used as additional context)
+            environment: (legacy, can be used as additional context)
             last_text_prompt: Previous iteration prompt P_{i-1}.
             history: List of previous {prompt, analysis} dicts.
+            video_description: Optional detailed description of the reference video.
 
         Returns:
             Dict with 'analysis' and 'refined_prompt'.
         """
         # Extract key frames from composite video
-        frames_base64 = self._extract_frames_base64(composite_video_path, num_frames=6)
+        frames_base64 = self._extract_frames_base64(composite_video_path, num_frames=8)
 
         if not frames_base64:
             logger.warning("No frames extracted, returning fallback")
@@ -209,16 +214,23 @@ class VLMClient:
         # Build history summary
         history_summary = self._format_history(history)
 
-        # Build structured user message (Listing 1 format)
+        # Build additional context from legacy params
+        extra_context = ""
+        if subject:
+            extra_context += f"Main subject: {subject}. "
+        if environment:
+            extra_context += f"Scene: {environment}. "
+        if video_description:
+            extra_context = video_description
+
+        # Build structured user message
         user_text = _build_user_message(
-            desired_visual_effect=desired_visual_effect or current_prompt,
-            subject=subject or "visual effect subject",
-            environment=environment or "scene environment",
             current_prompt=current_prompt,
             last_text_prompt=last_text_prompt,
             iteration=iteration,
             i_max=i_max,
             history_summary=history_summary,
+            video_description=extra_context,
         )
 
         # Build multimodal content (text + images)
@@ -254,9 +266,13 @@ class VLMClient:
 
         return self._fallback_response(current_prompt)
 
-    def _extract_frames_base64(self, video_path: str, num_frames: int = 6) -> List[str]:
+    def _extract_frames_base64(self, video_path: str, num_frames: int = 8) -> List[str]:
         """
-        Extract evenly-spaced frames from video and encode as base64 JPEG.
+        Extract evenly-spaced frames from composite video and encode as base64 JPEG.
+
+        Since the composite video is vertically stacked (ref/prev/current),
+        each frame already contains all panels for VLM comparison.
+        8 frames across ~5s video = one frame every ~0.6s.
         """
         import numpy as np
 
@@ -291,7 +307,7 @@ class VLMClient:
                 new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
                 img = img.resize(new_size, Image.LANCZOS)
             buffer = io.BytesIO()
-            img.save(buffer, format="JPEG", quality=80)
+            img.save(buffer, format="JPEG", quality=85)
             frames_b64.append(base64.b64encode(buffer.getvalue()).decode("utf-8"))
 
         return frames_b64
@@ -304,13 +320,13 @@ class VLMClient:
         lines = []
         for entry in history[-5:]:  # Keep last 5 iterations for context
             iter_num = entry.get("iteration", "?")
-            prompt = entry.get("prompt", "")[:80]
+            prompt = entry.get("prompt", "")[:100]
             analysis = entry.get("analysis", {})
             if isinstance(analysis, dict):
-                comparison = analysis.get("comparison", "")[:100]
+                comparison = analysis.get("comparison", "")[:150]
             else:
-                comparison = str(analysis)[:100]
-            lines.append(f"  Iter {iter_num}: prompt=\"{prompt}...\" | feedback=\"{comparison}...\"")
+                comparison = str(analysis)[:150]
+            lines.append(f"  Iter {iter_num}: prompt=\"{prompt}...\" | differences=\"{comparison}...\"")
 
         return "\n".join(lines)
 
@@ -400,7 +416,7 @@ class VLMClient:
 class MockVLMClient:
     """
     Mock VLM client for testing without API access.
-    Simulates progressive prompt refinement following paper's output format.
+    Simulates progressive prompt refinement for video reproduction.
     """
 
     def __init__(self, **kwargs):
@@ -416,19 +432,19 @@ class MockVLMClient:
         self.call_count += 1
 
         refinements = [
-            ", with smooth flowing particle trails and natural acceleration",
-            ", featuring luminous particles with varying speeds and organic trajectories",
-            ", with precisely timed particle bursts that accelerate outward then decelerate naturally, creating fluid motion trails with soft glowing edges",
+            ". The camera is static with a wide-angle view. Lighting is natural daylight from the left.",
+            ". The motion flows smoothly from left to right over 3 seconds. Background shows a blurred park setting with warm afternoon light.",
+            ". Shot from a slightly low angle with shallow depth of field. The subject moves with natural acceleration, and the scene has a warm golden-hour color palette with soft shadows.",
         ]
 
         suffix = refinements[min(self.call_count - 1, len(refinements) - 1)]
 
         return {
             "analysis": {
-                "reference_description": "Reference shows dynamic particle effects with natural motion patterns and soft glow.",
-                "last_generated_description": "Previous generation had somewhat rigid particle movement with uniform speed.",
-                "new_generated_description": "Current generation improved motion variety but still lacks the organic flow of reference.",
-                "comparison": "Main gap: particle acceleration patterns differ. Reference particles accelerate/decelerate naturally while generated ones move at near-constant speed. Glow intensity also 30% weaker.",
+                "reference_description": "The reference shows a detailed scene with specific subjects, motion patterns, and lighting conditions.",
+                "last_generated_description": "Previous generation captured the basic scene but missed some details in motion and composition.",
+                "new_generated_description": "Current generation improved subject appearance but camera angle and lighting still differ from reference.",
+                "comparison": "Main differences: 1) Camera angle is slightly too high (should be lower). 2) Motion speed is about 20% too fast. 3) Background lacks the warm color tone of the reference. 4) Subject's position in frame is slightly off-center.",
             },
             "refined_prompt": f"{current_prompt}{suffix}",
         }
@@ -438,7 +454,7 @@ def create_vlm_client(config: Dict[str, Any]) -> Any:
     """
     Factory to create VLM client from config.
 
-    Default: DashScope Qwen-VL (consistent with original pflow/ code).
+    Default: DashScope Qwen-VL.
     """
     provider = config.get("provider", "dashscope")
     model_name = config.get("model_name", "qwen-vl-max")

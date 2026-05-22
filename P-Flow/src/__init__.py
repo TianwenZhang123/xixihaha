@@ -1,11 +1,17 @@
 """
-P-Flow: Training-Free Visual Effects Customization via Test-Time Prompt Optimization.
+Video Reproduction via Iterative Prompt Optimization + Noise Prior.
 
-Full reproduction targeting single A800 (80GB) with CPU offload.
-Paper: arXiv:2603.22091
+Adapted from P-Flow (arXiv:2603.22091) for faithful video reproduction.
+
+Given a reference video, iteratively optimizes a T2V prompt so that the
+generated video reproduces the reference as closely as possible.
+
+Two mechanisms work together:
+1. Noise Prior: encodes motion dynamics from reference (flow inversion + SVD)
+2. Prompt Optimization: VLM compares videos, refines prompt each iteration
 
 Core components:
-- pipeline: Main Algorithm 1 orchestration
+- pipeline: Main orchestration (iterative loop)
 - noise_prior: Flow Matching Inversion + SVD two-stage filtering
 - svd_filter: Spatial removal + Temporal retention
 - flow_matching: Euler integration for inversion (t=1->0)
@@ -16,5 +22,5 @@ Core components:
 - distributed: Single-GPU inference utilities
 """
 
-__version__ = "1.0.0"
-__paper__ = "arXiv:2603.22091"
+__version__ = "2.0.0"
+__task__ = "video_reproduction"
