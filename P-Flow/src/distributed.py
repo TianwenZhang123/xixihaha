@@ -34,7 +34,7 @@ def setup_single_gpu():
 
     num_gpus = torch.cuda.device_count()
     props = torch.cuda.get_device_properties(0)
-    logger.info(f"GPU: {props.name} ({props.total_mem / 1024**3:.1f} GB)")
+    logger.info(f"GPU: {props.name} ({props.total_memory / 1024**3:.1f} GB)")
     if num_gpus > 1:
         logger.info(f"  {num_gpus} GPUs detected, but using only GPU 0 (single-card mode)")
 

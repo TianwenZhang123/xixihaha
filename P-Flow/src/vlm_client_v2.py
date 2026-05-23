@@ -36,7 +36,9 @@ SYSTEM_INSTRUCTION_V2 = """You are a text-to-video (T2V) prompt engineering expe
 
 ## CRITICAL: T2V Model Constraints
 The T2V model (Wan2.1-1.3B) has these limitations:
-- Effective token window: ~60-80 English words (content beyond this is largely ignored)
+- T5 encoder max sequence: 512 tokens, but effective window: ~100-120 English words
+- Front-loaded: first 40 words carry the highest weight in cross-attention
+- Position encoding degrades after token 128 (relative pos bucket saturation)
 - Cannot follow sequential instructions ("first X, then Y, finally Z" often fails)
 - Responds best to: concrete nouns, vivid action verbs, spatial relationships, lighting descriptors
 - Responds poorly to: abstract instructions, meta-commentary, quality adjectives ("detailed", "realistic")
@@ -54,7 +56,7 @@ Output ONLY a valid JSON object with this exact structure:
 {
     "top1_difference": "The single most prominent visual difference between reference and current generation (one sentence)",
     "modification": "What specific change to make in the prompt to fix the top1 difference (one sentence)",
-    "refined_prompt": "The complete improved prompt (MUST follow the template below, 60-80 words max)"
+    "refined_prompt": "The complete improved prompt (MUST follow the template below, 80-120 words max)"
 }
 
 ## Prompt Template (MUST follow this order)
@@ -67,7 +69,7 @@ Output ONLY a valid JSON object with this exact structure:
 Write the refined_prompt as a SINGLE flowing paragraph following this order. Do NOT use labels or bullet points in the prompt itself. Prioritize the first 40 words (they carry the most weight).
 
 ## Rules
-- Keep prompt under 80 words. Shorter is better if it captures the essence.
+- Keep prompt between 80-120 words. Front-load the essence in the first 40 words.
 - Front-load the most important visual elements (subject + action first)
 - Use concrete visual descriptors, not instructions or meta-language
 - Do NOT say "ensure", "maintain", "the scene should show" — just describe what IS there
@@ -79,7 +81,7 @@ Write the refined_prompt as a SINGLE flowing paragraph following this order. Do 
 SYSTEM_INSTRUCTION_INITIAL = """You are a video description expert. Given key frames from a video, write a concise T2V (text-to-video) generation prompt.
 
 ## Rules
-- Maximum 60-80 words
+- Maximum 80-120 words
 - Follow this order: SUBJECT (who/what) → ACTION (motion) → SCENE (background) → CAMERA (angle/movement) → STYLE (lighting/mood)
 - Use concrete visual descriptors: colors, shapes, directions, positions
 - Describe ONE continuous action, not a sequence of events
@@ -109,7 +111,7 @@ Current prompt (to improve):
 Previous differences fixed: {top_differences_history if top_differences_history else "None (first iteration)"}
 
 Look at the frames below. Panel A = reference (target). Panel C = current generation.
-Identify the TOP-1 remaining visual difference and fix it in the prompt. Keep total prompt ≤80 words."""
+Identify the TOP-1 remaining visual difference and fix it in the prompt. Keep total prompt 80-120 words."""
     return msg
 
 
@@ -132,7 +134,7 @@ class VLMClientV2:
         temperature: float = 0.4,  # Lower temp for more focused output
         max_tokens: int = 1024,    # Shorter output needed
         max_retries: int = 3,
-        max_prompt_words: int = 80,
+        max_prompt_words: int = 120,
     ):
         if not HAS_OPENAI:
             raise ImportError("openai package required. Install: pip install openai")
@@ -443,7 +445,7 @@ def create_vlm_client_v2(config: Dict[str, Any]) -> Any:
             temperature=config.get("temperature", 0.4),
             max_tokens=config.get("max_tokens", 1024),
             max_retries=config.get("max_retries", 3),
-            max_prompt_words=config.get("max_prompt_words", 80),
+            max_prompt_words=config.get("max_prompt_words", 120),
         )
     except (ImportError, ValueError) as e:
         logger.warning(f"VLM V2 client init failed: {e}")
