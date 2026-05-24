@@ -67,7 +67,7 @@ try:
     record_ok(f"PyTorch {torch.__version__}")
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
-        gpu_mem = torch.cuda.get_device_properties(0).total_mem / 1024**3
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
         record_ok(f"CUDA 可用: {gpu_name} ({gpu_mem:.0f}GB)")
         record_ok(f"CUDA 版本: {torch.version.cuda}")
         # 1.3B 只需要 ~12-16GB VRAM，4090 (24GB) 绰绰有余
