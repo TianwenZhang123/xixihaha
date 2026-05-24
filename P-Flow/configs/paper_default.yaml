@@ -43,7 +43,7 @@ video:
 #
 # Try different values: start with 0.1, increase if motion doesn't match
 noise_prior:
-  alpha: 0.1           # Reproduction default (P-Flow uses 0.001)
+  alpha: 0.001         # P-Flow optimal (validated by ablation experiment)
   rho_s: 0.1           # Spatial SVD energy threshold
   rho_m: 0.9           # Temporal SVD energy threshold
   inversion_steps: 50  # Flow matching inversion steps
