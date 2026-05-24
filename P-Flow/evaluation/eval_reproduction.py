@@ -93,33 +93,68 @@ class SSIMMetric:
 class CLIPScoreMetric:
     """CLIP-based visual similarity between frames."""
 
-    def __init__(self, device: str = "cuda"):
+    # Default local model path (AutoDL)
+    DEFAULT_LOCAL_PATH = "/root/autodl-tmp/models/clip-vit-base-patch32"
+
+    def __init__(self, device: str = "cuda", model_path: str = None):
         self.device = device
+        self.model_path = model_path
         self._model = None
         self._preprocess = None
 
     def _load_model(self):
-        """Lazy-load CLIP model."""
+        """Lazy-load CLIP model. Priority: local path > openai clip > HF online."""
         if self._model is not None:
             return
 
+        # 1) Try local path first (offline-friendly)
+        local_path = self.model_path or self.DEFAULT_LOCAL_PATH
+        if os.path.isdir(local_path):
+            try:
+                from transformers import CLIPModel, CLIPProcessor
+                self._model = CLIPModel.from_pretrained(
+                    local_path, local_files_only=True
+                ).to(self.device).eval()
+                self._preprocess = CLIPProcessor.from_pretrained(
+                    local_path, local_files_only=True
+                )
+                self._clip_type = "hf"
+                print(f"  CLIP loaded from local: {local_path}")
+                return
+            except Exception as e:
+                print(f"  Warning: failed to load CLIP from {local_path}: {e}")
+
+        # 2) Try openai clip package
         try:
             import clip
             self._model, self._preprocess = clip.load("ViT-B/32", device=self.device)
             self._clip_type = "openai"
-        except ImportError:
-            try:
-                from transformers import CLIPModel, CLIPProcessor
-                self._model = CLIPModel.from_pretrained(
-                    "openai/clip-vit-base-patch32"
-                ).to(self.device).eval()
-                self._preprocess = CLIPProcessor.from_pretrained(
-                    "openai/clip-vit-base-patch32"
-                )
-                self._clip_type = "hf"
-            except ImportError:
-                self._clip_type = "none"
-                print("Warning: CLIP not available. Install: pip install clip or transformers")
+            print("  CLIP loaded via openai/clip package")
+            return
+        except (ImportError, Exception):
+            pass
+
+        # 3) Try HuggingFace online (may fail on restricted networks)
+        try:
+            from transformers import CLIPModel, CLIPProcessor
+            self._model = CLIPModel.from_pretrained(
+                "openai/clip-vit-base-patch32"
+            ).to(self.device).eval()
+            self._preprocess = CLIPProcessor.from_pretrained(
+                "openai/clip-vit-base-patch32"
+            )
+            self._clip_type = "hf"
+            print("  CLIP loaded from HuggingFace online")
+            return
+        except Exception:
+            pass
+
+        # 4) All failed
+        self._clip_type = "none"
+        print("Warning: CLIP not available. Either:")
+        print(f"  - Download model to {self.DEFAULT_LOCAL_PATH}")
+        print("  - Or install: pip install git+https://github.com/openai/CLIP.git")
+        print("  - Or ensure network access to huggingface.co")
 
     @torch.no_grad()
     def compute_frame_similarity(
@@ -297,6 +332,7 @@ def evaluate_experiment(
     experiment_dir: str,
     device: str = "cuda",
     num_eval_frames: int = 16,
+    clip_model_path: str = None,
 ) -> Dict[str, Any]:
     """
     Evaluate a reproduction experiment: per-iteration quality metrics.
@@ -305,6 +341,7 @@ def evaluate_experiment(
         experiment_dir: Directory containing reference.mp4 and generated_iter_*.mp4
         device: Compute device for CLIP
         num_eval_frames: Frames to sample per video for evaluation
+        clip_model_path: Local path to CLIP model (optional)
         
     Returns:
         Complete per-iteration evaluation results
@@ -346,7 +383,7 @@ def evaluate_experiment(
 
     # Initialize metrics
     ssim_metric = SSIMMetric()
-    clip_metric = CLIPScoreMetric(device=device)
+    clip_metric = CLIPScoreMetric(device=device, model_path=clip_model_path)
     motion_metric = MotionConsistencyMetric()
 
     # Evaluate each iteration
@@ -459,6 +496,7 @@ def compare_experiments(
     dir2: str,
     device: str = "cuda",
     labels: Tuple[str, str] = ("V1", "V2"),
+    clip_model_path: str = None,
 ) -> Dict[str, Any]:
     """
     Compare two experiment runs (e.g., V1 prompt vs V2 prompt).
@@ -469,9 +507,9 @@ def compare_experiments(
     print(f"      vs:  {labels[1]}={dir2}")
     print("=" * 80)
 
-    results1 = evaluate_experiment(dir1, device)
+    results1 = evaluate_experiment(dir1, device, clip_model_path=clip_model_path)
     print("\n" + "=" * 80 + "\n")
-    results2 = evaluate_experiment(dir2, device)
+    results2 = evaluate_experiment(dir2, device, clip_model_path=clip_model_path)
 
     # Side-by-side comparison
     print("\n" + "=" * 80)
@@ -509,22 +547,31 @@ def main():
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--num_frames", type=int, default=16,
                        help="Number of frames to sample for evaluation")
+    parser.add_argument("--clip_model_path", type=str, default=None,
+                       help="Local path to CLIP model (e.g., /root/autodl-tmp/models/clip-vit-base-patch32). "
+                            "If not specified, tries default local path, then online download.")
     parser.add_argument("--labels", type=str, nargs=2, default=["Run1", "Run2"],
                        help="Labels for comparison (e.g., V1 V2)")
 
     args = parser.parse_args()
+
+    # Set CLIP model path globally via environment for metrics to pick up
+    if args.clip_model_path:
+        os.environ["CLIP_LOCAL_PATH"] = args.clip_model_path
 
     if args.experiment_dir2:
         compare_experiments(
             args.experiment_dir, args.experiment_dir2,
             device=args.device,
             labels=tuple(args.labels),
+            clip_model_path=args.clip_model_path,
         )
     else:
         evaluate_experiment(
             args.experiment_dir,
             device=args.device,
             num_eval_frames=args.num_frames,
+            clip_model_path=args.clip_model_path,
         )
 
 
