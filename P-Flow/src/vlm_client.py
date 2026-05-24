@@ -19,6 +19,7 @@ import os
 import io
 import time
 import logging
+import mimetypes
 from typing import Optional, Dict, List, Any
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,12 @@ try:
     HAS_OPENAI = True
 except ImportError:
     HAS_OPENAI = False
+
+try:
+    import requests as _requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
 
 
 # =============================================================================
@@ -45,13 +52,13 @@ You also receive structured metadata about the current optimization state.
 
 Your goal: Analyze ALL differences between the reference and generated video, then output an improved prompt that makes the T2V model generate a video that is as faithful as possible to the reference.
 
-Focus on these aspects for faithful reproduction:
-1. Subject/Object: what the main subjects are, their appearance, clothing, colors, features, quantity
-2. Motion/Action: what movements are happening, speed, direction, trajectories, gestures, interactions
-3. Scene/Background: setting, location, lighting, weather, time of day, depth, perspective
-4. Composition/Framing: camera angle, shot type (close-up/wide/medium), camera movement
-5. Style/Atmosphere: color palette, contrast, saturation, mood, artistic style
-6. Temporal dynamics: how the scene evolves over time, sequence of events, pacing
+Focus on these aspects for faithful reproduction (PRIORITY ORDER):
+1. Motion/Action (HIGHEST PRIORITY): what movements are happening, speed, direction, trajectories, gestures, interactions. Describe motion even if subtle — a slight sway, breathing, hair movement all count. NEVER say "no movement" unless the reference is truly a static image.
+2. Temporal dynamics: how the scene evolves over time, sequence of events, pacing, rhythm of motion
+3. Subject/Object: what the main subjects are, their appearance, clothing, colors, features, quantity
+4. Scene/Background: setting, location, lighting, weather, time of day, depth, perspective
+5. Composition/Framing: camera angle, shot type (close-up/wide/medium), camera movement
+6. Style/Atmosphere: color palette, contrast, saturation, mood, artistic style
 
 Output ONLY a valid JSON object (no markdown, no extra text) with this exact structure:
 {
@@ -135,6 +142,7 @@ class VLMClient:
         temperature: float = 0.7,
         max_tokens: int = 2048,
         max_retries: int = 3,
+        use_video_mode: bool = True,
     ):
         """
         Args:
@@ -145,6 +153,9 @@ class VLMClient:
             temperature: Sampling temperature.
             max_tokens: Maximum output tokens.
             max_retries: Number of retries on failure.
+            use_video_mode: If True, upload video file and pass as video_url
+                to VLM for native temporal understanding. If False, fall back
+                to frame extraction mode.
         """
         if not HAS_OPENAI:
             raise ImportError("openai package required. Install: pip install openai")
@@ -153,6 +164,7 @@ class VLMClient:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.max_retries = max_retries
+        self.use_video_mode = use_video_mode
 
         # DashScope uses OpenAI-compatible API
         api_key = api_key or os.environ.get("DASHSCOPE_API_KEY")
@@ -168,7 +180,109 @@ class VLMClient:
             "https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
 
+        self._api_key = api_key
         self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
+
+    def _upload_video_to_dashscope(self, video_path: str) -> Optional[str]:
+        """
+        Upload a local video file to DashScope OSS and return a temporary URL.
+
+        Uses DashScope's upload certificate API to get OSS credentials,
+        then uploads the file directly to OSS. The returned oss:// URL can
+        be used as video_url in VLM calls.
+
+        Args:
+            video_path: Local path to the video file.
+
+        Returns:
+            oss:// URL string if successful, None if upload fails.
+        """
+        if not HAS_REQUESTS:
+            logger.warning("requests package not available, cannot upload video")
+            return None
+
+        if not os.path.isfile(video_path):
+            logger.warning(f"Video file not found: {video_path}")
+            return None
+
+        try:
+            # Step 1: Get upload certificate from DashScope
+            cert_url = "https://dashscope.aliyuncs.com/api/v1/uploads"
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+            }
+            params = {
+                "action": "getPolicy",
+                "model": self.model_name,
+            }
+
+            cert_resp = _requests.get(cert_url, headers=headers, params=params, timeout=30)
+            cert_resp.raise_for_status()
+            cert_data = cert_resp.json()
+
+            if cert_data.get("status_code") != 200 and "output" not in cert_data:
+                # Try alternative response structure
+                output = cert_data.get("data", cert_data.get("output", {}))
+            else:
+                output = cert_data.get("output", {})
+
+            upload_dir = output.get("upload_dir", "")
+            upload_host = output.get("upload_host", "")
+            oss_access_key_id = output.get("oss_access_key_id", "")
+            signature = output.get("signature", "")
+            policy = output.get("policy", "")
+            x_oss_object_acl = output.get("x_oss_object_acl", "private")
+            x_oss_forbid_overwrite = output.get("x_oss_forbid_overwrite", "true")
+
+            if not all([upload_dir, upload_host, oss_access_key_id, signature, policy]):
+                logger.warning(f"Incomplete upload certificate: {cert_data}")
+                return None
+
+            # Step 2: Upload file to OSS
+            filename = os.path.basename(video_path)
+            object_key = f"{upload_dir}/{filename}"
+
+            content_type = mimetypes.guess_type(video_path)[0] or "video/mp4"
+
+            form_data = {
+                "OSSAccessKeyId": (None, oss_access_key_id),
+                "Signature": (None, signature),
+                "policy": (None, policy),
+                "key": (None, object_key),
+                "x-oss-object-acl": (None, x_oss_object_acl),
+                "x-oss-forbid-overwrite": (None, x_oss_forbid_overwrite),
+                "success_action_status": (None, "200"),
+                "x-oss-content-type": (None, content_type),
+            }
+
+            with open(video_path, "rb") as f:
+                files = {"file": (filename, f, content_type)}
+                upload_resp = _requests.post(
+                    upload_host,
+                    data={k: v[1] for k, v in form_data.items()},
+                    files=files,
+                    timeout=120,
+                )
+
+            if upload_resp.status_code == 200:
+                # Construct the oss:// URL
+                # Extract bucket from upload_host (e.g., https://bucket.oss-cn-xxx.aliyuncs.com)
+                from urllib.parse import urlparse
+                parsed = urlparse(upload_host)
+                bucket = parsed.hostname.split(".")[0] if parsed.hostname else "dashscope"
+                oss_url = f"oss://{bucket}/{object_key}"
+                logger.info(f"Video uploaded successfully: {oss_url}")
+                return oss_url
+            else:
+                logger.warning(
+                    f"OSS upload failed with status {upload_resp.status_code}: "
+                    f"{upload_resp.text[:200]}"
+                )
+                return None
+
+        except Exception as e:
+            logger.warning(f"Video upload failed: {e}")
+            return None
 
     def analyze_and_refine(
         self,
@@ -186,8 +300,9 @@ class VLMClient:
         """
         Analyze composite video and produce refined prompt for video reproduction.
 
-        Extracts 8 evenly-spaced key frames from the composite video and sends
-        them to Qwen-VL for comparison and prompt refinement.
+        If use_video_mode=True, uploads the composite video to DashScope OSS
+        and passes it as a video_url for native temporal understanding.
+        Otherwise, falls back to extracting static frames.
 
         Args:
             composite_video_path: Path to vertical composite video.
@@ -204,13 +319,6 @@ class VLMClient:
         Returns:
             Dict with 'analysis' and 'refined_prompt'.
         """
-        # Extract key frames from composite video
-        frames_base64 = self._extract_frames_base64(composite_video_path, num_frames=8)
-
-        if not frames_base64:
-            logger.warning("No frames extracted, returning fallback")
-            return self._fallback_response(current_prompt)
-
         # Build history summary
         history_summary = self._format_history(history)
 
@@ -233,15 +341,51 @@ class VLMClient:
             video_description=extra_context,
         )
 
-        # Build multimodal content (text + images)
+        # Build multimodal content based on mode
         content = [{"type": "text", "text": user_text}]
-        for frame_b64 in frames_base64:
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{frame_b64}",
-                }
-            })
+
+        if self.use_video_mode:
+            # Video mode: upload and pass as video_url for temporal understanding
+            video_url = self._upload_video_to_dashscope(composite_video_path)
+            if video_url:
+                content.append({
+                    "type": "video_url",
+                    "video_url": {"url": video_url}
+                })
+                logger.info(
+                    f"Using video mode (iter {iteration}): VLM receives full video "
+                    f"for temporal/motion analysis"
+                )
+            else:
+                # Upload failed, fall back to frame extraction
+                logger.warning("Video upload failed, falling back to frame extraction")
+                frames_base64 = self._extract_frames_base64(
+                    composite_video_path, num_frames=16
+                )
+                if not frames_base64:
+                    return self._fallback_response(current_prompt)
+                for frame_b64 in frames_base64:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{frame_b64}",
+                        }
+                    })
+        else:
+            # Legacy frame extraction mode
+            frames_base64 = self._extract_frames_base64(
+                composite_video_path, num_frames=8
+            )
+            if not frames_base64:
+                logger.warning("No frames extracted, returning fallback")
+                return self._fallback_response(current_prompt)
+            for frame_b64 in frames_base64:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{frame_b64}",
+                    }
+                })
 
         # Call VLM with retry
         for attempt in range(self.max_retries):
@@ -471,6 +615,7 @@ def create_vlm_client(config: Dict[str, Any]) -> Any:
             temperature=config.get("temperature", 0.7),
             max_tokens=config.get("max_tokens", 2048),
             max_retries=config.get("max_retries", 3),
+            use_video_mode=config.get("use_video_mode", True),
         )
     except (ImportError, ValueError) as e:
         logger.warning(f"VLM client init failed: {e}, using MockVLMClient")
