@@ -22,7 +22,7 @@ Key difference from P-Flow:
 - This: reproduces the ENTIRE reference video content via prompt optimization
 - alpha is larger (0.1 vs 0.001) to provide stronger motion guidance
 
-Hardware: Single A800-80GB with enable_model_cpu_offload()
+Hardware: Single 4090 (24GB) — Wan2.1-1.3B fits fully on GPU
 VLM: DashScope Qwen-VL (qwen-vl-max)
 Processing: One video at a time (sequential)
 """
@@ -110,8 +110,7 @@ class PFlowPipeline:
         """Load configuration with defaults."""
         default_config = {
             "model": {
-                "t2v_path": "/root/autodl-tmp/models/Wan2.1-T2V-14B-Diffusers",
-                "i2v_path": "/root/autodl-tmp/models/Wan2.1-I2V-14B-Diffusers",
+                "t2v_path": "/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers",
                 "dtype": "bfloat16",
             },
             "video": {
@@ -170,7 +169,7 @@ class PFlowPipeline:
                 base[key] = value
 
     def _load_model(self):
-        """Load Wan 2.1-14B on single A800 with CPU offload."""
+        """Load Wan 2.1-1.3B on single 4090."""
         model_path = self.config["model"]["t2v_path"]
 
         if self.device == "cpu":
@@ -239,7 +238,7 @@ class PFlowPipeline:
         logger.info(f"Iterations: {i_max} (fixed, NO early stopping)")
         logger.info(f"Noise prior alpha: {alpha} (motion guidance strength)")
         logger.info(f"Mode: {mode}")
-        logger.info(f"Model: Wan 2.1-14B (single GPU + CPU offload)")
+        logger.info(f"Model: Wan 2.1-1.3B (single 4090)")
         logger.info(f"VLM: {self.config['vlm']['model_name']}")
         logger.info(f"Output: {output_dir}")
         logger.info("=" * 60)
@@ -430,7 +429,7 @@ class PFlowPipeline:
         reference_image_path: Optional[str] = None,
     ) -> torch.Tensor:
         """
-        Generate video using Wan 2.1-14B.
+        Generate video using Wan 2.1-1.3B.
 
         Supports both T2V and I2V modes.
         """

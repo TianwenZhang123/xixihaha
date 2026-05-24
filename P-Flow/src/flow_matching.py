@@ -1,11 +1,11 @@
 """
-Flow Matching Inversion for P-Flow (14B Model).
+Flow Matching Inversion for P-Flow (Wan2.1-1.3B).
 
 Implements the flow matching inversion process:
     dx/dt = v_θ(x_t, t, c)
 Integrating from t=1 (data) to t=0 (noise) via Euler method.
 
-Adapted for Wan 2.1-14B distributed inference.
+Adapted for Wan 2.1-1.3B single-GPU inference.
 
 Reference: Section 3.2-3.3, Algorithm 1 line 2.
 """
@@ -39,7 +39,7 @@ class FlowMatchingInverter:
     ):
         """
         Args:
-            pipe: Wan 2.1-14B pipeline (multi-GPU distributed).
+            pipe: Wan 2.1-1.3B pipeline.
             num_inversion_steps: Number of ODE steps.
             guidance_scale: Guidance during inversion (1.0 = no guidance).
             device: Primary device for operations.

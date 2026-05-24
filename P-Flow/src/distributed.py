@@ -1,15 +1,16 @@
 """
-Single-GPU Inference Utilities for P-Flow on A800 (1x 80GB).
+Single-GPU Inference Utilities for Wan2.1-1.3B on 4090 (24GB).
 
 Supports:
-1. Single A800 with enable_model_cpu_offload (14B fits ~40GB VRAM)
-2. VAE slicing + tiling for memory efficiency
+1. Single 4090 — model fits fully in VRAM (~2.6GB bfloat16)
+2. VAE slicing + tiling for memory efficiency during video decode
 3. Sequential video-by-video processing
 
-Hardware: 1x A800-80GB
-- Wan 2.1-14B: ~28GB in bfloat16
-- With cpu_offload: components loaded on-demand, peak ~40GB
-- Video generation: ~90-120s per video (single card)
+Hardware: 1x RTX 4090 (24GB)
+- Wan 2.1-1.3B: ~2.6GB in bfloat16
+- No CPU offload needed — full model on GPU
+- Peak VRAM during generation: ~12-16GB (with 81 frames 480p)
+- Video generation: ~30-50s per video
 """
 
 import os
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def setup_single_gpu():
     """
-    Setup single-GPU environment for A800 inference.
+    Setup single-GPU environment for 4090 inference.
     Call this before loading any models.
 
     Returns:
@@ -34,7 +35,7 @@ def setup_single_gpu():
 
     num_gpus = torch.cuda.device_count()
     props = torch.cuda.get_device_properties(0)
-    logger.info(f"GPU: {props.name} ({props.total_memory / 1024**3:.1f} GB)")
+    logger.info(f"GPU: {props.name} ({props.total_mem / 1024**3:.1f} GB)")
     if num_gpus > 1:
         logger.info(f"  {num_gpus} GPUs detected, but using only GPU 0 (single-card mode)")
 
@@ -54,16 +55,14 @@ def load_model_single_gpu(
     enable_vae_tiling: bool = True,
 ) -> Any:
     """
-    Load Wan 2.1-14B model on single A800 with CPU offload.
+    Load Wan 2.1-1.3B model on single 4090.
 
-    The 14B model (~28GB bfloat16) fits on a single A800-80GB with CPU offload:
-    - Model components are loaded to GPU on-demand during inference
-    - Peak VRAM usage: ~40-50GB
-    - Requires sufficient system RAM (~32GB+)
+    The 1.3B model (~2.6GB bfloat16) fits comfortably on a 4090 (24GB).
+    No CPU offload needed. Peak VRAM during generation: ~12-16GB.
 
     Args:
         model_path: Path to model weights.
-        dtype: Model dtype (bfloat16 recommended for A800).
+        dtype: Model dtype (bfloat16 recommended).
         model_type: "t2v" for Text-to-Video, "i2v" for Image-to-Video.
         enable_vae_slicing: Enable VAE slicing for memory efficiency.
         enable_vae_tiling: Enable VAE tiling for large resolutions.
@@ -71,8 +70,8 @@ def load_model_single_gpu(
     Returns:
         Loaded pipeline ready for inference.
     """
-    logger.info(f"Loading Wan 2.1-14B ({model_type}) from: {model_path}")
-    logger.info(f"  Mode: single GPU + CPU offload, dtype={dtype}")
+    logger.info(f"Loading Wan 2.1-1.3B ({model_type}) from: {model_path}")
+    logger.info(f"  Mode: single GPU (full model on VRAM), dtype={dtype}")
 
     if model_type == "i2v":
         try:
@@ -94,12 +93,11 @@ def load_model_single_gpu(
             torch_dtype=dtype,
         )
 
-    # Use CPU offload: components are moved to GPU on-demand
-    # This allows 14B model to fit on single 80GB card
-    pipe.enable_model_cpu_offload()
-    logger.info("  CPU offload enabled (components loaded to GPU on-demand)")
+    # Move entire model to GPU — 1.3B fits comfortably
+    pipe = pipe.to("cuda")
+    logger.info("  Model loaded to GPU (no CPU offload needed for 1.3B)")
 
-    # Memory optimizations
+    # Memory optimizations for video decoding
     if enable_vae_slicing and hasattr(pipe, "enable_vae_slicing"):
         pipe.enable_vae_slicing()
         logger.info("  VAE slicing enabled")

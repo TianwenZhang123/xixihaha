@@ -1,12 +1,12 @@
-# P-Flow Full Reproduction Requirements
-# Target: Single A800 (80GB) with CPU offload
+# P-Flow Video Reproduction Requirements
+# Target: Single 4090 (24GB) — Wan2.1-1.3B
 
 # Core dependencies
 torch>=2.2.0
 torchvision>=0.17.0
 torchaudio>=2.2.0
 
-# Video generation model (Wan 2.1-14B)
+# Video generation model (Wan 2.1-1.3B)
 diffusers>=0.31.0
 transformers>=4.44.0
 accelerate>=0.30.0
@@ -28,9 +28,6 @@ scipy>=1.11.0                   # For FVD computation
 scikit-learn>=1.3.0
 lpips>=0.1.4                    # Perceptual similarity
 
-# VBench evaluation
-# pip install vbench (separate, has its own deps)
-
 # Numeric & utilities
 numpy>=1.24.0
 pandas>=2.0.0
@@ -38,15 +35,6 @@ Pillow>=10.0.0
 tqdm>=4.66.0
 pyyaml>=6.0
 einops>=0.7.0
-omegaconf>=2.3.0
-
-# Experiment tracking (optional)
-# wandb>=0.16.0
-# tensorboard>=2.15.0
 
 # Data management
 huggingface-hub>=0.20.0         # Model/dataset downloading
-gdown>=5.0.0                    # Google Drive downloads (for Open-VFX)
-
-# Optional: Human evaluation UI
-# gradio>=4.0.0                 # For building annotation interface

@@ -3,7 +3,16 @@ __pycache__/
 *.pyo
 .venv/
 *.egg-info/
-outputs/
 .DS_Store
 .env
-!outputs/**
+
+# Experiment outputs (don't commit large video files)
+outputs/
+test_run_*/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db

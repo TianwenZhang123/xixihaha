@@ -19,7 +19,7 @@ Core components:
 - prompt_optimizer: Vertical composite + VLM refinement
 - video_utils: Video I/O and processing
 - trajectory: History management
-- distributed: Single-GPU inference utilities
+- distributed: Single-GPU inference utilities (4090, 1.3B)
 """
 
 __version__ = "2.0.0"

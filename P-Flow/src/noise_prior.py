@@ -1,5 +1,5 @@
 """
-Noise Prior Enhancement for P-Flow (14B Model).
+Noise Prior Enhancement for P-Flow (Wan2.1-1.3B).
 
 Complete pipeline (Section 3.3):
     V_ref → VAE Encode → x_1 → Flow Inversion → η_inv
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class NoisePriorEnhancement:
     """
-    Complete Noise Prior Enhancement pipeline for Wan 2.1-14B.
+    Complete Noise Prior Enhancement pipeline for Wan 2.1-1.3B.
 
     Pipeline:
         V_ref → VAE → x_1 → Inversion → η_inv → SVD → η_temporal
@@ -47,7 +47,7 @@ class NoisePriorEnhancement:
     ):
         """
         Args:
-            pipe: Wan 2.1-14B pipeline (distributed).
+            pipe: Wan 2.1-1.3B pipeline.
             alpha: Blending weight (Eq. 7). Paper: 0.001.
             rho_s: Spatial SVD threshold. Paper: 0.1.
             rho_m: Temporal SVD threshold. Paper: 0.9.

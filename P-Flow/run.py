@@ -50,7 +50,7 @@ def main():
     parser.add_argument("--hint", type=str, default="",
                        help="Optional hint for auto-prompt generation")
     parser.add_argument("--output", type=str, default="/root/autodl-tmp/outputs/video_reproduction",
-                       help="Output directory")
+                       help="Output directory (default: /root/autodl-tmp/outputs/video_reproduction)")
     parser.add_argument("--config", type=str, default=None,
                        help="Config YAML (default: configs/paper_default.yaml)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")

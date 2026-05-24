@@ -1,18 +1,16 @@
 # Video Reproduction Configuration
 # Adapted from P-Flow (arXiv:2603.22091) for video reproduction task
-# Target: Single A800 (80GB) with CPU offload
+# Target: Single 4090 (24GB) — Wan2.1-1.3B fits entirely in VRAM
 
 # ============================================================
 # Model Configuration
 # ============================================================
 model:
-  # Text-to-Video model: Wan 2.1-14B
-  t2v_path: "/root/autodl-tmp/models/Wan2.1-T2V-14B-Diffusers"
-  # Image-to-Video model: Wan 2.1-14B I2V
-  i2v_path: "/root/autodl-tmp/models/Wan2.1-I2V-14B-Diffusers"
+  # Text-to-Video model: Wan 2.1-1.3B
+  t2v_path: "/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers"
   dtype: "bfloat16"
-  # Single A800 with enable_model_cpu_offload
-  # 14B model (~28GB bfloat16), peak VRAM ~40-50GB with cpu offload
+  # 1.3B model (~2.6GB bfloat16), fits comfortably on 4090 (24GB)
+  # No CPU offload needed — full model stays on GPU
 
 # ============================================================
 # Video Generation Settings
@@ -87,13 +85,13 @@ output:
   save_composites: true
 
 # ============================================================
-# Hardware Configuration (Single A800)
+# Hardware Configuration (Single 4090)
 # ============================================================
 hardware:
-  gpu_type: "A800-80GB"
+  gpu_type: "4090-24GB"
   num_gpus: 1
-  # Timing estimate (single card):
-  #   Video generation: ~90-120s per video
+  # Timing estimate (single card, 1.3B model):
+  #   Video generation: ~30-50s per video
   #   VLM inference (Qwen-VL): ~5-10s
-  #   Total per iteration: ~100-130s
-  #   Total per sample (10 iter): ~17-22 min
+  #   Total per iteration: ~40-60s
+  #   Total per sample (10 iter): ~7-10 min
