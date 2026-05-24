@@ -112,8 +112,9 @@ class CLIPScoreMetric:
         if os.path.isdir(local_path):
             try:
                 from transformers import CLIPModel, CLIPProcessor
+                # Use safetensors to avoid torch.load CVE-2025-32434 restriction
                 self._model = CLIPModel.from_pretrained(
-                    local_path, local_files_only=True
+                    local_path, local_files_only=True, use_safetensors=True
                 ).to(self.device).eval()
                 self._preprocess = CLIPProcessor.from_pretrained(
                     local_path, local_files_only=True
@@ -138,7 +139,7 @@ class CLIPScoreMetric:
         try:
             from transformers import CLIPModel, CLIPProcessor
             self._model = CLIPModel.from_pretrained(
-                "openai/clip-vit-base-patch32"
+                "openai/clip-vit-base-patch32", use_safetensors=True
             ).to(self.device).eval()
             self._preprocess = CLIPProcessor.from_pretrained(
                 "openai/clip-vit-base-patch32"
