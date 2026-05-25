@@ -10,33 +10,67 @@
 
 ### 数据集
 
-| 数据集 | 规模 | 用途 |
-|--------|------|------|
-| Open-VFX | 15 类视觉特效 | 主评估集 |
-| MovieGenBench | 1003 样本 | 通用视频质量评估 |
-| VidProM | 180K video-prompt 对 | Prompt 反演评估 + RAG 检索库 |
+| 数据集 | 规模 | 用途 | 状态 |
+|--------|------|------|------|
+| **MovieGenVideoBench (high-motion 200)** | 200 条 | 主评估集（与同门对齐） | ✅ 已筛选 |
+| MovieGenVideoBench (全集) | 1003 条 | 完整 benchmark | 已有 CSV |
 
-数据规范：480x832，81 帧 @16fps，mp4 H.264，归一化到 [-1, 1]。
+**数据筛选规则**（与同门 Video2Prompt 项目完全一致）：从 MovieGenVideoBenchWithTag.csv 中筛选 `motion_level=high` 的样本（共 265 条），按 prompt 长度降序排列，取前 200 条。
+
+**数据规范**：480×832，81 帧 @16fps（约 5s），mp4 H.264。
+
+**服务器数据布局**：
+```
+/root/autodl-tmp/
+├── models/
+│   ├── Wan2.1-T2V-1.3B-Diffusers/   # T2V 模型
+│   ├── clip-vit-base-patch32/         # CLIP 评测模型
+│   └── xclip-base-patch32/            # X-CLIP 视频评测模型
+├── videofake/                          # 代码仓库
+│   ├── P-Flow/                         # 本项目
+│   └── Video2Prompt/                   # 同门项目（共享数据）
+└── data/                               # 数据集（待建立）
+    └── video-200/
+        ├── water_mark_out/             # 原始参考视频 ({id}.mp4)
+        ├── captions_qwen/             # Qwen VLM caption ({id}.txt)
+        └── pflow_output/              # P-Flow 生成结果 ({id}.mp4)
+
+/root/models/
+└── Qwen2.5-VL-7B-Instruct/           # VLM 模型（系统盘）
+```
 
 ### VLM 选型
 
-| 模型 | 角色 | 理由 |
-|------|------|------|
-| **Qwen2.5-VL-72B** | 主力 | 视频理解约等于GPT-4o，绝对时间编码，国内稳定 |
-| GPT-4o | 交叉验证 | 排除系统性偏差 |
-| InternVL3-78B | 本地批量 | 开源可部署 |
+| 模型 | 角色 | 部署方式 | 状态 |
+|------|------|---------|------|
+| **Qwen2.5-VL-7B-Instruct** | 主力（迭代 prompt 优化） | 本地 A800，bf16 | ✅ 已部署 |
 
 ### T2V 选型
 
-| 模型 | 角色 | 理由 |
-|------|------|------|
-| **Wan 2.1-14B** | 主力 | P-Flow 原始实现，Flow Matching 架构适配 Inversion |
-| Wan 2.1-1.3B | 快速验证 | 单 4090 可跑 |
-| CogVideoX-5B / HunyuanVideo | 对比 | 验证模型无关性 |
+| 模型 | 角色 | 部署方式 | 状态 |
+|------|------|---------|------|
+| **Wan 2.1-T2V-1.3B** | 主力 | 本地 A800，bfloat16 | ✅ 已部署 |
 
-### 评估指标
+### 评估指标（与同门对齐）
 
-CLIP-Score（语义一致性）、FVD（分布距离）、光流一致性（运动保真度）、帧间 SSIM 方差（时序连贯性）、VBench（综合）、VLM-as-Judge（5 维度 1-5 分）。
+**集合级指标**（200 条样本整体评估）：
+
+| 指标 | 衡量维度 | 模型/工具 | 状态 |
+|------|---------|----------|------|
+| CLIP cosine similarity | 帧级语义相似度（原-生/原-文/生-文） | clip-vit-base-patch32 | ✅ 模型就绪 |
+| X-CLIP cosine similarity | 视频级语义相似度（同上三组） | xclip-base-patch32 | ✅ 模型就绪 |
+| STREAM-T | 时间频域分布距离 | DINOv2 (v-stream) | ⚠️ 需安装 |
+| STREAM-F | Precision 型覆盖 | DINOv2 (v-stream) | ⚠️ 需安装 |
+| STREAM-D | Recall 型覆盖 | DINOv2 (v-stream) | ⚠️ 需安装 |
+
+**Per-Iteration 指标**（单样本逐轮评估，已有）：
+
+| 指标 | 衡量维度 | 状态 |
+|------|---------|------|
+| SSIM | 像素级结构相似度 | ✅ 已实现 |
+| CLIP-Similarity | 帧级语义相似度 | ✅ 已实现 |
+| Motion Magnitude/Direction | 运动模式相关性 | ✅ 已实现 |
+| Prompt-Video Alignment | Prompt 与生成视频对齐度 | ✅ 已实现 |
 
 ---
 
@@ -344,7 +378,27 @@ FID-VID 和 FVD 是分布级指标，要求 2048+ 样本才能统计显著。我
 
 > **重要**：必须使用 **Diffusers 格式**模型（含 `model_index.json`），原始 checkpoint 格式无法被 `from_pretrained()` 加载。
 
-### 8.2 环境部署（无卡模式）
+### 8.2 当前服务器环境（AutoDL A800）
+
+```
+服务器: AutoDL A800-80GB
+镜像: PyTorch 2.5.1 / Python 3.12 / CUDA 12.4
+
+/root/
+├── models/
+│   └── Qwen2.5-VL-7B-Instruct/       # VLM (系统盘，持久)
+├── autodl-tmp/                         # 数据盘 (关机保留)
+│   ├── models/
+│   │   ├── Wan2.1-T2V-1.3B-Diffusers/ # T2V 模型 ✅
+│   │   ├── clip-vit-base-patch32/      # CLIP ✅
+│   │   └── xclip-base-patch32/         # X-CLIP ✅
+│   └── videofake/                      # 代码仓库
+│       ├── P-Flow/                     # 本项目
+│       └── Video2Prompt/               # 同门项目
+└── miniconda3/                         # Python 环境
+```
+
+### 8.3 环境部署（首次 / 重建）
 
 ```bash
 # Step 1: 网络加速
@@ -356,170 +410,123 @@ git clone https://github.com/TianwenZhang123/xixihaha.git videofake
 cd videofake
 
 # Step 3: 安装依赖
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -r P-Flow/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install v-stream -i https://pypi.tuna.tsinghua.edu.cn/simple  # STREAM 评测
 # A800 额外安装: pip install flash-attn --no-build-isolation
 
 # Step 4: 环境变量
 export HF_HOME=/root/autodl-tmp/huggingface
-export DASHSCOPE_API_KEY="你的百炼API Key"
 echo 'export HF_HOME=/root/autodl-tmp/huggingface' >> ~/.bashrc
-echo 'export DASHSCOPE_API_KEY="你的百炼API Key"' >> ~/.bashrc
 source ~/.bashrc
 
-# Step 5: 下载模型
-mkdir -p /root/autodl-tmp/models /root/autodl-tmp/outputs
-export HF_ENDPOINT=https://hf-mirror.com
+# Step 5: 模型已就绪（无需重新下载）
+# /root/autodl-tmp/models/ 下已有:
+#   Wan2.1-T2V-1.3B-Diffusers, clip-vit-base-patch32, xclip-base-patch32
+# /root/models/ 下已有:
+#   Qwen2.5-VL-7B-Instruct
 
-# 1.3B 版本:
-huggingface-cli download Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
-    --local-dir /root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers
-# 14B 版本:
-huggingface-cli download Wan-AI/Wan2.1-T2V-14B-Diffusers \
-    --local-dir /root/autodl-tmp/models/Wan2.1-T2V-14B-Diffusers
-
-# Step 6: 下载 MovieGenBench 数据集
-mkdir -p /root/autodl-tmp/data && cd /root/autodl-tmp/data
-wget -c https://d14whct5a0wtwm.cloudfront.net/moviegen/MovieGenVideoBench.tar.gz
-tar -xzf MovieGenVideoBench.tar.gz && mv MovieGenVideoBench moviegen_bench
-cd moviegen_bench
-wget https://raw.githubusercontent.com/facebookresearch/MovieGenBench/main/benchmark/MovieGenVideoBench.txt
-wget https://raw.githubusercontent.com/facebookresearch/MovieGenBench/main/benchmark/MovieGenVideoBenchWithTag.csv
-rm -f /root/autodl-tmp/data/MovieGenVideoBench.tar.gz  # 释放空间
-
-# Step 7: 验证
+# Step 6: 验证
 cd /root/autodl-tmp/videofake
 python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
 python -c "from diffusers import WanPipeline; print('diffusers OK')"
+python -c "from stream import STREAM; print('v-stream OK')"
 ```
 
-### 8.3 运行实验（有卡模式）
+### 8.4 运行实验（有卡模式）
 
 ```bash
 # 确认环境
-source /etc/network_turbo
-export DASHSCOPE_API_KEY="你的百炼API Key"
 nvidia-smi
 
-# ---- 4090 + 1.3B ----
-cd /root/autodl-tmp/videofake
-
-# 快速验证（仅 Noise Prior，不调 VLM）
-python scripts/run_pflow_paper.py --video_index 23 --noise_prior_only --seed 42
-
-# 完整 3 轮迭代
-python scripts/run_pflow_paper.py --video_index 23 --seed 42
-
-# ---- A800 + 14B ----
+# ---- A800 + 1.3B + 本地 VLM ----
 cd /root/autodl-tmp/videofake/P-Flow
 
 # Mock VLM 快速验证
 python run.py \
-    --video /root/autodl-tmp/data/moviegen_bench/23.mp4 \
-    --prompt "Borneo wildlife on the Kinabatangan River" \
-    --output /root/autodl-tmp/outputs/test_noise_prior \
+    --video /path/to/reference.mp4 \
+    --prompt "description of the video" \
+    --output /root/autodl-tmp/outputs/test_mock \
     --mock_vlm --seed 42
 
-# 完整 10 轮迭代
-python scripts/run_experiment.py \
-    --video /root/autodl-tmp/data/moviegen_bench/23.mp4 \
-    --prompt "Borneo wildlife on the Kinabatangan River" \
-    --output_dir /root/autodl-tmp/outputs/test_023 \
+# 完整 10 轮迭代（本地 Qwen2.5-VL-7B）
+python run.py \
+    --video /path/to/reference.mp4 \
+    --auto_prompt \
+    --output /root/autodl-tmp/outputs/test_001 \
+    --config configs/paper_default.yaml \
+    --seed 42
+
+# 批量运行 200 条样本（待实现）
+python scripts/run_batch_200.py \
+    --data_csv /root/autodl-tmp/videofake/Video2Prompt/MovieGenVideoBenchWithTag.csv \
+    --video_dir /root/autodl-tmp/data/video-200/water_mark_out \
+    --output_dir /root/autodl-tmp/outputs/batch_200 \
     --seed 42
 ```
 
-### 8.4 后台运行（防 SSH 断连）
+### 8.5 后台运行（防 SSH 断连）
 
 ```bash
-nohup python scripts/run_pflow_paper.py --video_index 23 --seed 42 \
+nohup python run.py --video /path/to/ref.mp4 --auto_prompt \
+    --output /root/autodl-tmp/outputs/run_001 --seed 42 \
     > /root/autodl-tmp/outputs/run_log.txt 2>&1 &
 tail -f /root/autodl-tmp/outputs/run_log.txt
 ```
 
 ---
 
-## 九、AB 对比实验与评测命令
+## 九、评测命令
 
-### 9.1 AB 实验（控制变量：alpha）
-
-```bash
-cd /root/autodl-tmp/videofake/P-Flow
-
-# 实验 A：无运动先验 (alpha=0.0)
-python run.py \
-  --video /root/autodl-tmp/data/moviegen_bench/2.mp4 \
-  --auto_prompt \
-  --output /root/autodl-tmp/outputs/spaceman_noSVD \
-  --config configs/paper_default.yaml \
-  --seed 42 --alpha 0.0 --i_max 3
-
-# 实验 B：论文推荐值 (alpha=0.001)
-python run.py \
-  --video /root/autodl-tmp/data/moviegen_bench/2.mp4 \
-  --auto_prompt \
-  --output /root/autodl-tmp/outputs/spaceman_withSVD_001 \
-  --config configs/paper_default.yaml \
-  --seed 42 --alpha 0.001 --i_max 3
-```
-
-> **alpha 取值参考**（来自论文 Table 4 消融实验）：
-> - alpha=0.0：纯随机噪声，无运动先验
-> - **alpha=0.001**：论文最终选定值，运动先验仅占 sqrt(0.001)=3.2% 权重（"微弱运动暗示"）
-> - alpha=0.01：FID 略好但运动一致性下降
-> - alpha=0.1：过强，像素质量严重下降（已验证）
-
-### 9.2 评测命令
+### 9.1 Per-Iteration 评测（单样本逐轮）
 
 ```bash
 cd /root/autodl-tmp/videofake/P-Flow
 
 # 单组评测
 python evaluation/eval_reproduction.py \
-  --experiment_dir /root/autodl-tmp/outputs/spaceman_withSVD_001 \
+  --experiment_dir /root/autodl-tmp/outputs/test_001 \
   --clip_model_path /root/autodl-tmp/models/clip-vit-base-patch32 \
   --device cuda --num_frames 16
 
-# 两组对比评测
+# 两组对比评测（如 alpha 消融）
 python evaluation/eval_reproduction.py \
-  --experiment_dir /root/autodl-tmp/outputs/spaceman_noSVD \
-  --experiment_dir2 /root/autodl-tmp/outputs/spaceman_withSVD_001 \
-  --clip_model_path /root/autodl-tmp/models/clip-vit-base-patch32 \
-  --device cuda --num_frames 16
-
-# 生成 + 评测一气呵成
-cd /root/autodl-tmp/videofake/P-Flow && \
-python run.py \
-  --video /root/autodl-tmp/data/moviegen_bench/2.mp4 \
-  --auto_prompt \
-  --output /root/autodl-tmp/outputs/spaceman_withSVD_001 \
-  --config configs/paper_default.yaml \
-  --seed 42 --alpha 0.001 --i_max 3 \
-&& python evaluation/eval_reproduction.py \
-  --experiment_dir /root/autodl-tmp/outputs/spaceman_withSVD_001 \
+  --experiment_dir /root/autodl-tmp/outputs/alpha_000 \
+  --experiment_dir2 /root/autodl-tmp/outputs/alpha_001 \
   --clip_model_path /root/autodl-tmp/models/clip-vit-base-patch32 \
   --device cuda --num_frames 16
 ```
 
-### 9.3 CLIP 模型准备（首次需要）
+### 9.2 集合级评测（200 条批量，与同门对齐）
+
+评测脚本复用同门 Video2Prompt 的实现，确保指标计算方式完全一致：
 
 ```bash
-source /etc/network_turbo
-export HF_ENDPOINT=https://hf-mirror.com
+cd /root/autodl-tmp/videofake/Video2Prompt/scripts
 
-# 下载 CLIP ViT-B/32（约 350MB）
-hf download openai/clip-vit-base-patch32 \
-  --local-dir /root/autodl-tmp/models/clip-vit-base-patch32
+# CLIP + X-CLIP 评测
+python run_clip_vclip_eval.py \
+  --orig-dir /root/autodl-tmp/data/video-200/water_mark_out \
+  --gen-dir /root/autodl-tmp/outputs/batch_200_final \
+  --caption-dir /root/autodl-tmp/data/video-200/captions_qwen \
+  --output-dir /root/autodl-tmp/outputs/eval_results/clip_vclip \
+  --clip-model /root/autodl-tmp/models/clip-vit-base-patch32 \
+  --vclip-model /root/autodl-tmp/models/xclip-base-patch32
 
-# 转换为 safetensors 格式（解决 torch<2.6 的 CVE 限制）
-cd /root/autodl-tmp/models/clip-vit-base-patch32 && \
-python3 -c "
-import torch
-from safetensors.torch import save_file
-state_dict = torch.load('pytorch_model.bin', map_location='cpu', weights_only=False)
-state_dict = {k: v.contiguous() for k, v in state_dict.items()}
-save_file(state_dict, 'model.safetensors')
-print('Converted to safetensors')
-"
+# STREAM (T/F/D) 评测
+python run_stream_eval.py \
+  --orig-dir /root/autodl-tmp/data/video-200/water_mark_out \
+  --gen-dir /root/autodl-tmp/outputs/batch_200_final \
+  --output-dir /root/autodl-tmp/outputs/eval_results/stream \
+  --model dinov2 --num-frames 16
 ```
+
+### 9.3 评测模型路径
+
+| 模型 | 路径 | 状态 |
+|------|------|------|
+| CLIP ViT-B/32 | `/root/autodl-tmp/models/clip-vit-base-patch32` | ✅ |
+| X-CLIP base-patch32 | `/root/autodl-tmp/models/xclip-base-patch32` | ✅ |
+| DINOv2 (STREAM) | torch.hub 自动下载 | ⚠️ 首次需联网 |
 
 ---
 
@@ -700,7 +707,114 @@ cd /root/autodl-tmp/videofake && source /etc/network_turbo && git pull origin ma
 
 ---
 
-## 十五、参考文献
+## 十五、与同门项目 (Video2Prompt) 对齐方案
+
+### 15.1 实验对比设计
+
+两个项目的实验形成 **baseline vs. ours** 的对比关系：
+
+| 维度 | Video2Prompt (baseline) | P-Flow (ours) |
+|------|------------------------|---------------|
+| 方法 | 直接 caption → T2V 生成 | 迭代 prompt 优化 + noise prior |
+| 流程 | VLM 看原视频 → 一次性 caption → Wan 生成 | VLM 反复对比 → 逐轮优化 prompt → Wan 生成 |
+| 迭代次数 | 1（无迭代） | 10 |
+| Noise Prior | 无 | 有（alpha=0.001） |
+| 输出 | 每条样本 1 个视频 | 每条样本取最优迭代的 1 个视频 |
+
+论文中的对比表格应为：
+
+```
+Method          | CLIP↑  | X-CLIP↑ | STREAM-T↓ | STREAM-F↑ | STREAM-D↑
+----------------|--------|---------|-----------|-----------|----------
+Direct Caption  | 0.xxx  | 0.xxx   | 0.xxx     | 0.xxx     | 0.xxx
+P-Flow (ours)   | 0.xxx  | 0.xxx   | 0.xxx     | 0.xxx     | 0.xxx
+```
+
+### 15.2 GAP 清单与修改计划
+
+#### GAP-1: 数据集准备（缺少原始视频）
+
+**现状**：同门的 `video-200/water_mark_out/` 目录存放了 200 条原始参考视频（{id}.mp4），但这些视频文件未在 git 仓库中（太大）。P-Flow 需要这些视频作为输入。
+
+**行动**：
+- [ ] 从同门处获取 200 条原始视频，放到 `/root/autodl-tmp/data/video-200/water_mark_out/`
+- [ ] 或从 MovieGenVideoBench 官方下载后按 `selected_200.csv` 筛选
+- [ ] 确认视频格式：mp4, 各种原始分辨率（评测时统一采样帧数即可）
+
+#### GAP-2: Caption 数据复用
+
+**现状**：同门已用 Qwen2.5-VL-7B 对 200 条原视频生成了 caption（`video-200/captions_qwen/{id}.txt`），这些 caption 既是 baseline 的生成输入，也是评测时的"文本"参照。
+
+**行动**：
+- [ ] 将同门的 `captions_qwen/` 目录软链接或复制到 P-Flow 可访问的路径
+- [ ] P-Flow 的 `--auto_prompt` 模式会自己用 VLM 生成初始 prompt，但评测时需要用同门的 caption 作为统一的文本参照（计算 text-video similarity）
+
+#### GAP-3: 批量运行脚本
+
+**现状**：P-Flow 的 `run.py` 只支持单条视频输入，无法批量跑 200 条。
+
+**行动**：
+- [ ] 新建 `P-Flow/scripts/run_batch_200.py`
+- [ ] 逻辑：读取 `selected_200.csv` → 遍历每条样本 → 调用 pipeline → 取最优迭代视频 → 输出到统一目录
+- [ ] 输出格式：`/root/autodl-tmp/outputs/batch_200_final/{id}.mp4`（与同门的 `wan_out_last100/{id}.mp4` 对齐）
+
+#### GAP-4: 生成参数统一
+
+**现状**：
+
+| 参数 | Video2Prompt | P-Flow | 差异 |
+|------|-------------|--------|------|
+| steps | 30 | 50 | ⚠️ 不一致 |
+| guidance_scale | 5.0 | 5.0 | ✅ |
+| height×width | 480×832 | 480×832 | ✅ |
+| num_frames | 81 | 81 | ✅ |
+| fps | 15 | 16 | ⚠️ 微小差异 |
+| seed | 42 + sample_id | 42 | ⚠️ 不一致 |
+| negative_prompt | 相同长文本 | 相同长文本 | ✅ |
+
+**行动**：
+- [ ] 决定统一 steps：建议都用 50（质量更好），或在论文中注明差异
+- [ ] fps 差异影响极小（15 vs 16），可忽略或统一为 16
+- [ ] seed 策略：P-Flow 批量运行时也用 `seed = 42 + sample_id` 保持可复现
+
+#### GAP-5: 评测脚本集成
+
+**现状**：P-Flow 的评测（`evaluation/`）只有 per-iteration 指标（SSIM/CLIP/Motion），缺少集合级指标（CLIP/X-CLIP/STREAM）。
+
+**行动**：
+- [ ] 安装 `v-stream`：`pip install v-stream`
+- [ ] 集合级评测直接调用同门的脚本（路径已在 9.2 节说明）
+- [ ] 或将同门的评测逻辑封装到 `P-Flow/evaluation/eval_batch.py` 中
+
+#### GAP-6: 最优迭代选择策略
+
+**现状**：P-Flow 跑 10 轮迭代，需要从中选出"最优"的一轮作为最终输出参与集合级评测。
+
+**行动**：
+- [ ] 策略选项：(a) 取最后一轮 (b) 取 CLIP-Sim 最高的一轮 (c) 取 SSIM 最高的一轮
+- [ ] 建议：取 CLIP-Sim 最高的一轮（与评测指标一致）
+- [ ] 在 `run_batch_200.py` 中实现自动选优逻辑
+
+### 15.3 执行优先级
+
+```
+P0 (必须先做):
+  1. 获取 200 条原始视频 → 放到服务器
+  2. pip install v-stream
+  3. 写 run_batch_200.py
+
+P1 (跑实验前):
+  4. 统一生成参数 (steps/seed)
+  5. 确认 caption 数据路径
+
+P2 (跑完实验后):
+  6. 运行集合级评测
+  7. 整理对比表格
+```
+
+---
+
+## 十六、参考文献
 
 1. P-Flow: Prompting Visual Effects Generation. arXiv:2603.22091
 2. Reverse Prompt Engineering. github.com/cyprivlab/reverse-prompt-engineering

@@ -1,0 +1,123 @@
+# P-Flow Experiment Configuration (Unified)
+# ============================================================
+# Single config file for both baseline and pflow methods.
+#
+# Usage:
+#   python run_batch.py --method baseline --config configs/batch_experiment.yaml
+#   python run_batch.py --method pflow --config configs/batch_experiment.yaml
+#
+# All parameters are aligned with Video2Prompt collaborator for fair comparison.
+# ============================================================
+
+# ============================================================
+# Model Configuration
+# ============================================================
+model:
+  t2v_path: "/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers"
+  dtype: "bfloat16"
+
+# ============================================================
+# Video Generation Settings (aligned with Video2Prompt)
+# ============================================================
+# Key alignment decisions:
+#   - steps: 30 (same as collaborator's run_wan_batch_last100.py)
+#   - guidance_scale: 5.0 (same)
+#   - resolution: 480x832 (same)
+#   - num_frames: 81 (same)
+#   - fps: 15 (same as collaborator, NOT 16)
+#   - seed: 42 + sample_id (same strategy as collaborator)
+video:
+  height: 480
+  width: 832
+  num_frames: 81         # 81 frames / 15fps ~ 5.4s
+  fps: 15                # Aligned with collaborator (15, not 16)
+  guidance_scale: 5.0
+  num_inference_steps: 30  # Aligned with collaborator (30, not 50)
+
+# ============================================================
+# Noise Prior Enhancement (P-Flow only, ignored by baseline)
+# ============================================================
+# The noise prior encodes motion dynamics from the reference video.
+# eta = sqrt(alpha) * eta_temporal + sqrt(1-alpha) * eta_random
+noise_prior:
+  alpha: 0.001           # P-Flow optimal (validated by ablation)
+  rho_s: 0.1             # Spatial SVD energy threshold (remove content)
+  rho_m: 0.9             # Temporal SVD energy threshold (keep motion)
+  inversion_steps: 50    # Flow matching inversion ODE steps
+  guidance_scale: 1.0    # No guidance during inversion
+
+# ============================================================
+# Iterative Optimization (P-Flow only, ignored by baseline)
+# ============================================================
+optimization:
+  i_max: 10              # Fixed 10 iterations, no early stopping
+
+# ============================================================
+# VLM Settings (Qwen2.5-VL-7B, local inference)
+# ============================================================
+# Used by:
+#   - baseline: one-shot captioning
+#   - pflow: initial captioning + iterative refinement
+vlm:
+  provider: "local"
+  model_path: "/root/models/Qwen2.5-VL-7B-Instruct"
+  temperature: 0.7
+  max_tokens: 2048
+  max_retries: 3
+  use_video_mode: true
+  quantization: null      # null=bf16 (best quality), "4bit", "8bit"
+  lazy_load: true         # Load only when needed, release after use
+
+# ============================================================
+# Trajectory Settings (P-Flow only)
+# ============================================================
+trajectory:
+  max_videos_to_vlm: 3   # V_ref, V_{i-1}, V_i (vertical composite)
+  keep_all_text_history: true
+  composite_layout: "vertical"
+
+# ============================================================
+# Data Paths
+# ============================================================
+data:
+  # 200 high-motion videos from MovieGenVideoBench
+  video_dir: "/root/autodl-tmp/data/video-200/water_mark_out"
+  # Pre-computed Qwen captions (shared with collaborator)
+  caption_dir: "/root/autodl-tmp/data/video-200/captions_qwen"
+
+# ============================================================
+# Output Paths
+# ============================================================
+output:
+  baseline_dir: "/root/autodl-tmp/outputs/baseline_batch"
+  pflow_dir: "/root/autodl-tmp/outputs/pflow_batch"
+  save_all_iterations: true
+  save_composites: true
+
+# ============================================================
+# Evaluation Models (for run_clip_xclip_eval.py / run_stream_eval.py)
+# ============================================================
+evaluation:
+  clip_model: "/root/autodl-tmp/models/clip-vit-base-patch32"
+  xclip_model: "/root/autodl-tmp/models/xclip-base-patch32"
+  stream_model: "dinov2"
+  stream_num_frames: 16
+  stream_resize_width: 448
+  stream_resize_height: 256
+  sample_frames_clip: 8
+
+# ============================================================
+# Hardware Notes (AutoDL A800 80GB)
+# ============================================================
+# Memory usage:
+#   - Wan2.1-1.3B: ~2.6GB bfloat16
+#   - Qwen2.5-VL-7B: ~14GB bfloat16
+#   - CLIP + X-CLIP: ~0.5GB total
+#   - Peak during generation: ~16GB
+#   - Both models can coexist in VRAM
+#
+# Timing estimates (single A800):
+#   Baseline per sample: ~30-40s (caption ~10s + generation ~20-30s @ 30 steps)
+#   P-Flow per sample: ~7-10 min (10 iterations × ~40-60s each @ 30 steps)
+#   Baseline 200 samples: ~1.5-2 hours
+#   P-Flow 200 samples: ~23-33 hours
