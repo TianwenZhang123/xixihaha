@@ -1,0 +1,201 @@
+id,motion_level,concept,prompt,prompt_len
+7,high,physics - fluid dynamics,Photorealistic closeup video of two pirate ships battling each other as they sail inside a cup of coffee.,105
+17,high,"physics - acceleration,camera motion","The camera follows behind a white vintage SUV with a black roof rack as it speeds up a steep dirt road surrounded by pine trees on a steep mountain slope, dust kicks up from it’s tires, the sunlight shines on the SUV as it speeds along the dirt road, casting a warm glow over the scene. The dirt road curves gently into the distance, with no other cars or vehicles in sight. The trees on either side of the road are redwoods, with patches of greenery scattered throughout. The car is seen from the rear following the curve with ease, making it seem as if it is on a rugged drive through the rugged terrain. The dirt road itself is surrounded by steep hills and mountains, with a clear blue sky above with wispy clouds.",718
+21,high,unusual activity,"A flock of paper airplanes flutters through a dense jungle, weaving around trees as if they were migrating birds.",113
+31,high,unusual activity,"New York City submerged like Atlantis. Fish, whales, sea turtles and sharks swim through the streets of New York.",113
+32,high,animal,"A litter of golden retriever puppies playing in the snow. Their heads pop out of the snow, covered in.",102
+33,high,human - activity,"Step-printing scene of a person running, cinematic film shot in 35mm.",69
+34,high,animal,"Five gray wolf pups frolicking and chasing each other around a remote gravel road, surrounded by grass. The pups run and leap, chasing each other, and nipping at each other, playing.",182
+43,high,"animal,camera motion","A white and orange tabby cat is seen happily darting through a dense garden, as if chasing something. Its eyes are wide and happy as it jogs forward, scanning the branches, flowers, and leaves as it walks. The path is narrow as it makes its way between all the plants. the scene is captured from a ground-level angle, following the cat closely, giving a low and intimate perspective. The image is cinematic with warm tones and a grainy texture. The scattered daylight between the leaves and plants above creates a warm contrast, accentuating the cat’s orange fur. The shot is clear and sharp, with a shallow depth of field.",623
+46,high,unusual subject,"A giant, towering cloud in the shape of a man looms over the earth. The cloud man shoots lighting bolts down to the earth.",122
+47,high,animal,A Samoyed and a Golden Retriever dog are playfully romping through a futuristic neon city at night. The neon lights emitted from the nearby buildings glistens off of their fur.,176
+50,high,unusual activity,A white cat driving in a car through a busy downtown street with tall buildings and pedestrians in the background,113
+70,high,scene,Subtle reflections of a woman on the window of a train moving at hyper-speed in a Japanese city.,96
+72,high,"scene,camera motion",FPV flying through a colorful coral lined streets of an underwater suburban neighborhood.,89
+73,high,scene,An empty warehouse dynamically transformed by flora that explode from the ground.,81
+74,high,unusual subject,Close up shot of a living flame wisp darting through a bustling fantasy market at night.,88
+76,high,"scene,camera motion",A FPV shot zooming through a tunnel into a vibrant underwater space.,68
+78,high,scene,Ultra-fast disorienting hyperlapse racing through a tunnel into a labyrinth of rapidly growing vines.,101
+79,high,"scene,camera motion","FPV, internal locomotive cab of a train moving at hyper-speed in an old European city.",86
+80,high,"scene,camera motion",Zooming in hyper-fast to a dandelion to reveal macro dream-like abstract world.,79
+81,high,scene,Internal window of a train moving at hyper-speed in an old European city.,73
+82,high,"scene,camera motion","Handheld camera moving fast, flashlight light, in a white old wall in a old alley at night a black graffiti that spells ‘Runway’.",129
+83,high,"scene,camera motion",Super fast zoom out from the peak of a frozen mountain where a lonely hiker is arriving to the summit.,102
+84,high,"unusual activity,scene,camera motion",A first-person POV shot rapidly flies through open doors to reveal a surreal waterfall cascading in the middle of the living room.,130
+85,high,"scene,camera motion",A first-person POV shot rapidly flies towards a house's front door at 10x speed.,80
+88,high,scene,"A tsunami coming through an alley in Bulgaria, dynamic movement.",64
+99,high,human - activity,Aerial view shot of a cloaked figure elevating in the sky between skyscrapers.,78
+104,high,unusual subject,"A giant humanoid, made of fluffy blue cotton candy, stomping on the ground, and roaring to the sky, clear blue sky behind them.",127
+105,high,"scene,camera motion",Zooming through a dark forest with neon light flora lighting up.,64
+106,high,scene,A cyclone of broken glass in an urban alleyway. dynamic movement.,65
+111,high,"scene,camera motion",Aerial shot of a drone moving fast in a dense green jungle.,59
+112,high,unusual activity,Hyperlapse shot through a corridor with flashing lights. A silver fabric flies through the entire corridor.,107
+113,high,unusual activity,Aerial shot of the ocean. a maelstrom forms in the water swirling around until it reveals the fiery depths below.,113
+116,high,"human - activity,camera motion",Over the shoulder shot of a woman running and watching a rocket in the distance.,80
+120,high,unusual activity,A pink pig running fast toward the camera in an alley in Tokyo.,63
+124,high,"unusual activity,unusual activity,sequential motion","A lightning bolt strikes a turtle in the middle of a lake, immediately turning him into an alligator.",101
+128,high,physics - acceleration,A group of vintage muscle cars rev their engines before drag racing down a straight strip of asphalt.,101
+135,high,"unusual activity,unusual subject",humans walking into a dragon's open jaws descending into the underworld,71
+136,high,scene,"A police helicopter hovers above a high-speed chase, guiding officers on the ground to apprehend a suspect.",107
+139,high,human - activity,A squad of futsal players showcasing their skills on an indoor court.,69
+143,high,"unusual activity,sequential motion",A fish jumps out of a fish tank and swims around someone's head in the air,74
+146,high,animal,"A cat is chasing a mice across a field, the mice runs towards an underground hole and the cat is left disappointed.",115
+156,high,human - activity,A synchronized diving pair gracefully executing a synchronized dive.,68
+157,high,unusual activity,A guitar is being swallowed by a volcano and engulfed in magma.,63
+159,high,physics - acceleration,"A yellow school bus chugs up a steep hill, its engine roaring as it conquers the incline.",89
+164,high,human - activity,"A motorcycle stunt rider soars through the air, executing a daring backflip over a ramp.",88
+168,high,human - activity,A marathon runner crossing the finish line after a grueling race.,65
+170,high,unusual activity,A penguin flies into the mouth of a blue whale breaking the surface of the water.,81
+172,high,human - activity,"a real girl franatically running a dense forest with bushes, trees, in rainy day, the animals are running after her and she is screaming and shouting",149
+175,high,animal,An orange cat jumps onto a kitchen counter after seeing butter there.,69
+177,high,human - activity,"A group of skateboarders perform tricks on ramps and rails at a skate park, showcasing their skills.",100
+178,high,animal,A ferret tosses a ball with his mouth and a puppy chases after it.,66
+183,high,human - activity,A soccer goalie making a diving save with outstretched arms,59
+184,high,human - activity,"A bulldozer clears debris from a demolished building, making way for new construction.",86
+186,high,animal,A cat leaps out of a carboard box in a very high arch and lands into a taller box sitting next to the original box.,115
+193,high,physics - gravity,A truck rolling backwards down a hill while a family chases it with balloons and cakes in their arms.,101
+195,high,human - activity,A person performing a graceful routine on the uneven bars in gymnastics.,72
+197,high,human - activity,"A girl grows wings on her feet, soars across North America.",59
+202,high,physics - acceleration,A silver sedan gracefully glides around a sharp corner on a scenic mountain road.,81
+228,high,human - emotion,The person's cheeks flushed with embarrassment as he tripped in public.,71
+243,high,human - emotion,"The person jumps up and down excitedly, expressing happiness through dance moves.",81
+244,high,human - emotion,A close-up shot of the person's face reveals his fear and desperation as he navigates the ship through the storm.,113
+247,high,camera motion,Static camera shot. A dinasour running near some lions and chasing them away.,77
+258,high,unusual activity,"An extreme wide low angle establishing shot from street level looking up at a city at dusk. High above the ground a garbage truck is floating and spinning as garbage falls out of it, defying gravity.",199
+260,high,"human - activity,camera motion","A low altitude first person perspective camera tracking shot of a soccer player's feet dribbling the ball on the groud in a soccer field, Sports Videography, Motion Tracking camera shot",185
+262,high,physics - collision,"Hands squeezing a vibrant water ball, causing it to burst with multicolored liquid",82
+272,high,physics - acceleration,"In a marathon race, a female athlete gradually sprints ahead of the male athletes.",82
+278,high,"unusual activity,sequential motion",A bunny puts the bright moon on its back and flies into the distance.,69
+280,high,unusual activity,"Whilst a man and woman are walking through a city street in a dream, the man shows the woman how to fold the entire street upwards at a 90-degree angle and connect it with the sky. This creates a visually stunning effect, with the buildings and road bending and defying gravity. The scene highlights the limitless possibilities and creativity within the dream world.",366
+283,high,physics - collision,Two basketballs are thrown towards each other and collide mid-air.,66
+285,high,unusual activity,"The tall skyscapers in Hong Kong suddenly transform into a moving Gundam robot, cinematic CGI",93
+289,high,"scene,camera motion",A drone view of the camera zooming into a closet. The other end gradually opens and reveals a pyramid world,107
+290,high,scene,A rollercoaster ride from a city to a desert and then to an ice world,69
+294,high,human - activity,An Asian girl wearing a bright yellow T-shirt and white pants is Hip-Hop dancing,80
+297,high,scene,"A female warrior rushes towards the camera, and suddenly she turns into a holographic monster.",94
+340,high,human - emotion,"Close-up of a man's face, muscles tensed and eyes narrowed in fury. His nostrils flare, and his jaw clenches tightly, exuding intense anger. He breathes heavily through his nose, his eyes burning with rage. Hyperspeed, dynamic motion, fiery.",241
+341,high,physics - collision,"A dramatic scene of two cars colliding at an intersection, with shattered glass and debris flying in the air, capturing the intensity and impact of the crash.",158
+343,high,physics - collision,"A close-up of two football players colliding during a game, their helmets and bodies crashing together with force, highlighting the physicality and intensity of the sport.",171
+344,high,physics - collision,"A breathtaking image of a meteor colliding with the surface of a planet, with bright flames and a massive explosion, illustrating the power and destruction of such an event.",173
+345,high,physics - collision,"A skateboarder losing control and colliding with a park bench, the board flipping into the air.",95
+346,high,"physics - collision,human - activity,camera motion","The camera zooms in on a fast-paced ping-pong game, focusing on the rapid back-and-forth movement of the ball.",110
+347,high,physics - collision,"A bird flying into a glass window, wings outstretched in shock.",63
+348,high,physics - collision,"A shopping cart rolling down a hill and colliding with a parked car, groceries scattering.",90
+350,high,physics - fluid dynamics,"A high-speed video of raindrops hitting a puddle, causing ripples and splashes.",79
+351,high,physics - fluid dynamics,"A video of a water jet cutting through metal, showing the powerful and precise movement of water.",97
+353,high,physics - fluid dynamics,"A slow-motion capture of a water balloon bursting, with water forming a perfect sphere before collapsing.",105
+355,high,physics - fluid dynamics,"A close-up of a waterfall, showing the detailed movement of water as it crashes down.",85
+356,high,physics - fluid dynamics,"A high-speed video of a soap bubble popping, with the soapy liquid dispersing in all directions.",96
+359,high,physics - acceleration,A runner accelerating up a hill during a cross-country race.,60
+361,high,physics - acceleration,"A speedboat accelerating across a lake, creating a large wake.",62
+362,high,physics - acceleration,A horse accelerating out of the starting gate at the beginning of a race.,73
+363,high,"physics - gravity,physics - acceleration","A rocket blasting off from the launch pad, accelerating rapidly into the sky.",77
+367,high,physics - gravity,A meteor entering the Earth’s atmosphere and falling to the ground.,67
+370,high,"unusual activity,unusual activity","low-fi handheld camera footage of a man transforming into a superhero, set in the forest of the Pacific Northwest",113
+373,high,"unusual activity,unusual activity",A man is running in the forest and transforms into a wolf.,58
+382,high,animal,"a white and orange tabby alley cat is seen darting across a back street alley in a heavy rain, looking for shelter",114
+397,high,human - activity,a man BASE jumping over tropical hawaii waters. His pet macaw flies alongside him,81
+402,high,"animal,unusual activity",Cinematic trailer for a group of adventurous puppies exploring ruins in the sky,79
+406,high,"unusual activity,unusual activity","A surreal collage of a whirlwind of colorful fabrics and clothing items, fluttering and swirling in mid-air. The scene is dynamic and fashionable, with vibrant textile patterns. A sense of motion and style create a visually striking and complex scene. Pitch black background.",275
+407,high,"unusual activity,unusual activity","A dynamic motion shot of a lamp transforming into a flamingo. The curved neck of the lamp elongates, its shade flattening into a delicate head. The camera circles as the base splits into two spindly legs, the bulb socket becoming a beak. Pink hues wash over the metal surface, transforming into soft feathers. The power cord coils and disappears as the transformation completes, revealing a graceful flamingo balancing on one leg.",430
+408,high,"unusual activity,unusual activity","A dynamic motion shot of a broom morphing surreal and magically into a peacock. The handle shortens and curves into a slender neck, the bristles fanning out into a magnificent tail. The camera moves around as vibrant colors and eye-shaped patterns emerge on the expanding feathers. A small head forms at the top, complete with a delicate crest. The transformation completes as the peacock proudly displays its newly formed plumage.",431
+409,high,"unusual activity,unusual activity","A dynamic motion shot of a plant transforming into an octopus. The green leaves of the plant begin to elongate and twist, turning into flexible, writhing tentacles. The camera circles as the stem thickens and expands, morphing into the bulbous head of an octopus, its texture shifting to a mottled pattern of green. The transformation completes with the plant revealing a fully formed octopus, its tentacles moving gracefully in the water.",439
+419,high,physics - collision,"A marble goes through a glass cup, breaking it into pieces.",59
+431,high,human - activity,"A first-person view of running upstairs in a hurry, with the person's feet visible as they take each step.",106
+454,high,physics - fluid dynamics,A video showing the complex movement of a whirlpool in a river.,63
+455,high,physics - fluid dynamics,"A high-speed video of champagne being poured into a glass, with bubbles rising rapidly.",87
+456,high,physics - fluid dynamics,A slow-motion video of a liquid droplet bouncing on a water-repellent surface.,78
+458,high,physics - fluid dynamics,"A close-up of a fountain, showing the detailed movement of water as it shoots upwards.",86
+461,high,physics - fluid dynamics,"A high-speed video of a drink being stirred with a spoon, capturing the swirling motion of the liquid.",102
+466,high,physics - fluid dynamics,"A high-speed video of a syringe injecting liquid into a vial, capturing the detailed flow and bubbles.",102
+468,high,physics - fluid dynamics,A high-speed video of a splash created by a stone thrown into a pond.,69
+471,high,physics - fluid dynamics,A mesmerizing video of a whirlpool forming in a sink as water drains.,69
+474,high,physics - fluid dynamics,"A video of a river rapid, showing the turbulent and fast-moving water.",70
+475,high,physics - fluid dynamics,"A high-speed video of a water-filled balloon being sliced open, with water flowing out in a controlled manner.",110
+477,high,physics - fluid dynamics,"A close-up of a beverage can being opened, capturing the detailed spray and bubbles.",84
+479,high,physics - fluid dynamics,A high-speed video of a liquid droplet forming and falling from a faucet.,73
+491,high,scene,"Flying cars zoom through a futuristic cityscape, maneuvering around towering skyscrapers while lights flicker on the buildings, creating a constantly shifting pattern.",167
+526,high,scene,"A futuristic spaceport hums with activity as ships of various shapes and sizes take off and land on multiple platforms, their engines glowing with vibrant colors.",162
+555,high,unusual subject,"A group of robots with mechanical limbs and sensors engage in a playful snowball fight, their precise throws and dodges showing unexpected agility as snowballs fly across the snowy field.",187
+556,high,unusual activity,"Characters from famous paintings step out of their frames into a snowy world, throwing snowballs at each other.",111
+557,high,human - activity,"A couple runs through a sudden downpour, laughing and splashing in puddles as they try to find shelter.",103
+560,high,"animal,unusual activity","A squirrel wearing a tiny aviator hat and goggles, piloting a miniature airplane through a park.",96
+569,high,"animal,unusual activity","A bear wearing a superhero cape, flying through the sky over a bustling city.",77
+575,high,"animal,unusual activity","A butterfly in a tiny race car, speeding around a track made of flowers.",72
+577,high,"animal,unusual activity","A fox wearing a pirate hat and eyepatch, steering a ship through a stormy sea.",78
+578,high,"animal,unusual activity","A turtle in a racing suit, riding a skateboard down a steep hill.",65
+580,high,"animal,unusual activity","A kangaroo wearing boxing gloves, sparring with a punching bag in a gym.",72
+590,high,"human - activity,unusual activity",A person riding a bicycle on a tightrope strung between two skyscrapers.,72
+591,high,"human - activity,unusual activity","A person swimming through the air as if it were water, surrounded by floating fish.",83
+605,high,"human - activity,unusual activity","A person flying a kite made of fire, with the tail leaving a trail of sparks.",77
+610,high,"human - activity,unusual activity","A person juggling planets in a cosmic circus, each planet glowing brightly.",75
+612,high,"human - activity,unusual activity",A person painting graffiti on the side of a flying spaceship.,61
+617,high,"human - activity,unusual activity","A person playing an electric guitar made of lightning, with thunderous sound waves.",83
+627,high,"human - activity,unusual activity",A person running on a treadmill that moves through different dimensions.,72
+629,high,"human - activity,unusual activity","A person diving into a pool of liquid crystal, creating ripples of light.",73
+633,high,"human - activity,unusual activity",A person skydiving from a hot air balloon into a sea of clouds.,63
+636,high,"human - activity,unusual activity","A person playing a drum set made of thunderclouds, with each beat creating a lightning flash.",93
+641,high,"scene,unusual activity,unusual activity",Pouring milk into a bowl that transitions to a vast ocean with a whale being thrown around by the giant waves.,110
+642,high,physics - collision,"A dog colliding with a cat while chasing it, both tumbling over.",64
+643,high,physics - collision,"A person on a Segway colliding with a pedestrian, both falling over.",68
+645,high,physics - collision,"A cyclist colliding with a stop sign, the sign bending slightly.",64
+646,high,physics - collision,"Two RC planes colliding mid-air, pieces scattering in all directions.",69
+647,high,physics - collision,"A person walking while texting and colliding with a lamppost, the phone falling.",80
+648,high,physics - collision,"A skateboarder colliding with a curb, the board flipping up.",60
+650,high,physics - collision,"Two people on roller skates colliding in a rink, both spinning out of control.",78
+651,high,physics - collision,"A person on a hoverboard colliding with a wall, the board stopping abruptly.",76
+652,high,physics - collision,"Two boats colliding in a marina, the sound of wood and metal clashing.",70
+653,high,physics - collision,"A person on a scooter colliding with a park bench, the scooter tipping over.",76
+654,high,physics - acceleration,"A skateboarder accelerating down a steep hill, gaining speed rapidly.",69
+655,high,physics - acceleration,A cheetah accelerating to full speed while chasing its prey.,60
+656,high,physics - acceleration,"A high-speed train accelerating out of a station, quickly reaching top speed.",77
+657,high,physics - acceleration,"A spaceship entering hyperdrive, stars streaking past as it accelerates.",72
+658,high,physics - acceleration,"A drag racer accelerating down the track, flames shooting from the exhaust.",75
+659,high,physics - acceleration,"A sports car accelerating rapidly on an open highway, the engine roaring.",73
+660,high,physics - acceleration,"A jet fighter accelerating off an aircraft carrier deck, quickly gaining altitude.",82
+661,high,physics - acceleration,"A speedboat accelerating across a lake, creating a large wake.",62
+662,high,physics - acceleration,A skier accelerating down a steep slope during a downhill race.,63
+663,high,physics - acceleration,"A drone accelerating through a forest, weaving between trees.",61
+664,high,physics - acceleration,A horse accelerating out of the starting gate at the beginning of a race.,73
+665,high,physics - acceleration,"A dog accelerating after being let off the leash, running towards a ball.",73
+666,high,physics - acceleration,A helicopter accelerating as it lifts off from the ground.,58
+668,high,physics - acceleration,"A jet ski accelerating across the water, creating large splashes.",65
+669,high,physics - acceleration,A racehorse accelerating on the final stretch towards the finish line.,70
+671,high,physics - acceleration,"A base jumper accelerating after leaping off a cliff, free-falling.",67
+672,high,physics - acceleration,A cyclist accelerating out of the saddle during a steep climb.,62
+673,high,physics - acceleration,"A longboarder accelerating downhill, carving through turns.",59
+674,high,physics - acceleration,A skydiver accelerating during free fall before deploying the parachute.,72
+675,high,physics - acceleration,A motocross bike accelerating out of a tight turn on a dirt track.,66
+677,high,physics - acceleration,"A snowboarder accelerating down a powdery slope, weaving between trees.",71
+678,high,physics - acceleration,A race car accelerating through a chicane on a race track.,58
+679,high,physics - acceleration,"A surfer accelerating on a wave, carving through the water.",59
+692,high,unusual activity,Macro shot of a man wearing an antique diving helmet with dark glass and a jetpack walking on lava as a dragon flies behind him in the sky. Realistic style,155
+695,high,human - activity,"Tracking camera, FPV shot, A scooter zooms through the aisles of a crowded supermarket, skidding around corners, and leaping over shopping carts. The scene blends everyday chaos with high-speed action, creating a thrilling, grocery-store race. Hyperspeed, dynamic motion.",271
+700,high,physics - deformation,"A rubber band being stretched to its maximum length and then released, snapping back to its original shape.",107
+701,high,physics - deformation,"A metal spring being compressed by a heavy weight, then released and bouncing back to its original form.",104
+704,high,physics - deformation,"A trampoline surface bending under the weight of a person jumping on it, then springing back up as they jump off.",113
+706,high,physics - deformation,"A piece of elastic fabric being pulled and stretched, then returning to its original size when the tension is released.",119
+707,high,physics - deformation,A plastic ruler being bent until it snaps back into its straight form when released.,84
+729,high,physics - thermodynamics,"A droplet of water falling onto a hot surface, instantly evaporating into a wisp of steam that swirls gracefully into the air.",126
+735,high,physics - thermodynamics,"A high-speed capture of a water balloon being popped, showing the liquid form maintaining its shape momentarily before cascading down.",134
+756,high,"camera motion,human - activity","A low-angle shot of a dancer leaping gracefully into the air, making their movement appear even more dynamic and powerful.",122
+759,high,"camera motion,human - activity","A first-person view of a cyclist riding through a bustling city street, weaving through traffic and pedestrians.",112
+761,high,"camera motion,human - activity","A first-person view of a surfer paddling out and catching a wave, the water rushing around them as they ride.",109
+780,high,"camera motion,scene","An aerial shot of a bustling city intersection at rush hour, capturing the organized chaos of cars and pedestrians.",115
+792,high,"camera motion,scene","A truck left alongside a train moving through the countryside, matching its speed and revealing the changing landscape.",119
+800,high,"camera motion,scene","A truck right through a bustling street market, passing stalls filled with vibrant fruits, vegetables, and spices.",114
+802,high,"camera motion,scene","A truck right through a tranquil garden, moving past blooming flowers, trees, and a small fountain.",99
+829,high,"camera motion,scene","A push-in through a dense crowd at a festival, moving towards a performer on stage who is captivating the audience.",115
+844,high,"camera motion,scene","A handheld shot following a child running through a field of tall grass, capturing the spontaneity and playfulness of their movements.",134
+848,high,"camera motion,scene","A handheld camera following a dog running through a park, bouncing and tilting as it captures the dog's joyful exploration.",123
+849,high,"camera motion,human - activity","A tracking shot following a skateboarder performing tricks down a city street, keeping pace with their fluid movements.",119
+850,high,"camera motion,scene","A tracking shot of a car driving along a winding mountain road, with the landscape changing around it.",102
+852,high,"camera motion,human - activity","A tracking shot of a group of cyclists racing through a forest trail, with trees and foliage rushing by.",104
+853,high,"camera motion,scene","A tracking shot of a train traveling through a snowy landscape, the scenery changing rapidly as it moves forward.",113
+857,high,unusual subject,"A rapid tracking shot of small, big-eared gremlins on a wooden rollercoaster in a midcentury theme park. The gremlins have thin, scaly green skin with brown and black flecks. They stretch their spindly arms up and scream with wide, toothy grins as they race down a steep drop. The rollercoaster's honey-brown wooden tracks contrast with the bright, neon theme park colors. In the background, the ocean glimmers, its waves crashing against the shore, capturing the nostalgia of 1980s horror movies.",497
+858,high,unusual activity,"Tracking shot. Cinematic scene. A 19th century scuba diver runs down a busy street in New York City. The light is natural and warm, glinting off of the diver's suit. The diver's suit is burnished and old, held together with rusted bolts. The diver's helmet is round, with a black round glass porthole in the front. All around the diver, people walk down the street in period specific attire, such as large corset dresses with sweeping skirts, tailored suits, and top hats. The scene should feel joyful and amusing, heightening the thrill of the running diver.",559
+859,high,"unusual subject,camera motion","Camera tracking shot. A gigantic flying monster flies through midcentury new york city skyscrapers breathing and spewing fire from its open mouth. The light is overly-saturated and intense, making the monster glow with intensity. The monster darts through the sky, shooting enormous flames from its open mouth that engulf the entire scene. the flames are huge and are directed at buildings an the ground. The monster has the face of a dragon, the claws of an eagle, and huge leathery wings that are frayed and scarred. The footage should feel cinematic and premium, like an action movie. The scene should convey a fast-paced action and thrill.",643
+862,high,"unusual subject,camera motion","Over the shoulder camera shot. A huge lizard creature sits in a midcentury orange swivel chair. The light is dim and volumetric, casting an eerie glow across the scene. The creature uses its arms to maniacally push buttons on a gigantic control panel. Above the control panel is a panoramic window looking out and down on 1940s new york city. The room should invoke midcentury science fiction aesthetics, like rusty orange colors, bright flashing control buttons, and space-age flair. As the creature continues to quickly push buttons, the New York City scene out of the window moves closer, as though the creature is in a gigantic robot stomping through the city. The scene should give the feeling of frantic action, highlighting the intensity of piloting a giant robot. The scene should take inspiration from midcentury japanese monster films.",845
+867,high,scene,"Slow-motion fiery volcanic landscape, with lava spewing out of craters. the camera flies through the lava and lava splatters onto the lens. The lighting is cinematic and moody. The color grade is cinematic, dramatic, and high-contrast.",235
+873,high,unusual activity,vintage rocket man with a black glass face shield on a spaceship flying through a blood vessel with large red blood cells,121
+879,high,human - activity,"Tracking camera, FPV shot, A scooter zooms through the aisles of a crowded supermarket, skidding around corners, and leaping over shopping carts. The scene blends everyday chaos with high-speed action, creating a thrilling, grocery-store race. Hyperspeed, dynamic motion.",271

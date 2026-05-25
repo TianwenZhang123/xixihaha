@@ -1,0 +1,7 @@
+{
+  "selection_rule": "Top 200 rows with motion_level=high ranked by prompt length descending; tie-break by smaller id.",
+  "total_csv_rows": 1003,
+  "total_high_rows": 265,
+  "selected_count": 200,
+  "video_subdir": "water_mark_out"
+}
