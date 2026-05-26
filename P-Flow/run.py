@@ -1,29 +1,37 @@
 #!/usr/bin/env python3
 """
-Video Reproduction via Iterative Prompt Optimization.
+P-Flow Runner - 通过命令行 flag 控制各改动点。
 
-Given a reference video, this script iteratively optimizes a T2V prompt
-so that the generated video faithfully reproduces the reference.
+用法:
+    # 纯 baseline (caption + 一次生成)
+    python run.py --video /path/to/ref.mp4 --caption "a cat walking"
 
-Usage:
-    # Basic: provide a reference video + initial prompt
-    python run.py --video reference.mp4 --prompt "a cat jumping on a table"
+    # 启用噪声先验 (inversion + svd + blend)
+    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend
 
-    # Auto-generate initial prompt from video (recommended)
-    python run.py --video reference.mp4 --auto_prompt
+    # 启用迭代优化 (10轮VLM反馈)
+    python run.py --video /path/to/ref.mp4 --caption "a cat" --iter 10
 
-    # With hint for auto-prompt
-    python run.py --video reference.mp4 --auto_prompt --hint "a cat playing"
+    # 完整 P-Flow (所有改动点)
+    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --iter 10 --composite
 
-    # Adjust motion guidance strength (alpha)
-    python run.py --video reference.mp4 --prompt "..." --alpha 0.2
+    # 用中点法替代Euler
+    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --midpoint
 
-    # Quick test with mock VLM (no API key needed)
-    python run.py --video reference.mp4 --prompt "..." --mock_vlm
+    # 批量处理
+    python run.py --data_dir /path/to/videos --caption_dir /path/to/captions --inversion --svd --blend --iter 10
 
-    # Full config
-    python run.py --video reference.mp4 --auto_prompt \
-        --config configs/paper_default.yaml --seed 42 --alpha 0.1
+改动点 Flag 说明:
+    --inversion    启用 Flow Matching Inversion (从参考视频反演噪声)
+    --svd          启用 SVD 两阶段滤波 (空间去内容 + 时间保运动)
+    --blend        启用噪声混合 (η = sqrt(α)*η_temporal + sqrt(1-α)*η_random)
+    --iter N       启用迭代VLM优化 (N轮反馈循环)
+    --midpoint     使用二阶中点法ODE求解器 (替代默认Euler)
+    --composite    启用三面板垂直拼接 (ref|prev|current 送VLM对比)
+
+快捷组合:
+    --noise_prior  等价于 --inversion --svd --blend
+    --full         等价于 --inversion --svd --blend --iter 10 --composite
 """
 
 import sys
@@ -31,123 +39,195 @@ import argparse
 import logging
 from pathlib import Path
 
-# Setup path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.pipeline import PFlowPipeline
+from src.pipeline import PFlowPipeline, PFlowConfig
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="P-Flow: 通过 flag 控制各改动点的视频生成管线",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    # ── 输入 ──
+    p.add_argument("--video", type=str, help="单个参考视频路径")
+    p.add_argument("--caption", type=str, default="", help="初始 caption")
+    p.add_argument("--data_dir", type=str, help="批量模式: 视频目录")
+    p.add_argument("--caption_dir", type=str, help="批量模式: caption目录")
+    p.add_argument("--output_dir", type=str, default="outputs", help="输出目录")
+    p.add_argument("--sample_ids", type=int, nargs="+", help="指定样本ID")
+    p.add_argument("--limit", type=int, help="最多处理N个样本")
+
+    # ── 改动点开关 ──
+    p.add_argument("--inversion", action="store_true", help="启用 Flow Matching Inversion")
+    p.add_argument("--svd", action="store_true", help="启用 SVD 滤波")
+    p.add_argument("--blend", action="store_true", help="启用噪声混合")
+    p.add_argument("--iter", type=int, default=0, help="迭代轮数 (0=不迭代)")
+    p.add_argument("--midpoint", action="store_true", help="使用中点法ODE求解器")
+    p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
+
+    # ── 快捷组合 ──
+    p.add_argument("--noise_prior", action="store_true", help="快捷: --inversion --svd --blend")
+    p.add_argument("--full", action="store_true", help="快捷: 全部启用 (iter=10)")
+
+    # ── 参数调节 ──
+    p.add_argument("--alpha", type=float, default=0.001, help="噪声混合权重")
+    p.add_argument("--rho_s", type=float, default=0.1, help="空间SVD阈值")
+    p.add_argument("--rho_m", type=float, default=0.9, help="时间SVD阈值")
+    p.add_argument("--steps", type=int, default=30, help="推理步数")
+    p.add_argument("--guidance", type=float, default=5.0, help="CFG scale")
+    p.add_argument("--seed", type=int, default=42, help="随机种子")
+    p.add_argument("--height", type=int, default=480)
+    p.add_argument("--width", type=int, default=832)
+    p.add_argument("--num_frames", type=int, default=81)
+    p.add_argument("--fps", type=int, default=15)
+
+    # ── 模型路径 ──
+    p.add_argument("--model_path", type=str, default="/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers")
+    p.add_argument("--vlm_path", type=str, default="/root/models/Qwen2.5-VL-7B-Instruct")
+    p.add_argument("--vlm_provider", type=str, default="local", choices=["local", "dashscope", "mock"])
+
+    # ── 执行控制 ──
+    p.add_argument("--resume", action="store_true", help="跳过已有输出")
+    p.add_argument("--verbose", action="store_true")
+
+    return p.parse_args()
+
+
+def build_config(args) -> PFlowConfig:
+    """从命令行参数构建配置。"""
+    # 处理快捷组合
+    if args.full:
+        args.inversion = True
+        args.svd = True
+        args.blend = True
+        args.composite = True
+        if args.iter == 0:
+            args.iter = 10
+
+    if args.noise_prior:
+        args.inversion = True
+        args.svd = True
+        args.blend = True
+
+    return PFlowConfig(
+        t2v_path=args.model_path,
+        dtype="bfloat16",
+        height=args.height,
+        width=args.width,
+        num_frames=args.num_frames,
+        fps=args.fps,
+        guidance_scale=args.guidance,
+        num_inference_steps=args.steps,
+        use_inversion=args.inversion,
+        use_svd=args.svd,
+        use_blend=args.blend,
+        use_iter=args.iter > 0,
+        use_midpoint=args.midpoint,
+        use_composite=args.composite,
+        alpha=args.alpha,
+        rho_s=args.rho_s,
+        rho_m=args.rho_m,
+        inversion_steps=50,
+        i_max=args.iter if args.iter > 0 else 1,
+        vlm_provider=args.vlm_provider,
+        vlm_model_path=args.vlm_path,
+        seed=args.seed,
+    )
+
+
+def run_single(pipeline, args):
+    """单视频模式。"""
+    if not args.video:
+        print("错误: 单视频模式需要 --video 参数")
+        sys.exit(1)
+
+    result = pipeline.run(
+        video_path=args.video,
+        output_dir=args.output_dir,
+        caption=args.caption,
+        sample_id=0,
+    )
+    print(f"\n完成: {result['output']}")
+    print(f"  实验: {result['experiment']}")
+    print(f"  耗时: {result['time_seconds']:.1f}s")
+    print(f"  flags: {result['flags']}")
+
+
+def run_batch(pipeline, args):
+    """批量模式。"""
+    data_path = Path(args.data_dir)
+    if not data_path.exists():
+        print(f"错误: 数据目录不存在: {args.data_dir}")
+        sys.exit(1)
+
+    # 发现样本
+    videos = sorted(data_path.glob("*.mp4"), key=lambda p: int(p.stem))
+    if args.sample_ids:
+        id_set = set(args.sample_ids)
+        videos = [v for v in videos if int(v.stem) in id_set]
+    if args.limit:
+        videos = videos[:args.limit]
+
+    print(f"找到 {len(videos)} 个样本")
+    print(f"实验: {pipeline.config.experiment_name()}")
+    print(f"Flags: {pipeline.config.active_flags() or ['baseline']}")
+    print()
+
+    for idx, vp in enumerate(videos, 1):
+        sample_id = int(vp.stem)
+        sample_out = Path(args.output_dir) / f"sample_{sample_id}"
+
+        # Resume
+        if args.resume and (sample_out / f"{sample_id}.mp4").exists():
+            print(f"  [{idx}/{len(videos)}] 跳过 {sample_id} (已存在)")
+            continue
+
+        # 加载 caption
+        caption = ""
+        if args.caption_dir:
+            cap_file = Path(args.caption_dir) / f"{sample_id}.txt"
+            if cap_file.exists():
+                caption = cap_file.read_text(encoding="utf-8").strip()
+
+        print(f"  [{idx}/{len(videos)}] 处理 {sample_id}...")
+        pipeline.run(
+            video_path=str(vp),
+            output_dir=str(sample_out),
+            caption=caption,
+            sample_id=sample_id,
+        )
+
+    print(f"\n批量完成! 输出: {args.output_dir}")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Video Reproduction via Iterative Prompt Optimization + Noise Prior"
-    )
-    parser.add_argument("--video", type=str, required=True,
-                       help="Reference video path (the video to reproduce)")
-    parser.add_argument("--prompt", type=str, default=None,
-                       help="Initial text prompt describing the video content")
-    parser.add_argument("--auto_prompt", action="store_true",
-                       help="Auto-generate initial prompt from reference video using VLM")
-    parser.add_argument("--hint", type=str, default="",
-                       help="Optional hint for auto-prompt generation")
-    parser.add_argument("--output", type=str, default="/root/autodl-tmp/outputs/video_reproduction",
-                       help="Output directory (default: /root/autodl-tmp/outputs/video_reproduction)")
-    parser.add_argument("--config", type=str, default=None,
-                       help="Config YAML (default: configs/paper_default.yaml)")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--alpha", type=float, default=None,
-                       help="Noise prior alpha (motion guidance strength). "
-                            "0.001=minimal, 0.1=moderate, 0.3=strong. Default from config.")
-    parser.add_argument("--i_max", type=int, default=None,
-                       help="Number of optimization iterations (default: 10)")
-    parser.add_argument("--mode", type=str, default="t2v", choices=["t2v", "i2v"])
-    parser.add_argument("--mock_vlm", action="store_true", help="Use mock VLM (testing)")
-    parser.add_argument("--noise_prior_only", action="store_true",
-                       help="Run only noise prior (no prompt optimization, for testing)")
-    parser.add_argument("--verbose", action="store_true")
+    args = parse_args()
 
-    args = parser.parse_args()
-
-    # Validate args
-    if not args.auto_prompt and args.prompt is None:
-        parser.error("Either --prompt or --auto_prompt is required")
-
-    # Setup logging
-    level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    # Default config
-    config_path = args.config
-    if config_path is None:
-        default_config = Path(__file__).parent / "configs" / "paper_default.yaml"
-        if default_config.exists():
-            config_path = str(default_config)
+    config = build_config(args)
 
-    # Override i_max if specified
-    config_override = None
-    if args.i_max is not None:
-        config_override = {"optimization": {"i_max": args.i_max}}
+    # 打印配置摘要
+    flags = config.active_flags()
+    print(f"P-Flow | {config.experiment_name()}")
+    print(f"  Flags: {flags or ['baseline (无改动)']}")
+    if config.use_blend:
+        print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
+    if config.use_iter:
+        print(f"  iterations={config.i_max}")
+    print()
 
-    # Create pipeline
-    pipeline = PFlowPipeline(
-        config_path=config_path,
-        config=config_override,
-        use_mock_vlm=args.mock_vlm,
-    )
+    pipeline = PFlowPipeline(config)
 
-    # Determine initial prompt
-    if args.auto_prompt:
-        print("Generating initial prompt from reference video...")
-        prompt = pipeline.generate_initial_prompt(
-            reference_video_path=args.video,
-            user_hint=args.hint,
-        )
-        print(f"Generated prompt: {prompt}\n")
+    if args.data_dir:
+        run_batch(pipeline, args)
     else:
-        prompt = args.prompt
-
-    # Run
-    if args.noise_prior_only:
-        # Quick test: noise prior only
-        output_path = str(Path(args.output) / "noise_prior_only.mp4")
-        result_path = pipeline.run_noise_prior_only(
-            reference_video_path=args.video,
-            prompt=prompt,
-            output_path=output_path,
-            seed=args.seed,
-            alpha_override=args.alpha,
-        )
-        print(f"\nDone! Output: {result_path}")
-        print("This video uses noise prior only (no prompt optimization).")
-        print("Compare with full pipeline to see the effect of iterative refinement.")
-    else:
-        # Full pipeline
-        result = pipeline.run(
-            reference_video_path=args.video,
-            prompt=prompt,
-            output_dir=args.output,
-            seed=args.seed,
-            video_description=args.hint,
-            mode=args.mode,
-            alpha_override=args.alpha,
-        )
-
-        print(f"\n{'='*60}")
-        print(f"Done! Output directory: {result['output_dir']}")
-        print(f"{'='*60}")
-        print(f"Reference video: {result['reference_video']}")
-        print(f"Initial prompt: {result['initial_prompt'][:80]}...")
-        print(f"Final prompt: {result['final_prompt'][:80]}...")
-        print(f"Noise prior alpha: {result['noise_prior_alpha']}")
-        print(f"Total iterations: {result['num_iterations']}")
-        print(f"Total time: {result['total_time']:.1f}s ({result['total_time']/60:.1f} min)")
-        print(f"\nGenerated videos:")
-        for vp in result['video_paths']:
-            print(f"  {vp}")
-        print(f"\nReview the generated videos and compare with reference.mp4")
-        print(f"The later iterations should be closer to the reference.")
+        run_single(pipeline, args)
 
 
 if __name__ == "__main__":

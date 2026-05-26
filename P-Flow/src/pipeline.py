@@ -1,483 +1,428 @@
 """
-Video Reproduction Pipeline - Iterative Prompt Optimization with Noise Prior.
+P-Flow Unified Pipeline.
 
-Goal: Given a reference video, iteratively optimize a T2V prompt so that the
-generated video faithfully reproduces the reference video's content, motion,
-composition, and style.
+一个管线搞定所有配置，通过 flag 开关各改动点：
 
-Approach (adapted from P-Flow Algorithm 1):
-    1. Encode V_ref to latent space
-    2. Flow matching inversion -> eta_inv
-    3. SVD filtering -> eta_temporal (preserves motion dynamics)
-    4. For i = 1 to i_max (fixed, NO early stopping):
-       a. Blend: eta = sqrt(alpha)*eta_temporal + sqrt(1-alpha)*eta_new
-       b. Generate V_i = G(P_i, eta)
-       c. Create vertical composite [V_ref | V_{i-1} | V_i]
-       d. VLM analysis -> refined prompt P_{i+1}
-       e. Update trajectory
-    5. Return all {V_i, P_i, A_i} for offline evaluation
+    Flag              对应改动点                    效果
+    ─────────────────────────────────────────────────────────────
+    --inversion       Flow Matching Inversion      从参考视频反演噪声
+    --svd             SVD Two-stage Filtering      空间去内容 + 时间保运动
+    --blend           Noise Prior Blending         混合运动噪声与随机噪声
+    --iter N          Iterative VLM Optimization   N轮VLM反馈优化prompt
+    --midpoint        Midpoint ODE Solver          二阶中点法(替代Euler)
+    --composite       Vertical Composite           三面板拼接送VLM对比
 
-Key difference from P-Flow:
-- P-Flow: transfers visual EFFECTS from reference to new content
-- This: reproduces the ENTIRE reference video content via prompt optimization
-- alpha is larger (0.1 vs 0.001) to provide stronger motion guidance
-
-Hardware: Single 4090 (24GB) — Wan2.1-1.3B fits fully on GPU
-VLM: DashScope Qwen-VL (qwen-vl-max)
-Processing: One video at a time (sequential)
+组合示例：
+    baseline:     无任何flag → caption + 一次生成
+    +noise_prior: --inversion --svd --blend → 噪声先验引导
+    +iteration:   --iter 10 → 迭代优化
+    full pflow:   --inversion --svd --blend --iter 10 --composite
 """
 
 import os
 import json
 import time
-import yaml
+import shutil
 import logging
 from typing import Optional, Dict, List, Any
 from pathlib import Path
+from dataclasses import dataclass
 
 import torch
-import numpy as np
-from tqdm import tqdm
 
-from .distributed import load_model_single_gpu, setup_single_gpu, cleanup_gpu_memory
-from .noise_prior import NoisePriorEnhancement
-from .prompt_optimizer import PromptOptimizer
-from .trajectory import TrajectoryManager
-from .vlm_client import create_vlm_client, MockVLMClient
-from .video_utils import load_video, save_video_tensor, normalize_video, denormalize_video
-from .flow_matching import encode_video_to_latents
+from .distributed import setup_single_gpu, load_model_single_gpu, cleanup_gpu_memory
+from .flow_matching import FlowMatchingInverter, encode_video_to_latents
+from .svd_filter import SVDFilter
+from .video_utils import (
+    load_video, save_video_tensor, normalize_video, denormalize_video,
+    create_vertical_composite,
+)
+from .vlm_client import create_vlm_client
 
 logger = logging.getLogger(__name__)
+
+NEGATIVE_PROMPT = (
+    "Bright tones, overexposed, static, blurred details, subtitles, style, work, "
+    "paintings, images, static, overall gray, worst quality, low quality, JPEG compression "
+    "residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn face, "
+    "deformed, blurry, watermark"
+)
+
+
+@dataclass
+class PFlowConfig:
+    """所有可配置参数，一个 dataclass 搞定。"""
+
+    # ── 模型 ──
+    t2v_path: str = "/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers"
+    dtype: str = "bfloat16"
+
+    # ── 视频生成 ──
+    height: int = 480
+    width: int = 832
+    num_frames: int = 81
+    fps: int = 15
+    guidance_scale: float = 5.0
+    num_inference_steps: int = 30
+
+    # ── 改动点开关 ──
+    use_inversion: bool = False    # Flow Matching Inversion
+    use_svd: bool = False          # SVD Filtering
+    use_blend: bool = False        # Noise Blending (α mixing)
+    use_iter: bool = False         # Iterative VLM Optimization
+    use_midpoint: bool = False     # Midpoint ODE Solver
+    use_composite: bool = False    # Vertical Composite for VLM
+
+    # ── Noise Prior 参数 ──
+    alpha: float = 0.001           # 混合权重 (√α·η_temporal + √(1-α)·η_random)
+    rho_s: float = 0.1            # 空间SVD阈值 (去内容)
+    rho_m: float = 0.9            # 时间SVD阈值 (保运动)
+    inversion_steps: int = 50     # 反演ODE步数
+
+    # ── 迭代优化参数 ──
+    i_max: int = 10               # 迭代轮数
+
+    # ── VLM ──
+    vlm_provider: str = "local"
+    vlm_model_path: str = "/root/models/Qwen2.5-VL-7B-Instruct"
+
+    # ── 其他 ──
+    seed: int = 42
+
+    def active_flags(self) -> List[str]:
+        """返回当前启用的改动点列表。"""
+        flags = []
+        if self.use_inversion:
+            flags.append("inversion")
+        if self.use_svd:
+            flags.append("svd")
+        if self.use_blend:
+            flags.append("blend")
+        if self.use_iter:
+            flags.append(f"iter({self.i_max})")
+        if self.use_midpoint:
+            flags.append("midpoint")
+        if self.use_composite:
+            flags.append("composite")
+        return flags
+
+    def experiment_name(self) -> str:
+        """生成实验名称。"""
+        flags = self.active_flags()
+        if not flags:
+            return "baseline"
+        return "pflow_" + "_".join(f.split("(")[0] for f in flags)
 
 
 class PFlowPipeline:
     """
-    Video Reproduction via Test-Time Prompt Optimization + Noise Prior.
+    统一管线：baseline 和所有改动点共用一个类。
 
-    Two complementary mechanisms:
-    1. Noise Prior: provides motion trajectory guidance from reference video
-    2. Prompt Optimization: iteratively refines text description via VLM feedback
-
-    Supports configurable alpha:
-    - alpha=0.001 (P-Flow default): minimal motion hint, maximum diversity
-    - alpha=0.1~0.3 (recommended for reproduction): stronger motion guidance
-    - alpha=0.5+: very strong motion guidance, less diversity
+    通过 PFlowConfig 中的 flag 控制行为：
+    - 所有 flag 关闭 = baseline (caption → 一次生成)
+    - 开启不同 flag = 不同消融配置
     """
 
-    def __init__(
-        self,
-        config_path: Optional[str] = None,
-        config: Optional[Dict[str, Any]] = None,
-        use_mock_vlm: bool = False,
-    ):
-        """
-        Initialize pipeline from configuration.
+    def __init__(self, config: PFlowConfig):
+        self.config = config
+        self.device = setup_single_gpu()
+        self.dtype = getattr(torch, config.dtype)
 
-        Args:
-            config_path: Path to YAML config file.
-            config: Config dict (overrides config_path).
-            use_mock_vlm: Use mock VLM for testing.
-        """
-        self.config = self._load_config(config_path, config)
-        self.use_mock_vlm = use_mock_vlm
-
-        # Lazy-loaded components
         self._pipe = None
         self._vlm_client = None
 
-        # Setup single-GPU environment
-        self.device = setup_single_gpu()
-        self.dtype = getattr(torch, self.config["model"]["dtype"])
-
     @property
     def pipe(self):
-        """Lazy-load the video generation pipeline."""
         if self._pipe is None:
-            self._pipe = self._load_model()
+            self._pipe = load_model_single_gpu(
+                model_path=self.config.t2v_path,
+                dtype=self.dtype,
+                model_type="t2v",
+            )
         return self._pipe
 
     @property
     def vlm_client(self):
-        """Lazy-load the VLM client."""
         if self._vlm_client is None:
-            if self.use_mock_vlm:
-                self._vlm_client = MockVLMClient()
-            else:
-                self._vlm_client = create_vlm_client(self.config["vlm"])
-        return self._vlm_client
-
-    def _load_config(self, config_path, config) -> Dict[str, Any]:
-        """Load configuration with defaults."""
-        default_config = {
-            "model": {
-                "t2v_path": "/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers",
-                "dtype": "bfloat16",
-            },
-            "video": {
-                "height": 480,
-                "width": 832,
-                "num_frames": 81,
-                "fps": 16,
-                "guidance_scale": 5.0,
-                "num_inference_steps": 50,
-            },
-            "noise_prior": {
-                "alpha": 0.1,  # Larger than P-Flow (0.001) for stronger motion guidance
-                "rho_s": 0.1,
-                "rho_m": 0.9,
-                "inversion_steps": 50,
-                "guidance_scale": 1.0,
-            },
-            "optimization": {
-                "i_max": 10,
-            },
-            "vlm": {
-                "provider": "dashscope",
-                "model_name": "qwen-vl-max",
-                "api_key_env": "DASHSCOPE_API_KEY",
+            vlm_cfg = {
+                "provider": self.config.vlm_provider,
+                "model_path": self.config.vlm_model_path,
                 "temperature": 0.7,
                 "max_tokens": 2048,
-            },
-            "trajectory": {
-                "max_videos_to_vlm": 3,
-                "keep_all_text_history": True,
-            },
-            "output": {
-                "base_dir": "/root/autodl-tmp/outputs/video_reproduction",
-                "save_all_iterations": True,
-                "save_composites": True,
-            },
-        }
+                "max_retries": 3,
+                "use_video_mode": True,
+                "lazy_load": True,
+            }
+            self._vlm_client = create_vlm_client(vlm_cfg)
+        return self._vlm_client
 
-        if config is not None:
-            self._deep_merge(default_config, config)
-            return default_config
-
-        if config_path and os.path.exists(config_path):
-            with open(config_path, "r") as f:
-                file_config = yaml.safe_load(f)
-            self._deep_merge(default_config, file_config)
-
-        return default_config
-
-    def _deep_merge(self, base: dict, override: dict):
-        """Deep merge override into base."""
-        for key, value in override.items():
-            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-                self._deep_merge(base[key], value)
-            else:
-                base[key] = value
-
-    def _load_model(self):
-        """Load Wan 2.1-1.3B on single 4090."""
-        model_path = self.config["model"]["t2v_path"]
-
-        if self.device == "cpu":
-            logger.warning("Loading model on CPU (testing only)")
-            from diffusers import WanPipeline
-            return WanPipeline.from_pretrained(model_path, torch_dtype=self.dtype)
-
-        return load_model_single_gpu(
-            model_path=model_path,
-            dtype=self.dtype,
-            model_type="t2v",
-        )
+    # ─────────────────────────────────────────────────────────────
+    # 主入口
+    # ─────────────────────────────────────────────────────────────
 
     @torch.no_grad()
     def run(
         self,
-        reference_video_path: str,
-        prompt: str,
-        output_dir: Optional[str] = None,
-        seed: Optional[int] = None,
-        video_description: str = "",
-        mode: str = "t2v",
-        reference_image_path: Optional[str] = None,
-        alpha_override: Optional[float] = None,
+        video_path: str,
+        output_dir: str,
+        caption: str = "",
+        sample_id: int = 0,
     ) -> Dict[str, Any]:
         """
-        Run the video reproduction pipeline.
-
-        Fixed i_max iterations. No early stopping.
-        Best video selected offline by evaluation metrics.
+        运行管线。根据 config 中的 flag 自动决定执行哪些步骤。
 
         Args:
-            reference_video_path: Path to reference video to reproduce.
-            prompt: Initial text prompt describing the video content.
-            output_dir: Output directory.
-            seed: Random seed.
-            video_description: Optional detailed description of reference video
-                               (helps VLM understand the target).
-            mode: "t2v" for text-to-video, "i2v" for image-to-video.
-            reference_image_path: First frame for I2V mode.
-            alpha_override: Override noise prior blending weight.
-                           Higher = more motion guidance from reference.
+            video_path: 参考视频路径
+            output_dir: 输出目录
+            caption: 初始 caption (为空则用VLM生成)
+            sample_id: 样本ID
 
         Returns:
-            Dict with all iteration results.
+            实验结果 dict
         """
-        # Setup
-        output_dir = output_dir or self.config["output"]["base_dir"]
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
+        t0 = time.time()
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
 
-        if seed is not None:
-            generator = torch.Generator(device=self.device).manual_seed(seed)
-            torch.manual_seed(seed)
-        else:
-            generator = None
+        cfg = self.config
+        seed = cfg.seed + sample_id
+        generator = torch.Generator(device=self.device).manual_seed(seed)
+        torch.manual_seed(seed)
 
-        i_max = self.config["optimization"]["i_max"]
-        alpha = alpha_override if alpha_override is not None else self.config["noise_prior"]["alpha"]
+        flags = cfg.active_flags()
+        logger.info(f"[P-Flow] sample={sample_id}, flags={flags or 'baseline'}")
 
-        logger.info("=" * 60)
-        logger.info("Video Reproduction: Iterative Prompt Optimization + Noise Prior")
-        logger.info("=" * 60)
-        logger.info(f"Reference video: {reference_video_path}")
-        logger.info(f"Initial prompt: {prompt}")
-        logger.info(f"Iterations: {i_max} (fixed, NO early stopping)")
-        logger.info(f"Noise prior alpha: {alpha} (motion guidance strength)")
-        logger.info(f"Mode: {mode}")
-        logger.info(f"Model: Wan 2.1-1.3B (single 4090)")
-        logger.info(f"VLM: {self.config['vlm']['model_name']}")
-        logger.info(f"Output: {output_dir}")
-        logger.info("=" * 60)
-
-        total_start = time.time()
-
-        # Step 1: Load and encode reference video
-        logger.info("[Step 1] Loading reference video...")
-        reference_video = load_video(
-            reference_video_path,
-            num_frames=self.config["video"]["num_frames"],
-            height=self.config["video"]["height"],
-            width=self.config["video"]["width"],
+        # ── Step 1: 加载参考视频 ──
+        ref_video = load_video(
+            video_path,
+            num_frames=cfg.num_frames,
+            height=cfg.height,
+            width=cfg.width,
             device=self.device,
         )
 
-        ref_save_path = str(output_path / "reference.mp4")
-        save_video_tensor(reference_video, ref_save_path, fps=self.config["video"]["fps"])
+        # ── Step 2: 计算噪声先验 (如果启用) ──
+        eta_temporal = None
+        if cfg.use_inversion:
+            eta_temporal = self._compute_noise_prior(ref_video, caption or "a video")
 
-        # Encode to latent space
-        logger.info("[Step 1] Encoding to latent space...")
-        ref_normalized = normalize_video(reference_video).unsqueeze(0)
-        ref_latents = encode_video_to_latents(self.pipe, ref_normalized, self.device)
+        # ── Step 3: 生成循环 ──
+        num_iters = cfg.i_max if cfg.use_iter else 1
+        current_prompt = caption or "a video scene"
+        prev_video = None
+        results = []
 
-        # Step 2: Noise Prior Enhancement (computed ONCE)
-        logger.info("[Step 2] Computing Noise Prior Enhancement...")
-        logger.info(f"  alpha={alpha}: {'strong' if alpha >= 0.1 else 'weak'} motion guidance")
-        noise_enhancer = NoisePriorEnhancement(
-            pipe=self.pipe,
-            alpha=alpha,
-            rho_s=self.config["noise_prior"]["rho_s"],
-            rho_m=self.config["noise_prior"]["rho_m"],
-            num_inversion_steps=self.config["noise_prior"]["inversion_steps"],
-            device=self.device,
-            use_efficient_svd=(self.config["video"]["height"] * self.config["video"]["width"] > 480 * 832),
-        )
+        for i in range(1, num_iters + 1):
+            logger.info(f"  iter {i}/{num_iters}: {current_prompt[:60]}...")
 
-        prompt_embeds_inv = self._encode_prompt(prompt)
-        eta_temporal = noise_enhancer.compute_temporal_prior(
-            video_latents=ref_latents,
-            prompt_embeds=prompt_embeds_inv,
-            negative_prompt_embeds=prompt_embeds_inv,
-        )
-        logger.info(f"  eta_temporal: mean={eta_temporal.mean():.4f}, std={eta_temporal.std():.4f}")
+            # 获取噪声
+            latents = self._get_latents(eta_temporal, generator)
 
-        # Step 3: Initialize components
-        logger.info("[Step 3] Initializing optimization...")
-        trajectory = TrajectoryManager(
-            output_dir=str(output_path),
-            save_all_videos=self.config["output"]["save_all_iterations"],
-        )
-        trajectory.set_reference(reference_video, ref_save_path)
+            # 生成视频
+            gen_video = self._generate(current_prompt, latents, generator)
+            video_path_i = str(out / f"iter_{i:02d}.mp4")
+            save_video_tensor(gen_video, video_path_i, fps=cfg.fps)
 
-        prompt_optimizer = PromptOptimizer(
-            vlm_client=self.vlm_client,
-            max_iterations=i_max,
-            output_dir=str(output_path),
-        )
-
-        # Step 4: Fixed Iteration Loop
-        logger.info(f"[Step 4] Optimization loop ({i_max} iterations)...")
-
-        current_prompt = prompt
-        last_prompt = ""
-        timing_stats = []
-
-        for iteration in range(1, i_max + 1):
-            iter_start = time.time()
-
-            logger.info(f"\n--- Iteration {iteration}/{i_max} ---")
-            logger.info(f"  Prompt: {current_prompt[:100]}...")
-
-            # 4a: Blend noise (motion prior + random exploration)
-            eta = noise_enhancer.blend_noise(eta_temporal, generator)
-
-            # 4b: Generate video
-            gen_start = time.time()
-            generated_video = self._generate_video(
-                prompt=current_prompt,
-                latents=eta,
-                generator=generator,
-                mode=mode,
-                reference_image_path=reference_image_path,
-            )
-            gen_time = time.time() - gen_start
-            logger.info(f"  Generation time: {gen_time:.1f}s")
-
-            # Save generated video
-            iter_video_path = str(output_path / f"generated_iter_{iteration:03d}.mp4")
-            save_video_tensor(generated_video, iter_video_path, fps=self.config["video"]["fps"])
-
-            # 4c-4d: VLM analysis and prompt refinement
-            vlm_start = time.time()
-            prev_video = trajectory.get_previous_video()
-            optimization_result = prompt_optimizer.optimize_prompt(
-                current_prompt=current_prompt,
-                reference_video=reference_video,
-                generated_video=generated_video,
-                iteration=iteration,
-                desired_visual_effect=video_description or prompt,
-                subject="",
-                environment="",
-                last_text_prompt=last_prompt,
-                previous_video=prev_video,
-                history=trajectory.get_text_history(),
-            )
-            vlm_time = time.time() - vlm_start
-            logger.info(f"  VLM time: {vlm_time:.1f}s")
-
-            # 4e: Update trajectory
-            trajectory.add_entry(
-                iteration=iteration,
-                prompt=current_prompt,
-                video=generated_video,
-                video_path=iter_video_path,
-                analysis=optimization_result.get("analysis", {}),
-                refined_prompt=optimization_result.get("refined_prompt", ""),
-            )
-
-            # Timing stats
-            iter_time = time.time() - iter_start
-            timing_stats.append({
-                "iteration": iteration,
-                "total_time": iter_time,
-                "generation_time": gen_time,
-                "vlm_time": vlm_time,
+            results.append({
+                "iteration": i,
+                "prompt": current_prompt,
+                "video_path": video_path_i,
             })
-            logger.info(f"  Iteration total: {iter_time:.1f}s")
 
-            # Update prompt (no convergence check)
-            last_prompt = current_prompt
-            refined = optimization_result.get("refined_prompt", "")
-            if refined and refined.strip():
-                current_prompt = refined
+            # VLM 迭代优化 (如果启用且不是最后一轮)
+            if cfg.use_iter and i < num_iters:
+                current_prompt = self._vlm_refine(
+                    ref_video, gen_video, prev_video, current_prompt, i
+                )
 
-        # Step 5: Save all results
-        total_time = time.time() - total_start
-        logger.info(f"\n[Step 5] Complete! Total time: {total_time:.1f}s ({total_time/60:.1f} min)")
+            prev_video = gen_video
 
-        # Save trajectory
-        trajectory_data = trajectory.get_full_trajectory()
-        with open(output_path / "full_trajectory.json", "w", encoding="utf-8") as f:
-            json.dump(trajectory_data, f, indent=2, ensure_ascii=False)
+        # ── Step 4: 输出最终结果 ──
+        final_path = str(out / f"{sample_id}.mp4")
+        shutil.copy2(results[-1]["video_path"], final_path)
 
-        # Save timing and metadata
+        elapsed = time.time() - t0
         metadata = {
-            "task": "video_reproduction",
-            "reference_video": reference_video_path,
-            "initial_prompt": prompt,
+            "sample_id": sample_id,
+            "experiment": cfg.experiment_name(),
+            "flags": flags,
+            "initial_caption": caption,
             "final_prompt": current_prompt,
-            "all_prompts": trajectory.get_all_prompts(),
-            "total_iterations": i_max,
-            "noise_prior_alpha": alpha,
-            "total_time_seconds": total_time,
-            "timing_stats": timing_stats,
-            "config": self.config,
-            "note": "Compare generated videos with reference to find best reproduction. "
-                    "Higher alpha provides stronger motion guidance.",
+            "iterations": num_iters,
+            "time_seconds": elapsed,
+            "output": final_path,
+            "all_iterations": results,
         }
-        with open(output_path / "experiment_metadata.json", "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False, default=str)
+        with open(out / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-        logger.info(f"  Videos saved: {output_path}/generated_iter_*.mp4")
-        logger.info(f"  Review videos to find the best reproduction of the reference.")
+        logger.info(f"[P-Flow] Done in {elapsed:.1f}s → {final_path}")
+        return metadata
 
-        return {
-            "output_dir": str(output_path),
-            "reference_video": reference_video_path,
-            "initial_prompt": prompt,
-            "final_prompt": current_prompt,
-            "all_prompts": trajectory.get_all_prompts(),
-            "num_iterations": i_max,
-            "noise_prior_alpha": alpha,
-            "total_time": total_time,
-            "trajectory": trajectory_data,
-            "video_paths": [
-                str(output_path / f"generated_iter_{i:03d}.mp4")
-                for i in range(1, i_max + 1)
-            ],
-        }
+    # ─────────────────────────────────────────────────────────────
+    # 内部方法：各改动点的实现
+    # ─────────────────────────────────────────────────────────────
 
-    def _generate_video(
-        self,
-        prompt: str,
-        latents: Optional[torch.Tensor] = None,
-        generator: Optional[torch.Generator] = None,
-        mode: str = "t2v",
-        reference_image_path: Optional[str] = None,
+    def _compute_noise_prior(
+        self, ref_video: torch.Tensor, prompt: str
     ) -> torch.Tensor:
         """
-        Generate video using Wan 2.1-1.3B.
+        改动点: Inversion + SVD → η_temporal
 
-        Supports both T2V and I2V modes.
+        流程: V_ref → VAE encode → Flow Inversion → (SVD filter) → η_temporal
         """
+        logger.info("  [Inversion] encoding reference → latent...")
+        ref_norm = normalize_video(ref_video).unsqueeze(0)
+        ref_latents = encode_video_to_latents(self.pipe, ref_norm, self.device)
+
+        # Flow Matching Inversion
+        prompt_embeds = self._encode_prompt(prompt)
+        inverter = FlowMatchingInverter(
+            pipe=self.pipe,
+            num_inversion_steps=self.config.inversion_steps,
+            guidance_scale=1.0,
+            device=self.device,
+        )
+
+        if self.config.use_midpoint:
+            logger.info("  [Inversion] midpoint (2nd-order)...")
+            eta_inv = inverter.invert_midpoint(
+                ref_latents, prompt_embeds, prompt_embeds
+            )
+        else:
+            logger.info("  [Inversion] euler (1st-order)...")
+            eta_inv = inverter.invert(
+                ref_latents, prompt_embeds, prompt_embeds
+            )
+
+        # SVD Filtering (如果启用)
+        if self.config.use_svd:
+            logger.info(f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}")
+            svd_filter = SVDFilter(
+                rho_s=self.config.rho_s, rho_m=self.config.rho_m
+            )
+            eta_temporal = svd_filter.filter(eta_inv)
+        else:
+            eta_temporal = eta_inv
+
+        logger.info(
+            f"  η_temporal: mean={eta_temporal.mean():.4f}, std={eta_temporal.std():.4f}"
+        )
+        return eta_temporal
+
+    def _get_latents(
+        self,
+        eta_temporal: Optional[torch.Tensor],
+        generator: torch.Generator,
+    ) -> Optional[torch.Tensor]:
+        """
+        改动点: Noise Blending
+
+        η = √α · η_temporal + √(1-α) · η_random
+        """
+        if eta_temporal is None or not self.config.use_blend:
+            return None  # 让 diffusers 自己采样随机噪声
+
+        eta_random = torch.randn(
+            eta_temporal.shape,
+            dtype=eta_temporal.dtype,
+            device=eta_temporal.device,
+            generator=generator,
+        )
+
+        alpha = self.config.alpha
+        eta = (
+            torch.sqrt(torch.tensor(alpha, device=self.device)) * eta_temporal
+            + torch.sqrt(torch.tensor(1.0 - alpha, device=self.device)) * eta_random
+        )
+        return eta
+
+    def _generate(
+        self,
+        prompt: str,
+        latents: Optional[torch.Tensor],
+        generator: torch.Generator,
+    ) -> torch.Tensor:
+        """调用 Wan 2.1-1.3B 生成视频。"""
+        cfg = self.config
         kwargs = {
             "prompt": prompt,
-            "height": self.config["video"]["height"],
-            "width": self.config["video"]["width"],
-            "num_frames": self.config["video"]["num_frames"],
-            "guidance_scale": self.config["video"]["guidance_scale"],
-            "num_inference_steps": self.config["video"]["num_inference_steps"],
+            "negative_prompt": NEGATIVE_PROMPT,
+            "height": cfg.height,
+            "width": cfg.width,
+            "num_frames": cfg.num_frames,
+            "guidance_scale": cfg.guidance_scale,
+            "num_inference_steps": cfg.num_inference_steps,
             "generator": generator,
             "output_type": "pt",
         }
-
         if latents is not None:
             kwargs["latents"] = latents
 
-        if mode == "i2v" and reference_image_path:
-            from PIL import Image
-            ref_image = Image.open(reference_image_path).convert("RGB")
-            kwargs["image"] = ref_image
-
         output = self.pipe(**kwargs)
 
-        # Handle output format
+        # 处理输出格式
         if hasattr(output, "frames"):
             video = output.frames
             if isinstance(video, list):
                 import torchvision.transforms as T
-                transform = T.ToTensor()
-                frames = [transform(f) for f in video[0]]
+                frames = [T.ToTensor()(f) for f in video[0]]
                 video = torch.stack(frames, dim=1)
             elif isinstance(video, torch.Tensor):
                 if video.dim() == 5:
                     video = video[0]
-                    if video.shape[0] == self.config["video"]["num_frames"]:
+                    if video.shape[0] == cfg.num_frames:
                         video = video.permute(1, 0, 2, 3)
         else:
             video = output[0]
 
         if video.min() < 0:
             video = denormalize_video(video)
-        video = video.clamp(0, 1)
+        return video.clamp(0, 1)
 
-        return video
+    def _vlm_refine(
+        self,
+        ref_video: torch.Tensor,
+        gen_video: torch.Tensor,
+        prev_video: Optional[torch.Tensor],
+        current_prompt: str,
+        iteration: int,
+    ) -> str:
+        """
+        改动点: Iterative VLM Optimization (+ Composite)
+
+        创建对比视频 → VLM分析 → 返回优化后的prompt
+        """
+        # 创建VLM输入
+        composite_path = f"/tmp/pflow_composite_iter{iteration}.mp4"
+
+        if self.config.use_composite:
+            # 三面板垂直拼接
+            videos = [ref_video, gen_video] if prev_video is None else [ref_video, prev_video, gen_video]
+            composite = create_vertical_composite(videos)
+            save_video_tensor(composite, composite_path, fps=self.config.fps)
+        else:
+            # 仅发送生成视频
+            save_video_tensor(gen_video, composite_path, fps=self.config.fps)
+
+        # 调用VLM
+        try:
+            result = self.vlm_client.analyze_and_refine(
+                composite_video_path=composite_path,
+                current_prompt=current_prompt,
+                iteration=iteration,
+                i_max=self.config.i_max,
+            )
+            refined = result.get("refined_prompt", "")
+            if refined and refined.strip():
+                return refined
+        except Exception as e:
+            logger.warning(f"  VLM failed at iter {iteration}: {e}")
+
+        return current_prompt
 
     def _encode_prompt(self, prompt: str) -> torch.Tensor:
-        """Encode text prompt to embeddings."""
+        """编码文本到 embedding。"""
         import inspect
 
         if hasattr(self.pipe, "encode_prompt"):
@@ -490,165 +435,12 @@ class PFlowPipeline:
                 kwargs["num_videos_per_prompt"] = 1
             if "do_classifier_free_guidance" in params:
                 kwargs["do_classifier_free_guidance"] = False
-
             result = self.pipe.encode_prompt(**kwargs)
-            if isinstance(result, tuple):
-                return result[0]
-            return result
+            return result[0] if isinstance(result, tuple) else result
         else:
-            text_inputs = self.pipe.tokenizer(
+            inputs = self.pipe.tokenizer(
                 prompt, padding="max_length",
                 max_length=self.pipe.tokenizer.model_max_length,
                 truncation=True, return_tensors="pt",
             )
-            return self.pipe.text_encoder(text_inputs.input_ids.to(self.device))[0]
-
-    def run_noise_prior_only(
-        self,
-        reference_video_path: str,
-        prompt: str,
-        output_path: str = "output_noise_prior.mp4",
-        seed: Optional[int] = None,
-        alpha_override: Optional[float] = None,
-    ) -> str:
-        """
-        Run only noise prior enhancement (no prompt optimization).
-        Useful for testing how much motion guidance alpha provides.
-
-        Args:
-            reference_video_path: Path to reference video.
-            prompt: Text prompt.
-            output_path: Output video path.
-            seed: Random seed.
-            alpha_override: Override alpha for this run.
-        """
-        generator = None
-        if seed is not None:
-            generator = torch.Generator(device=self.device).manual_seed(seed)
-
-        alpha = alpha_override if alpha_override is not None else self.config["noise_prior"]["alpha"]
-
-        reference_video = load_video(
-            reference_video_path,
-            num_frames=self.config["video"]["num_frames"],
-            height=self.config["video"]["height"],
-            width=self.config["video"]["width"],
-            device=self.device,
-        )
-
-        ref_normalized = normalize_video(reference_video).unsqueeze(0)
-        ref_latents = encode_video_to_latents(self.pipe, ref_normalized, self.device)
-
-        noise_enhancer = NoisePriorEnhancement(
-            pipe=self.pipe,
-            alpha=alpha,
-            rho_s=self.config["noise_prior"]["rho_s"],
-            rho_m=self.config["noise_prior"]["rho_m"],
-            num_inversion_steps=self.config["noise_prior"]["inversion_steps"],
-            device=self.device,
-        )
-
-        prompt_embeds = self._encode_prompt(prompt)
-        enhanced_noise = noise_enhancer.enhance(
-            video_latents=ref_latents,
-            prompt_embeds=prompt_embeds,
-            negative_prompt_embeds=prompt_embeds,
-            generator=generator,
-        )
-
-        video = self._generate_video(prompt, enhanced_noise, generator)
-        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-        save_video_tensor(video, output_path, fps=self.config["video"]["fps"])
-
-        return output_path
-
-    def generate_initial_prompt(
-        self,
-        reference_video_path: str,
-        user_hint: str = "",
-    ) -> str:
-        """
-        Use VLM to generate an initial detailed prompt from the reference video.
-
-        This gives a much better starting point than a manual prompt.
-
-        Args:
-            reference_video_path: Path to reference video.
-            user_hint: Optional hint about the video content.
-
-        Returns:
-            Detailed text prompt describing the reference video.
-        """
-        import base64
-        import io
-        import numpy as np
-
-        logger.info("Generating initial prompt from reference video via VLM...")
-
-        # Extract frames
-        frames_b64 = []
-        try:
-            from decord import VideoReader, cpu as decord_cpu
-            vr = VideoReader(reference_video_path, ctx=decord_cpu(0))
-            total_frames = len(vr)
-            indices = np.linspace(0, total_frames - 1, 8, dtype=int)
-            frames = vr.get_batch(indices).asnumpy()
-        except (ImportError, Exception):
-            import imageio.v3 as iio
-            all_frames = iio.imread(reference_video_path, plugin="pyav")
-            total_frames = len(all_frames)
-            indices = np.linspace(0, total_frames - 1, 8, dtype=int)
-            frames = all_frames[indices]
-
-        from PIL import Image
-        for frame in frames:
-            img = Image.fromarray(frame)
-            max_dim = 1280
-            if max(img.size) > max_dim:
-                ratio = max_dim / max(img.size)
-                new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
-                img = img.resize(new_size, Image.LANCZOS)
-            buffer = io.BytesIO()
-            img.save(buffer, format="JPEG", quality=85)
-            frames_b64.append(base64.b64encode(buffer.getvalue()).decode("utf-8"))
-
-        # Call VLM for initial description
-        system_msg = """You are a professional video description expert. Given key frames from a video, provide a detailed text-to-video prompt that could be used to recreate this video using an AI video generation model.
-
-Your description should cover:
-1. Main subject(s): appearance, clothing, features, position
-2. Action/Motion: what's happening, movement direction, speed, sequence of events
-3. Scene/Background: setting, location, objects, depth
-4. Camera: angle, shot type, any camera movement
-5. Lighting: direction, color, intensity, time of day
-6. Style/Mood: color palette, atmosphere, artistic style
-
-Output a single, self-contained prompt paragraph (no JSON, no bullet points). Write it as a direct T2V prompt that video generation models respond well to. Be specific and vivid."""
-
-        user_msg = f"These are 8 evenly-spaced key frames from a video. Describe what happens in this video in detail for video generation."
-        if user_hint:
-            user_msg += f"\n\nAdditional context from user: {user_hint}"
-
-        content = [{"type": "text", "text": user_msg}]
-        for frame_b64 in frames_b64:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}
-            })
-
-        try:
-            response = self.vlm_client.client.chat.completions.create(
-                model=self.vlm_client.model_name,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": content},
-                ],
-                temperature=0.3,
-                max_tokens=1024,
-            )
-            initial_prompt = response.choices[0].message.content.strip()
-            logger.info(f"  Generated initial prompt: {initial_prompt[:100]}...")
-            return initial_prompt
-        except Exception as e:
-            logger.warning(f"Failed to generate initial prompt: {e}")
-            return user_hint or "A video scene."
+            return self.pipe.text_encoder(inputs.input_ids.to(self.device))[0]

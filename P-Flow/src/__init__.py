@@ -1,38 +1,42 @@
 """
-Video Reproduction via Iterative Prompt Optimization + Noise Prior.
+P-Flow: Video Reproduction via Iterative Prompt Optimization + Noise Prior.
 
-Adapted from P-Flow (arXiv:2603.22091) for faithful video reproduction.
+通过命令行 flag 控制各改动点，一个管线搞定所有配置。
 
-Architecture:
-    ┌─────────────────────────────────────────────────────────┐
-    │                    run_batch.py                          │
-    │         --method baseline  |  --method pflow            │
-    ├─────────────────────────────┬───────────────────────────┤
-    │     BaselinePipeline        │      PFlowEnhancer        │
-    │  (src/baseline.py)          │   (src/enhancement.py)    │
-    │                             │                           │
-    │  VLM Caption → Wan Generate │  + Noise Prior            │
-    │  (one-shot, no iteration)   │  + Iterative Optimization │
-    │                             │  + Best Selection         │
-    └─────────────────────────────┴───────────────────────────┘
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │                         Entry Point                                  │
+    ├─────────────────────────────────────────────────────────────────────┤
+    │  run.py              — CLI 入口 (--svd --inversion --blend ...)     │
+    ├─────────────────────────────────────────────────────────────────────┤
+    │                         Core Modules                                 │
+    ├─────────────────────────────────────────────────────────────────────┤
+    │  pipeline.py         — 统一管线 (PFlowConfig + PFlowPipeline)       │
+    │  baseline.py         — 纯 baseline (caption → 一次生成)             │
+    ├─────────────────────────────────────────────────────────────────────┤
+    │                    Shared Infrastructure                              │
+    ├─────────────────────────────────────────────────────────────────────┤
+    │  flow_matching.py    — FlowMatchingInverter (Euler + Midpoint)       │
+    │  svd_filter.py       — SVDFilter (空间去内容 + 时间保运动)           │
+    │  vlm_client.py       — Local/DashScope/Mock VLM 客户端              │
+    │  video_utils.py      — 视频 I/O 和处理工具                          │
+    │  distributed.py      — 单 GPU 推理工具                              │
+    └─────────────────────────────────────────────────────────────────────┘
 
-Two methods:
-    1. Baseline (Direct Caption): VLM看视频 → 一次性caption → Wan生成
-    2. P-Flow (Ours): VLM caption → [Noise Prior + 迭代VLM优化] → 最优视频
+改动点 (通过 flag 启用):
+    --inversion    Flow Matching Inversion (从参考视频反演噪声)
+    --svd          SVD 两阶段滤波 (空间去内容 + 时间保运动)
+    --blend        噪声混合 (η = √α·η_temporal + √(1-α)·η_random)
+    --iter N       迭代 VLM 优化 (N轮反馈循环)
+    --midpoint     二阶中点法 ODE 求解器 (替代 Euler)
+    --composite    三面板垂直拼接 (ref|prev|current 送 VLM 对比)
 
-Core components:
-- baseline: Direct caption → generation pipeline (no optimization)
-- enhancement: P-Flow iterative optimization module (pluggable)
-- pipeline: Legacy full pipeline (kept for backward compatibility)
-- noise_prior: Flow Matching Inversion + SVD two-stage filtering
-- svd_filter: Spatial removal + Temporal retention
-- flow_matching: Euler integration for inversion (t=1->0)
-- vlm_client: Local Qwen2.5-VL-7B / DashScope API
-- prompt_optimizer: Vertical composite + VLM refinement
-- video_utils: Video I/O and processing
-- trajectory: History management
-- distributed: Single-GPU inference utilities
+用法:
+    python run.py --video ref.mp4 --caption "..." --inversion --svd --blend --iter 10
 """
 
-__version__ = "3.0.0"
+__version__ = "5.0.0"
 __task__ = "video_reproduction"
+
+from .pipeline import PFlowConfig, PFlowPipeline
+
+__all__ = ["PFlowConfig", "PFlowPipeline"]
