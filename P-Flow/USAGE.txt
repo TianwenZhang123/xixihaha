@@ -15,6 +15,7 @@
   --data_dir DATA_DIR     批量模式: 视频目录 (文件名为 0.mp4, 1.mp4, ...)
   --caption_dir CAPTION_DIR
                           批量模式: caption 目录 (文件名为 0.txt, 1.txt, ...)
+                          如果不提供，VLM 会自动观看视频生成 caption
   --output_dir OUTPUT_DIR 输出目录 (默认: outputs)
   --sample_ids ID [ID ...]
                           指定处理哪些样本 ID
@@ -89,35 +90,66 @@
 
 
 ================================================================================
+  管线流程说明
+================================================================================
+
+  Baseline (无任何 flag):
+    1. 加载参考视频
+    2. VLM 观看参考视频 → 生成 caption (如已提供 caption 则跳过)
+    3. caption → T2V 生成视频
+    4. 保存输出 + metadata.json
+
+  Noise Prior (--noise_prior):
+    1. 加载参考视频
+    2. VLM 观看参考视频 → 生成 caption (如已提供则跳过)
+    3. Flow Matching Inversion → SVD 滤波 → 噪声混合
+    4. 混合噪声 + caption → T2V 生成视频
+    5. 保存输出
+
+  Full P-Flow (--full):
+    1. 加载参考视频
+    2. VLM 观看参考视频 → 生成 caption (如已提供则跳过)
+    3. Flow Matching Inversion → SVD 滤波 → 噪声混合
+    4. 迭代循环 (10轮):
+       a. 混合噪声 + prompt → T2V 生成视频
+       b. 三面板拼接 (ref|prev|current) → VLM 对比分析
+       c. VLM 输出优化后的 prompt → 下一轮
+    5. 保存最终视频 + 所有中间结果
+
+
+================================================================================
   使用示例
 ================================================================================
 
-  # 1. 纯 baseline (无任何改动，caption → 一次生成)
-  python run.py --video ref.mp4 --caption "a cat walking on grass"
+  # 1. 纯 baseline — 端到端 (VLM 自动生成 caption → T2V 生成)
+  python run.py --data_dir ./videos --sample_ids 7 --output_dir outputs/baseline
 
-  # 2. 只开噪声先验 (inversion + svd + blend)
-  python run.py --video ref.mp4 --caption "a cat" --inversion --svd --blend
+  # 2. baseline — 使用预生成的 caption
+  python run.py --data_dir ./videos --caption_dir ./captions --sample_ids 7
 
-  # 3. 噪声先验 + 迭代优化 10 轮
-  python run.py --video ref.mp4 --caption "a cat" --inversion --svd --blend --iter 10
+  # 3. 只开噪声先验 (inversion + svd + blend)
+  python run.py --data_dir ./videos --sample_ids 7 --noise_prior
 
-  # 4. 全部改动点 (快捷方式)
-  python run.py --video ref.mp4 --caption "a cat" --full
+  # 4. 噪声先验 + 迭代优化 10 轮
+  python run.py --data_dir ./videos --sample_ids 7 --noise_prior --iter 10
 
-  # 5. 用中点法替代 Euler
-  python run.py --video ref.mp4 --caption "a cat" --noise_prior --midpoint
+  # 5. 全部改动点 (快捷方式)
+  python run.py --data_dir ./videos --sample_ids 7 --full
 
-  # 6. 批量处理 + 断点续跑
+  # 6. 用中点法替代 Euler
+  python run.py --data_dir ./videos --sample_ids 7 --noise_prior --midpoint
+
+  # 7. 批量处理 + 断点续跑
   python run.py --data_dir ./videos --caption_dir ./captions --full --resume
 
-  # 7. 消融: 只开 inversion (不做 SVD 和 blend)
-  python run.py --video ref.mp4 --caption "a cat" --inversion
+  # 8. 消融: 只开 inversion (不做 SVD 和 blend)
+  python run.py --data_dir ./videos --sample_ids 7 --inversion
 
-  # 8. 消融: 只开迭代 (不用噪声先验)
-  python run.py --video ref.mp4 --caption "a cat" --iter 10
+  # 9. 消融: 只开迭代 (不用噪声先验)
+  python run.py --data_dir ./videos --sample_ids 7 --iter 10
 
-  # 9. 调参: 修改 alpha 和 SVD 阈值
-  python run.py --video ref.mp4 --caption "a cat" --full --alpha 0.01 --rho_s 0.2 --rho_m 0.8
+  # 10. 调参: 修改 alpha 和 SVD 阈值
+  python run.py --data_dir ./videos --sample_ids 7 --full --alpha 0.01 --rho_s 0.2 --rho_m 0.8
 
 
 ================================================================================
@@ -126,13 +158,13 @@
 
   实验名              命令
   ─────────────────────────────────────────────────────────────────────────
-  baseline            python run.py --video ... --caption ...
-  +inversion          python run.py --video ... --caption ... --inversion
-  +inversion+svd      python run.py --video ... --caption ... --inversion --svd
-  +noise_prior        python run.py --video ... --caption ... --noise_prior
-  +noise_prior+iter   python run.py --video ... --caption ... --noise_prior --iter 10
-  +midpoint           python run.py --video ... --caption ... --noise_prior --midpoint
-  +composite          python run.py --video ... --caption ... --noise_prior --iter 10 --composite
-  full (ours)         python run.py --video ... --caption ... --full
+  baseline            python run.py --data_dir ... --sample_ids 7
+  +inversion          python run.py --data_dir ... --sample_ids 7 --inversion
+  +inversion+svd      python run.py --data_dir ... --sample_ids 7 --inversion --svd
+  +noise_prior        python run.py --data_dir ... --sample_ids 7 --noise_prior
+  +noise_prior+iter   python run.py --data_dir ... --sample_ids 7 --noise_prior --iter 10
+  +midpoint           python run.py --data_dir ... --sample_ids 7 --noise_prior --midpoint
+  +composite          python run.py --data_dir ... --sample_ids 7 --noise_prior --iter 10 --composite
+  full (ours)         python run.py --data_dir ... --sample_ids 7 --full
 
 ================================================================================

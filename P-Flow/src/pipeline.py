@@ -201,14 +201,27 @@ class PFlowPipeline:
             device=self.device,
         )
 
-        # ── Step 2: 计算噪声先验 (如果启用) ──
+        # ── Step 2: 生成 caption (如果为空，调 VLM 描述参考视频) ──
+        if not caption:
+            logger.info("  [Caption] caption 为空，调用 VLM 描述参考视频...")
+            caption = self.vlm_client.describe_video(video_path)
+            if caption:
+                logger.info(f"  [Caption] VLM 生成: {caption[:80]}...")
+            else:
+                logger.warning("  [Caption] VLM 生成失败，使用默认 caption")
+                caption = "a video scene"
+            # 保存生成的 caption
+            caption_file = out / "vlm_caption.txt"
+            caption_file.write_text(caption, encoding="utf-8")
+
+        # ── Step 3: 计算噪声先验 (如果启用) ──
         eta_temporal = None
         if cfg.use_inversion:
-            eta_temporal = self._compute_noise_prior(ref_video, caption or "a video")
+            eta_temporal = self._compute_noise_prior(ref_video, caption)
 
-        # ── Step 3: 生成循环 ──
+        # ── Step 4: 生成循环 ──
         num_iters = cfg.i_max if cfg.use_iter else 1
-        current_prompt = caption or "a video scene"
+        current_prompt = caption
         prev_video = None
         results = []
 
@@ -237,7 +250,7 @@ class PFlowPipeline:
 
             prev_video = gen_video
 
-        # ── Step 4: 输出最终结果 ──
+        # ── Step 5: 输出最终结果 ──
         final_path = str(out / f"{sample_id}.mp4")
         shutil.copy2(results[-1]["video_path"], final_path)
 

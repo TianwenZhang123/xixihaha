@@ -483,6 +483,58 @@ class LocalVLMClient:
             validated["refined_prompt"] = fallback_prompt
         return validated
 
+    def describe_video(self, video_path: str) -> str:
+        """
+        用 VLM 观看视频并生成详细描述（用于 baseline caption 生成）。
+
+        Args:
+            video_path: 视频文件路径
+
+        Returns:
+            视频的详细文本描述
+        """
+        self._load_model()
+
+        num_frames = 16 if self.use_video_mode else 8
+        frames_pil = self._extract_frames_pil(video_path, num_frames=num_frames)
+        if not frames_pil:
+            logger.warning(f"No frames extracted from {video_path}, returning empty caption")
+            return ""
+
+        describe_instruction = (
+            "You are a professional video captioning expert. "
+            "Describe the given video in detail for a text-to-video generation model. "
+            "Include: main subjects and their appearance, actions and motion patterns, "
+            "scene/background, lighting, camera angle/movement, color palette, and temporal sequence. "
+            "Be specific and vivid. Output ONLY the description text, no JSON, no extra formatting."
+        )
+
+        content_list = []
+        for img in frames_pil:
+            content_list.append({"type": "image", "image": img})
+        content_list.append({
+            "type": "text",
+            "text": "Please describe this video in detail for text-to-video generation.",
+        })
+
+        messages = [
+            {"role": "system", "content": [{"type": "text", "text": describe_instruction}]},
+            {"role": "user", "content": content_list},
+        ]
+
+        for attempt in range(self.max_retries):
+            try:
+                response_text = self._generate(messages)
+                return response_text.strip()
+            except Exception as e:
+                logger.warning(
+                    f"VLM describe_video failed (attempt {attempt + 1}/{self.max_retries}): {e}"
+                )
+                if attempt < self.max_retries - 1:
+                    time.sleep(1)
+
+        return ""
+
     def _fallback_response(self, prompt: str) -> Dict[str, Any]:
         """Fallback when VLM is unavailable."""
         return {
@@ -867,6 +919,68 @@ class VLMClient:
 
         return validated
 
+    def describe_video(self, video_path: str) -> str:
+        """
+        用 VLM 观看视频并生成详细描述（用于 baseline caption 生成）。
+
+        Args:
+            video_path: 视频文件路径
+
+        Returns:
+            视频的详细文本描述
+        """
+        describe_instruction = (
+            "You are a professional video captioning expert. "
+            "Describe the given video in detail for a text-to-video generation model. "
+            "Include: main subjects and their appearance, actions and motion patterns, "
+            "scene/background, lighting, camera angle/movement, color palette, and temporal sequence. "
+            "Be specific and vivid. Output ONLY the description text, no JSON, no extra formatting."
+        )
+
+        content = [{"type": "text", "text": "Please describe this video in detail for text-to-video generation."}]
+
+        if self.use_video_mode:
+            video_url = self._upload_video_to_dashscope(video_path)
+            if video_url:
+                content.append({"type": "video_url", "video_url": {"url": video_url}})
+            else:
+                frames_base64 = self._extract_frames_base64(video_path, num_frames=16)
+                if not frames_base64:
+                    return ""
+                for frame_b64 in frames_base64:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}
+                    })
+        else:
+            frames_base64 = self._extract_frames_base64(video_path, num_frames=8)
+            if not frames_base64:
+                return ""
+            for frame_b64 in frames_base64:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}
+                })
+
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": describe_instruction},
+                        {"role": "user", "content": content},
+                    ],
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                logger.warning(f"VLM describe_video failed (attempt {attempt + 1}/{self.max_retries}): {e}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(2 ** attempt)
+
+        return ""
+
     def _fallback_response(self, prompt: str) -> Dict[str, Any]:
         """Fallback when VLM is unavailable."""
         return {
@@ -889,6 +1003,13 @@ class MockVLMClient:
 
     def __init__(self, **kwargs):
         self.call_count = 0
+
+    def describe_video(self, video_path: str) -> str:
+        """Mock: 返回一个通用描述。"""
+        return (
+            "A video scene with natural motion and lighting. "
+            "The camera captures the subject in a medium shot with smooth movement."
+        )
 
     def analyze_and_refine(
         self,
