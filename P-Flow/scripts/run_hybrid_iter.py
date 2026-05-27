@@ -48,17 +48,61 @@ logger = logging.getLogger(__name__)
 # LLM 改写
 # ─────────────────────────────────────────────────────────────────────────────
 
-REWRITE_SYSTEM = """You are a video prompt optimization expert. Rewrite the given text-to-video prompt following the "Hybrid Strategy":
+REWRITE_SYSTEM = """You restructure VLM video captions into better T2V generation prompts with MINIMAL invasive changes.
 
-## Three Principles:
-1. Subject-First Opening — first word(s) MUST be the concrete main subject noun(s). Remove "The video shows..."
-2. Inject Temporal Action Chain — add "initially...", "then...", "gradually..." to describe motion over time.
-3. Preserve Original Visual Vocabulary — DO NOT replace specific visual descriptors (colors, materials, textures).
+## Core Principle:
+This is a MINIMAL-INTERVENTION rewrite. You ONLY modify: (1) the opening words, (2) action verbs → temporal chains, (3) the ending phrase. Everything else stays VERBATIM — colors, materials, spatial relations, lighting, composition, object names — untouched.
 
-## Constraints:
-- Output ONLY the rewritten prompt. No explanations.
-- Keep word count within ±20% of the original.
-- Write in English."""
+## Rules:
+
+1. OPENING — FIRST WORD = CORE ACTION SUBJECT (the thing that moves/acts).
+   - Remove "The video shows/captures/depicts/showcases..." framework phrases.
+   - Start directly with the subject NOUN (e.g., "Two small sailboats", "White SUV", "Giant whale", "Colorful paper airplanes").
+   - If the action subject appears in paragraph 2 or later, move it to the very beginning.
+   - This exploits position-0 golden weight in UMT5 encoder.
+
+2. ACTION — Convert STATIC action descriptions into TEMPORAL CHAINS.
+   - "is seen driving" → "initially accelerates from a standstill, then cruises steadily"
+   - "swims gracefully" → "initially enters from the left, then glides steadily rightward"
+   - "are flying through" → "initially drift gently into the frame, then gradually accelerate"
+   - Add 1-2 temporal markers ("initially/then/gradually/finally") ONLY on the action subject's motion.
+   - NEVER add temporal markers on background, lighting, or atmosphere descriptions.
+   - You MAY add brief motion direction/trajectory if the original implies movement but doesn't specify direction.
+
+3. ENDING — Close with the most salient MOTION or VISUAL FEATURE keyword.
+   - End the last sentence with a vivid motion/visual phrase (e.g., "gentle circular motion", "dust trail billowing behind", "neon-lit cityscape", "dappled jungle light").
+   - This exploits the last-token golden weight in UMT5 encoder.
+
+4. MIDDLE — Keep ALL original visual descriptions VERBATIM.
+   - Do NOT rephrase "dark brown hulls" as "wooden hulls".
+   - Do NOT rephrase "glass facades" as "glass walls".
+   - Do NOT rephrase "pristine white backdrop" as "white background".
+   - Colors, materials, textures, spatial relations, lighting, composition — copy word-for-word.
+   - These visual vocabulary words are the foundation of CLIP score.
+
+5. DELETE useless meta-text: "In summary...", "Overall, the video captures...", "This perspective allows viewers to appreciate...", "capturing the viewer's attention".
+
+6. Word count: EQUAL to original ±15%. Never compress a 150-word caption into 50 words.
+
+7. Keep paragraph structure similar to original (±1 paragraph).
+
+8. Output ONLY the restructured prompt. No explanations.
+
+## Summary of what you change vs. what you preserve:
+- CHANGE: opening words (subject-first), action verbs (→ temporal chain), ending phrase (→ key visual/motion word)
+- PRESERVE: everything else (colors, materials, objects, spatial relations, lighting, composition, atmosphere descriptions) — word for word
+
+## Examples:
+
+INPUT: "The video depicts an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. A large whale swims gracefully through the center of the scene. Fish can be seen swimming around the whale, adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood."
+OUTPUT: "Giant whale swimming gracefully through an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. The whale initially enters from the left side of the frame, then glides steadily rightward through the center of the scene, its tail and fins moving in slow rhythmic undulation. Fish can be seen swimming around the whale, scattering as it passes and adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood, with the whale's massive form creating gentle currents in the dark blue water."
+
+INPUT: "The video showcases a vibrant and lush jungle environment, with dense green foliage covering the ground and towering trees stretching towards the sky. The trees have a mix of thin and thick trunks, some with bark that appears weathered and rugged. The canopy overhead is thick with leaves, allowing only patches of sunlight to filter through and cast dappled shadows on the forest floor below.\n\nA variety of colorful paper airplanes, including shades of white, pink, purple, yellow, and green, are seen flying through the air. The planes vary in size and design, some appearing more complex than others. They gracefully glide and spin as they move across the frame, contrasting beautifully against the natural backdrop of the forest.\n\nThe scene is peaceful and serene, with the gentle rustling of leaves and the occasional chirping sounds of birds providing a soothing soundtrack to the visual display. The overall atmosphere is one of tranquility and harmony between nature and human creativity in a beautiful jungle setting."
+OUTPUT: "Colorful paper airplanes flying through a vibrant and lush jungle environment, with dense green foliage covering the ground and towering trees stretching towards the sky. The trees have a mix of thin and thick trunks, some with bark that appears weathered and rugged. The canopy overhead is thick with leaves, allowing only patches of sunlight to filter through and cast dappled shadows on the forest floor below.\n\nA variety of paper airplanes, including shades of white, pink, purple, yellow, and green, initially drift gently into the frame, then gradually accelerate as they glide and spin across the scene. The planes vary in size and design, some appearing more complex than others. They gracefully swoop and spiral as they move, some darting forward quickly while others flutter slowly downward, contrasting beautifully against the natural backdrop of the forest.\n\nThe scene is peaceful and serene, with the overall atmosphere one of tranquility and harmony between nature and human creativity, the camera panning left to right following the paper airplanes through the dappled jungle light."
+
+INPUT: "In a serene snowy landscape, two adorable golden retriever puppies waddle through deep snowdrifts. Their fluffy coats glisten in the soft winter light, contrasting beautifully against the pristine white backdrop. With curious and eager expressions, they investigate their surroundings, occasionally pausing to sniff the air or look around. The camera remains steady, capturing every playful movement of the puppies as they move deeper into the snow."
+OUTPUT: "Two adorable golden retriever puppies waddling through deep snowdrifts in a serene snowy landscape. Their fluffy coats glisten in the soft winter light, contrasting beautifully against the pristine white backdrop. The puppies initially trot side by side with curious and eager expressions, then one surges slightly ahead while the other follows closely behind, occasionally pausing to sniff the air or look around. They investigate their surroundings with playful energy, their paws sinking into the deep snow with each bouncing step. The camera remains steady, capturing every playful movement of the puppies as they move deeper into the snow."
+"""
 
 REFINE_SYSTEM = """You are a video prompt optimization expert. You will receive:
 1. The current prompt
@@ -103,7 +147,18 @@ def call_llm(prompt: str, system: str, model: str = "qwen-plus") -> str:
 
 def llm_rewrite(caption: str, model: str = "qwen-plus") -> str:
     """LLM 融合策略初始改写"""
-    user_msg = f"Original prompt ({len(caption.split())} words):\n\n{caption}\n\nRewrite following the Hybrid Strategy. Output ONLY the rewritten prompt:"
+    word_count = len(caption.split())
+    user_msg = (
+        f"Restructure this VLM caption ({word_count} words). "
+        f"ONLY change 3 things: (1) move ACTION SUBJECT to first word, "
+        f"(2) convert static actions to temporal chains (initially/then/gradually), "
+        f"(3) end with a key motion/visual feature phrase. "
+        f"Keep ALL visual descriptions (colors, materials, spatial relations) VERBATIM. "
+        f"Delete meta-text like 'In summary/Overall'. "
+        f"Target ~{word_count} words.\n\n"
+        f"INPUT:\n{caption}\n\n"
+        f"OUTPUT:"
+    )
     return call_llm(user_msg, REWRITE_SYSTEM, model)
 
 
