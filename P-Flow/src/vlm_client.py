@@ -485,13 +485,16 @@ class LocalVLMClient:
 
     def describe_video(self, video_path: str) -> str:
         """
-        用 VLM 观看视频并生成详细描述（用于 baseline caption 生成）。
+        用 VLM 观看视频并生成结构化 caption（用于 baseline caption 生成）。
+
+        按 SUBJECT->ACTION->SCENE->CAMERA->STYLE 模板输出，
+        严格限制在 80-100 英文词，适配 Wan2.1-1.3B T5 encoder 有效窗口。
 
         Args:
             video_path: 视频文件路径
 
         Returns:
-            视频的详细文本描述
+            结构化 caption 字符串（英文，80-100 词）
         """
         self._load_model()
 
@@ -502,11 +505,26 @@ class LocalVLMClient:
             return ""
 
         describe_instruction = (
-            "You are a professional video captioning expert. "
-            "Describe the given video in detail for a text-to-video generation model. "
-            "Include: main subjects and their appearance, actions and motion patterns, "
-            "scene/background, lighting, camera angle/movement, color palette, and temporal sequence. "
-            "Be specific and vivid. Output ONLY the description text, no JSON, no extra formatting."
+            "You are a professional text-to-video prompt engineer. "
+            "Write a structured prompt for a text-to-video model based on the given video frames. "
+            "Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text."
+        )
+
+        structured_request = (
+            "Watch these video frames carefully and write a structured text-to-video prompt in English. "
+            "Follow this exact content order:\n"
+            "1. SUBJECT: who/what the main subject(s) are, their appearance and count.\n"
+            "2. ACTION: what motion/action is happening, movement direction, speed, gestures.\n"
+            "3. SCENE: environment, background, lighting, time of day, weather.\n"
+            "4. CAMERA: shot type (close-up/medium/wide), angle (low/high/eye-level), "
+            "movement (static/pan/zoom/tracking).\n"
+            "5. STYLE: color palette, mood, atmosphere, visual quality.\n\n"
+            "STRICT RULES:\n"
+            "- Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text.\n"
+            "- Total length: strictly 80-100 English words. Count carefully before outputting.\n"
+            "- Put subject and action in the FIRST 40 words (highest priority for the model).\n"
+            "- Be specific and vivid (e.g. 'a golden retriever sprinting left to right across green grass' "
+            "not 'a dog moving')."
         )
 
         content_list = []
@@ -514,7 +532,7 @@ class LocalVLMClient:
             content_list.append({"type": "image", "image": img})
         content_list.append({
             "type": "text",
-            "text": "Please describe this video in detail for text-to-video generation.",
+            "text": structured_request,
         })
 
         messages = [
@@ -921,23 +939,41 @@ class VLMClient:
 
     def describe_video(self, video_path: str) -> str:
         """
-        用 VLM 观看视频并生成详细描述（用于 baseline caption 生成）。
+        用 VLM 观看视频并生成结构化 caption（用于 baseline caption 生成）。
+
+        按 SUBJECT->ACTION->SCENE->CAMERA->STYLE 模板输出，
+        严格限制在 80-100 英文词，适配 Wan2.1-1.3B T5 encoder 有效窗口。
 
         Args:
             video_path: 视频文件路径
 
         Returns:
-            视频的详细文本描述
+            结构化 caption 字符串（英文，80-100 词）
         """
         describe_instruction = (
-            "You are a professional video captioning expert. "
-            "Describe the given video in detail for a text-to-video generation model. "
-            "Include: main subjects and their appearance, actions and motion patterns, "
-            "scene/background, lighting, camera angle/movement, color palette, and temporal sequence. "
-            "Be specific and vivid. Output ONLY the description text, no JSON, no extra formatting."
+            "You are a professional text-to-video prompt engineer. "
+            "Write a structured prompt for a text-to-video model based on the given video. "
+            "Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text."
         )
 
-        content = [{"type": "text", "text": "Please describe this video in detail for text-to-video generation."}]
+        structured_request = (
+            "Watch this video carefully and write a structured text-to-video prompt in English. "
+            "Follow this exact content order:\n"
+            "1. SUBJECT: who/what the main subject(s) are, their appearance and count.\n"
+            "2. ACTION: what motion/action is happening, movement direction, speed, gestures.\n"
+            "3. SCENE: environment, background, lighting, time of day, weather.\n"
+            "4. CAMERA: shot type (close-up/medium/wide), angle (low/high/eye-level), "
+            "movement (static/pan/zoom/tracking).\n"
+            "5. STYLE: color palette, mood, atmosphere, visual quality.\n\n"
+            "STRICT RULES:\n"
+            "- Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text.\n"
+            "- Total length: strictly 80-100 English words. Count carefully before outputting.\n"
+            "- Put subject and action in the FIRST 40 words (highest priority for the model).\n"
+            "- Be specific and vivid (e.g. 'a golden retriever sprinting left to right across green grass' "
+            "not 'a dog moving')."
+        )
+
+        content = [{"type": "text", "text": structured_request}]
 
         if self.use_video_mode:
             video_url = self._upload_video_to_dashscope(video_path)

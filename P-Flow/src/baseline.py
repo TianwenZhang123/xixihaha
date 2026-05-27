@@ -109,27 +109,41 @@ class BaselinePipeline:
 
     def caption_video(self, video_path: str) -> str:
         """
-        Use Qwen2.5-VL-7B to generate a caption for the video.
+        Use Qwen2.5-VL-7B to generate a structured caption for the video.
 
-        Same approach as Video2Prompt: feed video directly to VLM,
-        get a detailed English description.
+        Outputs a structured prompt following the template:
+            SUBJECT -> ACTION -> SCENE -> CAMERA -> STYLE
+
+        Constrained to 80-100 English words to fit Wan2.1-1.3B's effective
+        T5 encoder window (~100-150 tokens, ~80-120 English words).
+        The most important information (subject + action) is placed in the
+        first 40 words to maximize cross-attention weight.
 
         Args:
             video_path: Path to the reference video.
 
         Returns:
-            Caption string (English).
+            Structured caption string (English, 80-100 words).
         """
         from qwen_vl_utils import process_vision_info
 
         self.load_vlm()
 
         prompt_text = (
-            "Describe this video in detail in English. Include: "
-            "the main subject and their appearance, the action/motion happening, "
-            "the scene/background, camera angle and movement, "
-            "and lighting/atmosphere. Write as a single paragraph suitable "
-            "for a text-to-video generation model."
+            "Watch this video carefully and write a structured text-to-video prompt in English. "
+            "Follow this exact content order:\n"
+            "1. SUBJECT: who/what the main subject(s) are, their appearance and count.\n"
+            "2. ACTION: what motion/action is happening, movement direction, speed, gestures.\n"
+            "3. SCENE: environment, background, lighting, time of day, weather.\n"
+            "4. CAMERA: shot type (close-up/medium/wide), angle (low/high/eye-level), "
+            "movement (static/pan/zoom/tracking).\n"
+            "5. STYLE: color palette, mood, atmosphere, visual quality.\n\n"
+            "STRICT RULES:\n"
+            "- Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text.\n"
+            "- Total length: strictly 80-100 English words. Count carefully before outputting.\n"
+            "- Put subject and action in the FIRST 40 words (highest priority for the model).\n"
+            "- Be specific and vivid (e.g. 'a golden retriever sprinting left to right across green grass' "
+            "not 'a dog moving')."
         )
 
         messages = [
