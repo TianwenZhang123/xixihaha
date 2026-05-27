@@ -11,7 +11,6 @@ P-Flow: Video Reproduction via Iterative Prompt Optimization + Noise Prior.
     │                         Core Modules                                 │
     ├─────────────────────────────────────────────────────────────────────┤
     │  pipeline.py         — 统一管线 (PFlowConfig + PFlowPipeline)       │
-    │  baseline.py         — 纯 baseline (caption → 一次生成)             │
     ├─────────────────────────────────────────────────────────────────────┤
     │                    Shared Infrastructure                              │
     ├─────────────────────────────────────────────────────────────────────┤
