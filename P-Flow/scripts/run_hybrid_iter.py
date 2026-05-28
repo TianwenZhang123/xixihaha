@@ -48,78 +48,120 @@ logger = logging.getLogger(__name__)
 # LLM 改写
 # ─────────────────────────────────────────────────────────────────────────────
 
-REWRITE_SYSTEM = """You restructure VLM video captions into better T2V generation prompts with MINIMAL invasive changes.
+REWRITE_SYSTEM = """You restructure VLM video captions into better T2V generation prompts. Your output must be nearly identical to the input — you only make 3 surgical changes.
 
-## Core Principle:
-This is a MINIMAL-INTERVENTION rewrite. You ONLY modify: (1) the opening words, (2) action verbs → temporal chains, (3) the ending phrase. Everything else stays VERBATIM — colors, materials, spatial relations, lighting, composition, object names — untouched.
+## CRITICAL: How to identify the ACTION SUBJECT
+The action subject is THE THING THAT MOVES OR ACTS in the video. Ask: "What is performing the main motion?"
+- If a whale swims through a cityscape → subject = "Giant whale", NOT "Underwater cityscape"
+- If paper airplanes fly through a jungle → subject = "Colorful paper airplanes", NOT "Vibrant jungle environment"
+- If a SUV drives on a road → subject = "White SUV", NOT "Scenic mountainous landscape"
+- If puppies waddle through snow → subject = "Two adorable golden retriever puppies", NOT "Serene snowy landscape"
+- If a cat walks through a garden → subject = "Orange and white cat", NOT "Serene garden"
+- If a volcano erupts → subject = "Massive volcanic eruption", NOT "High vantage point"
+The subject is NEVER the background/environment/setting. It is always the moving entity.
 
-## Rules:
+## The 3 changes you make (NOTHING ELSE):
 
-1. OPENING — FIRST WORD = CORE ACTION SUBJECT (the thing that moves/acts).
-   - Remove "The video shows/captures/depicts/showcases..." framework phrases.
-   - Start directly with the subject NOUN (e.g., "Two small sailboats", "White SUV", "Giant whale", "Colorful paper airplanes").
-   - If the action subject appears in paragraph 2 or later, move it to the very beginning.
-   - This exploits position-0 golden weight in UMT5 encoder.
+1. OPENING — Move the action subject to the very first words. Delete "The video shows/captures/depicts/showcases..." and start with the subject noun phrase.
 
-2. ACTION — Convert STATIC action descriptions into TEMPORAL CHAINS.
-   - "is seen driving" → "initially accelerates from a standstill, then cruises steadily"
-   - "swims gracefully" → "initially enters from the left, then glides steadily rightward"
-   - "are flying through" → "initially drift gently into the frame, then gradually accelerate"
-   - Add 1-2 temporal markers ("initially/then/gradually/finally") ONLY on the action subject's motion.
-   - NEVER add temporal markers on background, lighting, or atmosphere descriptions.
-   - You MAY add brief motion direction/trajectory if the original implies movement but doesn't specify direction.
+2. ACTION — Find the 1-2 sentences where the subject's motion is described. Convert static verbs to a temporal chain using "initially/then/gradually". Add motion direction if implied but not stated. Do NOT touch any other sentences.
 
-3. ENDING — Close with the most salient MOTION or VISUAL FEATURE keyword.
-   - End the last sentence with a vivid motion/visual phrase (e.g., "gentle circular motion", "dust trail billowing behind", "neon-lit cityscape", "dappled jungle light").
-   - This exploits the last-token golden weight in UMT5 encoder.
+3. ENDING — Make the final phrase end with a vivid motion or visual keyword (e.g., "gentle circular motion", "dust trail billowing behind", "dappled jungle light").
 
-4. MIDDLE — Keep ALL original visual descriptions VERBATIM.
-   - Do NOT rephrase "dark brown hulls" as "wooden hulls".
-   - Do NOT rephrase "glass facades" as "glass walls".
-   - Do NOT rephrase "pristine white backdrop" as "white background".
-   - Colors, materials, textures, spatial relations, lighting, composition — copy word-for-word.
-   - These visual vocabulary words are the foundation of CLIP score.
+## What you must NOT do:
 
-5. DELETE useless meta-text: "In summary...", "Overall, the video captures...", "This perspective allows viewers to appreciate...", "capturing the viewer's attention".
+- Do NOT compress or summarize. If the input is 150 words, output ~150 words.
+- Do NOT rephrase visual descriptions. Copy them VERBATIM: "dark brown hulls" stays "dark brown hulls", "glass facades and steel structures" stays "glass facades and steel structures".
+- Do NOT merge paragraphs. If input has 3 paragraphs, output has ~3 paragraphs.
+- Do NOT add information the original doesn't mention or imply.
+- Do NOT add temporal markers to background/lighting/atmosphere sentences.
 
-6. Word count: EQUAL to original ±15%. Never compress a 150-word caption into 50 words.
-
-7. Keep paragraph structure similar to original (±1 paragraph).
-
-8. Output ONLY the restructured prompt. No explanations.
-
-## Summary of what you change vs. what you preserve:
-- CHANGE: opening words (subject-first), action verbs (→ temporal chain), ending phrase (→ key visual/motion word)
-- PRESERVE: everything else (colors, materials, objects, spatial relations, lighting, composition, atmosphere descriptions) — word for word
+## Process:
+1. Read the input. Identify the action subject (what moves?).
+2. Copy the ENTIRE input text.
+3. Move the subject to position 0 (delete framework phrase if needed).
+4. Find the 1-2 motion sentences → insert temporal chain.
+5. Adjust the last phrase to end on a strong visual/motion word.
+6. Leave everything else UNTOUCHED.
 
 ## Examples:
 
+### Example 1 (whale in underwater city):
 INPUT: "The video depicts an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. A large whale swims gracefully through the center of the scene. Fish can be seen swimming around the whale, adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood."
 OUTPUT: "Giant whale swimming gracefully through an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. The whale initially enters from the left side of the frame, then glides steadily rightward through the center of the scene, its tail and fins moving in slow rhythmic undulation. Fish can be seen swimming around the whale, scattering as it passes and adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood, with the whale's massive form creating gentle currents in the dark blue water."
+WHY: Subject="whale" (it swims), not "cityscape" (static background). Sentences about buildings/water/lighting copied verbatim. Only the whale's motion sentence was expanded into a temporal chain.
 
+### Example 2 (paper airplanes in jungle — multi-paragraph):
 INPUT: "The video showcases a vibrant and lush jungle environment, with dense green foliage covering the ground and towering trees stretching towards the sky. The trees have a mix of thin and thick trunks, some with bark that appears weathered and rugged. The canopy overhead is thick with leaves, allowing only patches of sunlight to filter through and cast dappled shadows on the forest floor below.\n\nA variety of colorful paper airplanes, including shades of white, pink, purple, yellow, and green, are seen flying through the air. The planes vary in size and design, some appearing more complex than others. They gracefully glide and spin as they move across the frame, contrasting beautifully against the natural backdrop of the forest.\n\nThe scene is peaceful and serene, with the gentle rustling of leaves and the occasional chirping sounds of birds providing a soothing soundtrack to the visual display. The overall atmosphere is one of tranquility and harmony between nature and human creativity in a beautiful jungle setting."
 OUTPUT: "Colorful paper airplanes flying through a vibrant and lush jungle environment, with dense green foliage covering the ground and towering trees stretching towards the sky. The trees have a mix of thin and thick trunks, some with bark that appears weathered and rugged. The canopy overhead is thick with leaves, allowing only patches of sunlight to filter through and cast dappled shadows on the forest floor below.\n\nA variety of paper airplanes, including shades of white, pink, purple, yellow, and green, initially drift gently into the frame, then gradually accelerate as they glide and spin across the scene. The planes vary in size and design, some appearing more complex than others. They gracefully swoop and spiral as they move, some darting forward quickly while others flutter slowly downward, contrasting beautifully against the natural backdrop of the forest.\n\nThe scene is peaceful and serene, with the overall atmosphere one of tranquility and harmony between nature and human creativity, the camera panning left to right following the paper airplanes through the dappled jungle light."
+WHY: Subject="paper airplanes" (they fly), not "jungle environment" (static setting). The entire first paragraph about trees/canopy is copied word-for-word. Only the airplanes' motion in paragraph 2 gets temporal markers. Paragraph 3's meta-text trimmed, ended with "dappled jungle light".
 
-INPUT: "In a serene snowy landscape, two adorable golden retriever puppies waddle through deep snowdrifts. Their fluffy coats glisten in the soft winter light, contrasting beautifully against the pristine white backdrop. With curious and eager expressions, they investigate their surroundings, occasionally pausing to sniff the air or look around. The camera remains steady, capturing every playful movement of the puppies as they move deeper into the snow."
-OUTPUT: "Two adorable golden retriever puppies waddling through deep snowdrifts in a serene snowy landscape. Their fluffy coats glisten in the soft winter light, contrasting beautifully against the pristine white backdrop. The puppies initially trot side by side with curious and eager expressions, then one surges slightly ahead while the other follows closely behind, occasionally pausing to sniff the air or look around. They investigate their surroundings with playful energy, their paws sinking into the deep snow with each bouncing step. The camera remains steady, capturing every playful movement of the puppies as they move deeper into the snow."
-"""
+### Example 3 (sailboats on coffee — multi-paragraph):
+INPUT: "The video captures a unique scene of two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed.\n\nThe coffee in the cup is dark, providing a stark contrast to the light-colored boats. The camera remains steady throughout the video, providing a clear and unobstructed view of the boats and the coffee. There are no other objects or distractions in the frame, keeping the focus solely on the boats and the coffee.\n\nOverall, the video is a creative and visually appealing representation of two sailboats on a cup of coffee, with the dark coffee serving as the 'sea' for the boats to sail on."
+OUTPUT: "Two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed.\n\nAs the scene progresses, the two boats initially remain still, then begin to drift slowly around the cup of coffee. The larger boat moves clockwise while the smaller one moves counterclockwise, creating a sense of dynamic movement within the still setting. The contrast between the dark coffee and the light wooden boats creates a striking visual effect. The camera remains steady throughout, allowing viewers to fully absorb the intricate details of the boats as they navigate through the dark coffee surface in gentle circular motion."
+WHY: Subject="Two small sailboats" (they float/drift). Deleted "The video captures a unique scene of" and "Overall..." meta-text. Added temporal chain for the boats' motion. Ended with "gentle circular motion". Visual details (dark brown hulls, white sail, black symbol) all preserved verbatim.
 
-REFINE_SYSTEM = """You are a video prompt optimization expert. You will receive:
-1. The current prompt
-2. A VLM's analysis comparing the generated video with the reference (differences)
+### Example 4 (SUV on mountain road — multi-paragraph):
+INPUT: "The video depicts a scenic mountainous landscape bathed in sunlight, highlighting the rugged terrain and the trees that line the path. A white SUV is seen driving on a dirt road that winds through the mountains. The camera pans across the landscape, capturing the vastness of the mountains and the winding road that snakes through them. The dense vegetation adds depth to the image, with trees and bushes lining both sides of the road.\n\nThe SUV's tire tracks are visible on the road, and its headlights illuminate the path ahead. The vehicle moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature.\n\nThe combination of the rugged landscape, the winding dirt road, and the white SUV on the move creates a dynamic visual experience."
+OUTPUT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight, highlighting the rugged terrain and the trees that line the path. The camera pans across the landscape, capturing the vastness of the mountains and the winding road that snakes through them. The dense vegetation adds depth to the image, with trees and bushes lining both sides of the road.\n\nThe SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves. The vehicle's tire tracks are visible on the road, and its headlights illuminate the path ahead. The SUV moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature.\n\nThe combination of the rugged landscape, the winding dirt road, and the white SUV on the move creates a dynamic visual experience with the dust trail billowing behind the vehicle."
+WHY: Subject="White SUV" (it drives), not "scenic mountainous landscape" (static). Landscape/vegetation sentences copied verbatim. SUV motion expanded with temporal chain. Ended with "dust trail billowing behind the vehicle".
 
-Fix the prompt to address the differences, while STILL following:
-1. Subject-First Opening — keep first word(s) as main subject noun(s).
-2. Temporal Action Chain — maintain/improve temporal markers.
-3. Preserve Visual Vocabulary — only modify parts the VLM identified as different.
+Output ONLY the restructured prompt. No explanations."""
 
-Rules:
-- Make TARGETED fixes (top 1-2 differences). Do NOT rewrite everything.
-- Output ONLY the fixed prompt. No explanations.
-- Keep word count similar (±20%). English only."""
+REFINE_SYSTEM = """You fix video generation prompts based on VLM feedback. You make SURGICAL fixes — change only what the VLM says is wrong, leave everything else VERBATIM.
+
+## Your constraints:
+- You will receive: (1) the current prompt, (2) a VLM comparison between reference video and generated video.
+- Fix ONLY the top 1-2 differences the VLM identified. Do NOT touch anything else.
+- The current prompt already follows Subject-First Opening + Temporal Action Chain structure. PRESERVE this structure.
+
+## What you must NOT do:
+- Do NOT rewrite the entire prompt. Copy it and make targeted edits.
+- Do NOT compress or shorten. Output word count must be within ±15% of input.
+- Do NOT rephrase visual descriptions that the VLM did NOT flag. "dark brown hulls" stays "dark brown hulls".
+- Do NOT remove temporal markers (initially/then/gradually) unless VLM says timing is wrong.
+- Do NOT change the subject in position 0 unless VLM says the wrong subject is shown.
+
+## How to fix common VLM feedback:
+
+### "Motion direction is wrong" (e.g., moves left but should move right):
+→ Find the motion sentence, change direction words only. Keep everything else.
+
+### "Subject appearance differs" (e.g., wrong color, wrong size):
+→ Find the subject description, adjust the specific attribute. Keep surrounding sentences.
+
+### "Background/scene differs" (e.g., missing element, wrong lighting):
+→ Find the relevant background sentence, add/modify the specific detail. Keep other descriptions.
+
+### "Motion speed/intensity differs" (e.g., too fast, too slow):
+→ Adjust temporal adverbs: "rapidly" → "slowly", "sudden burst" → "gentle emergence". Keep structure.
+
+## Example:
+
+CURRENT PROMPT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight. The SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves."
+
+VLM FEEDBACK: "In the reference video, the SUV moves from right to left, but in the generated video it moves left to right. Also the dust trail is barely visible in the reference."
+
+FIXED PROMPT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight. The SUV initially appears from the right side of the frame, then moves steadily leftward along the dirt road, with a faint trail of dust barely visible behind it."
+
+WHY: Changed "left→right" to "right→left" (direction fix), changed "growing trail of dust" to "faint trail of dust barely visible" (intensity fix). Everything else copied verbatim.
+
+## Output ONLY the fixed prompt. No explanations. English only."""
 
 
-def call_llm(prompt: str, system: str, model: str = "qwen-plus") -> str:
+def _compute_edit_ratio(text_a: str, text_b: str) -> float:
+    """计算两段文本的 token-level 编辑距离比率 (0~1)。
+    使用 SequenceMatcher 的 ratio 取反：1 - similarity = edit_ratio。
+    """
+    from difflib import SequenceMatcher
+    tokens_a = text_a.split()
+    tokens_b = text_b.split()
+    similarity = SequenceMatcher(None, tokens_a, tokens_b).ratio()
+    return 1.0 - similarity
+
+
+def call_llm(prompt: str, system: str, model: str = "qwen-plus",
+             temperature: float = 0.5) -> str:
     """调用 DashScope LLM"""
     import openai
 
@@ -133,7 +175,7 @@ def call_llm(prompt: str, system: str, model: str = "qwen-plus") -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.7,
+        temperature=temperature,
         max_tokens=1024,
     )
     result = response.choices[0].message.content.strip()
@@ -145,27 +187,76 @@ def call_llm(prompt: str, system: str, model: str = "qwen-plus") -> str:
     return result
 
 
-def llm_rewrite(caption: str, model: str = "qwen-plus") -> str:
-    """LLM 融合策略初始改写"""
+def llm_rewrite(caption: str, model: str = "qwen-plus",
+                max_retries: int = 2) -> str:
+    """LLM 融合策略初始改写（带 length 验证 + diff check）"""
     word_count = len(caption.split())
     user_msg = (
         f"Restructure this VLM caption ({word_count} words). "
-        f"ONLY change 3 things: (1) move ACTION SUBJECT to first word, "
-        f"(2) convert static actions to temporal chains (initially/then/gradually), "
-        f"(3) end with a key motion/visual feature phrase. "
-        f"Keep ALL visual descriptions (colors, materials, spatial relations) VERBATIM. "
-        f"Delete meta-text like 'In summary/Overall'. "
-        f"Target ~{word_count} words.\n\n"
+        f"First, identify what MOVES in this caption — that is your action subject. "
+        f"Then make ONLY 3 changes: "
+        f"(1) move the action subject to the first word (delete 'The video captures/shows...' if present), "
+        f"(2) find the 1-2 sentences about the subject's motion and add a temporal chain (initially/then/gradually), "
+        f"(3) end the last sentence with a key motion/visual word. "
+        f"Copy ALL other sentences VERBATIM — do not rephrase, compress, or merge paragraphs. "
+        f"Delete only meta-text like 'In summary/Overall/This perspective allows...'. "
+        f"Output must be ~{word_count} words (±15%). Do NOT compress.\n\n"
         f"INPUT:\n{caption}\n\n"
         f"OUTPUT:"
     )
-    return call_llm(user_msg, REWRITE_SYSTEM, model)
+
+    for attempt in range(max_retries + 1):
+        # 首次用 0.5，重试时逐步降低 temperature 增加保守性
+        temp = 0.5 if attempt == 0 else max(0.3, 0.5 - attempt * 0.1)
+        result = call_llm(user_msg, REWRITE_SYSTEM, model, temperature=temp)
+
+        # ── 验证 1: 长度检查（不能压缩超过 30%）──
+        result_words = len(result.split())
+        ratio = result_words / max(word_count, 1)
+        if ratio < 0.70:
+            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words}/{word_count} = {ratio:.0%}")
+            continue
+
+        # ── 验证 2: diff check（编辑距离不能超过 50%）──
+        edit_ratio = _compute_edit_ratio(caption, result)
+        if edit_ratio > 0.50:
+            logger.warning(f"  [重试 {attempt+1}] 改动过大: edit_ratio={edit_ratio:.0%}")
+            continue
+
+        return result
+
+    # 所有重试都失败，返回最后一次结果（总比没有好）
+    logger.warning(f"  所有重试均未通过验证，使用最后一次结果")
+    return result
 
 
-def llm_refine(current_prompt: str, vlm_feedback: str, model: str = "qwen-plus") -> str:
-    """LLM 根据 VLM 反馈修复"""
+def llm_refine(current_prompt: str, vlm_feedback: str, model: str = "qwen-plus",
+               max_retries: int = 2) -> str:
+    """LLM 根据 VLM 反馈修复（带 length 验证 + diff check）"""
+    word_count = len(current_prompt.split())
     user_msg = f"## Current Prompt:\n{current_prompt}\n\n## VLM Feedback:\n{vlm_feedback}\n\nFix the prompt. Output ONLY the fixed prompt:"
-    return call_llm(user_msg, REFINE_SYSTEM, model)
+
+    for attempt in range(max_retries + 1):
+        temp = 0.4 if attempt == 0 else max(0.2, 0.4 - attempt * 0.1)
+        result = call_llm(user_msg, REFINE_SYSTEM, model, temperature=temp)
+
+        # ── 验证 1: 长度检查 ──
+        result_words = len(result.split())
+        ratio = result_words / max(word_count, 1)
+        if ratio < 0.70:
+            logger.warning(f"  [REFINE 重试 {attempt+1}] 输出过短: {result_words}/{word_count} = {ratio:.0%}")
+            continue
+
+        # ── 验证 2: diff check（修复阶段允许更小的改动，阈值 35%）──
+        edit_ratio = _compute_edit_ratio(current_prompt, result)
+        if edit_ratio > 0.35:
+            logger.warning(f"  [REFINE 重试 {attempt+1}] 改动过大: edit_ratio={edit_ratio:.0%}")
+            continue
+
+        return result
+
+    logger.warning(f"  REFINE 所有重试均未通过验证，使用最后一次结果")
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -226,11 +317,29 @@ def run_eval(orig_dir: str, gen_dir: str, caption_dir: str,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# VLM 对比（调用现有 VLM 接口）
+# VLM 对比（结构化对比 prompt）
 # ─────────────────────────────────────────────────────────────────────────────
 
+VLM_COMPARE_PROMPT = """You are comparing two videos shown as key frames. The TOP half is the REFERENCE (ground truth), the BOTTOM half is the GENERATED video.
+
+Analyze the differences in these 4 dimensions ONLY. Be specific and concise:
+
+1. SUBJECT: What is the main moving entity? Is it the same in both? (species, color, size, count)
+2. MOTION: Is the motion direction, speed, and trajectory the same? (left→right vs right→left, fast vs slow, straight vs curved)
+3. BACKGROUND: Are the background elements, colors, and lighting consistent?
+4. TIMING: Does the action sequence match? (what happens first/then/finally)
+
+Format your response as:
+SUBJECT: [differences or "matches"]
+MOTION: [differences or "matches"]
+BACKGROUND: [differences or "matches"]
+TIMING: [differences or "matches"]
+
+If a dimension matches perfectly, just write "matches". Focus on the 1-2 biggest differences that would matter most for prompt correction."""
+
+
 def vlm_compare(ref_video: str, gen_video: str, vlm_client) -> str:
-    """VLM 对比两个视频，返回差异分析"""
+    """VLM 对比两个视频，返回结构化差异分析"""
     from src.video_utils import load_video, save_video_tensor, create_vertical_composite
 
     # 加载并拼接（CPU 上操作）
@@ -242,26 +351,48 @@ def vlm_compare(ref_video: str, gen_video: str, vlm_client) -> str:
     del ref, gen, composite
 
     try:
-        result = vlm_client.analyze_and_refine(
-            composite_video_path=composite_path,
-            current_prompt="[Comparing reference vs generated]",
-            iteration=1,
-            i_max=1,
-        )
-        analysis = result.get("analysis", {})
-        comparison = analysis.get("comparison", "")
-        if comparison:
-            return comparison
-        # fallback
-        parts = []
-        if analysis.get("reference_description"):
-            parts.append(f"Reference: {analysis['reference_description']}")
-        if analysis.get("new_generated_description"):
-            parts.append(f"Generated: {analysis['new_generated_description']}")
-        if parts:
-            return "\n".join(parts)
+        # 直接用 VLM 的底层接口，传自定义结构化 prompt
+        num_frames = 16 if getattr(vlm_client, 'use_video_mode', True) else 8
+        frames_pil = vlm_client._extract_frames_pil(composite_path, num_frames=num_frames)
+        if not frames_pil:
+            return "Unable to extract frames for comparison."
+
+        content_list = []
+        for img in frames_pil:
+            content_list.append({"type": "image", "image": img})
+        content_list.append({"type": "text", "text": VLM_COMPARE_PROMPT})
+
+        messages = [
+            {"role": "user", "content": content_list},
+        ]
+
+        response_text = vlm_client._generate(messages)
+        if response_text and len(response_text.strip()) > 10:
+            return response_text.strip()
+
     except Exception as e:
-        logger.warning(f"  VLM compare failed: {e}")
+        logger.warning(f"  VLM structured compare failed: {e}, falling back to analyze_and_refine")
+        # Fallback: 用原来的通用接口
+        try:
+            result = vlm_client.analyze_and_refine(
+                composite_video_path=composite_path,
+                current_prompt="[Comparing reference vs generated]",
+                iteration=1,
+                i_max=1,
+            )
+            analysis = result.get("analysis", {})
+            comparison = analysis.get("comparison", "")
+            if comparison:
+                return comparison
+            parts = []
+            if analysis.get("reference_description"):
+                parts.append(f"Reference: {analysis['reference_description']}")
+            if analysis.get("new_generated_description"):
+                parts.append(f"Generated: {analysis['new_generated_description']}")
+            if parts:
+                return "\n".join(parts)
+        except Exception as e2:
+            logger.warning(f"  VLM fallback also failed: {e2}")
 
     return "Unable to analyze differences."
 
