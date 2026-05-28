@@ -55,17 +55,18 @@ from scripts.run_hybrid_iter import (
 
 
 # ─── 已知的正确主体（用于验证主体识别）───
+# 基于实际 VLM caption 内容确定的正确主体
 EXPECTED_SUBJECTS = {
-    7: "Two small sailboats",
-    17: "White SUV",
-    21: "Colorful paper airplanes",
-    31: "Giant whale",
-    32: "Massive volcanic eruption",  # or "Volcano"
-    33: "Two adorable golden retriever puppies",
-    34: "Vibrant red and orange autumn leaves",
-    43: "Orange and white cat",
-    46: "Massive volcanic eruption",
-    47: "Bright orange goldfish",
+    7: "Two small sailboats",          # sailboats floating on coffee
+    17: "White SUV",                    # SUV driving on dirt road
+    21: "Colorful paper airplanes",     # airplanes flying through jungle
+    31: "Giant whale",                  # whale swimming through cityscape
+    32: "Two adorable golden retriever puppies",  # puppies in snow
+    33: "Man",                          # man running in place
+    34: "Three playful puppies",        # puppies on gravel road
+    43: "Orange and white cat",         # cat walking through garden
+    46: "Massive volcanic eruption",    # volcano erupting
+    47: "Two dogs",                     # two dogs walking in city
 }
 
 
