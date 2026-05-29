@@ -1,0 +1,154 @@
+# ============================================================================
+# VMAD (Video Motion Asset Distillation) — Faithful Video Reproduction
+# via Progressive Velocity Distillation
+# ============================================================================
+#
+# Goal: Given a reference video V_ref, find the optimal conditioning (Δe, η)
+#       that maximizes multi-dimensional similarity to V_ref when generating
+#       with a frozen T2V model.
+#
+# Theory: Spectral Autoregression (Dieleman 2024) — diffusion generates
+#         low-freq → high-freq. Three-layer encoding captures each band.
+#
+# References: DiTFlow (CVPR25), MotionPrompt (CVPR25), Reenact Anything (SIGGRAPH25),
+#             BCD (ICCV25), FreeInit (ECCV24), RichSpace (ICLR25), ARPO (2025)
+#
+# Base Model: Wan2.1-T2V-1.3B (bfloat16, ~2.6GB VRAM)
+# Hardware: 1x RTX 4090 (24GB) or A800
+# ============================================================================
+
+# ── Model Paths ──
+model:
+  t2v_path: "/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers"
+  vlm_path: "/root/models/Qwen2.5-VL-7B-Instruct"
+  vlm_provider: "local"          # local | dashscope | mock
+  dtype: "bfloat16"
+
+# ── Video Generation Parameters ──
+video:
+  height: 480
+  width: 832
+  num_frames: 81
+  fps: 15
+  guidance_scale: 5.0
+  num_inference_steps: 30
+
+# ============================================================================
+# Phase A: Noise Prior Extraction (Layer 3 — Highest Fidelity)
+# ============================================================================
+# Flow Matching Inversion recovers the exact noise η_inv that, when denoised,
+# reproduces the reference video. This is the highest-fidelity layer but
+# only works with the same model + same seed.
+
+# Flow Matching Inversion (Euler ODE)
+inversion:
+  steps: 50                      # ODE integration steps
+  use_midpoint: false            # true=2nd-order midpoint, false=1st-order Euler
+
+# Spectral Analysis (OPTIONAL — for understanding, not filtering)
+# In reproduction mode (default), we keep ALL information (ρ_s=0, ρ_m=1.0).
+# In motion transfer mode, set ρ_s=0.1 to remove content-specific components.
+spectral_decomposition:
+  rho_s: 0.0                    # Spatial filtering ratio (0 = keep everything for reproduction)
+  rho_m: 1.0                    # Temporal retention ratio (1.0 = keep all motion)
+  compute_energy_distribution: true  # Compute spectral energy for analysis
+
+# Noise Prior Blending
+# α controls how much of η_inv to inject as initial noise.
+# Even α=0.001 provides significant structural guidance (spectral autoregression).
+blend:
+  alpha: 0.001                   # η_init = √α·η_inv + √(1-α)·η_random
+
+# ============================================================================
+# Phase B: Embedding Optimization (Layer 2 — Core Innovation)
+# ============================================================================
+# Position-Aware Velocity Field Matching: optimize Δe so that
+#   v_θ(x_t, t, e₀ + Δe) ≈ v* = z₀ - η_inv  for all t ∈ [0, T_m]
+#
+# Key insight: DiT cross-attention position 0 has 10-15× higher weight
+# (U-shape bias). Position-aware gradient scaling exploits this for
+# faster convergence (~100 steps vs 1000+ for uniform optimization).
+#
+# STATUS: Code implemented, experiments pending.
+
+velocity_matching:
+  T_m: 1.0                      # Full timestep range for maximum reproduction fidelity
+                                 # (Use 0.3 for motion-only transfer mode)
+  num_opt_steps: 100            # Optimization iterations
+  lr: 1.0e-3                    # Adam learning rate
+  use_disentangle: false        # Disabled for reproduction mode (no need to separate motion/content)
+
+  # Position-Aware Extension (Wu et al. ICML 2025)
+  use_position_aware: true      # Enable position-aware gradient scaling
+  lambda_pos: 0.01              # Position regularization weight
+  warmup_ratio: 0.1             # Cosine annealing warmup ratio
+  position_init: "u_shape"      # Weight initialization: u_shape | uniform | linear_decay
+
+# Content Disentanglement (OPTIONAL — only for motion transfer mode)
+# When λ_dis > 0, ensures Δe encodes only motion, not content.
+# For reproduction mode (default), set λ_dis = 0 (we WANT all information).
+disentangle:
+  lambda_dis: 0.0               # 0.0 = reproduction mode (default), 0.1 = motion transfer
+  num_augmentations: 5          # LLM-generated augmentation prompts
+  compute_every_n_steps: 10     # Compute disentangle loss every N steps (efficiency)
+  augmentation_provider: "mock" # mock | dashscope | local
+
+# ============================================================================
+# Phase C: Token Decoding (Layer 1 — Cross-Model Transfer)
+# ============================================================================
+# Converts continuous Δe to discrete tokens for human readability and
+# cross-model transfer. Uses velocity-preserving decoding to maintain
+# fidelity during discretization.
+
+token_decoder:
+  enabled: true
+  # Stage 1: Nearest-Neighbor Projection
+  top_k: 64                     # Candidate pool size for NN search
+  # Stage 2: Gumbel-Softmax Relaxation
+  gumbel_temperature: 0.7       # Temperature (lower=sharper, higher=more exploration)
+  gumbel_hard: true             # Hard Gumbel-Softmax (straight-through estimator)
+  # Stage 3: Velocity-Preserving Reranking
+  beam_width: 8                 # Beam search width for reranking
+  velocity_weight: 0.6          # Weight for velocity preservation vs likelihood
+  max_decode_length: 20         # Maximum decoded token sequence length
+
+# VLM Motion Text Decoding (supplementary)
+text_decoding:
+  enabled: true
+  compare_prompt: >
+    Compare these two videos and describe ALL differences in detail.
+    Focus on: motion patterns, spatial layout, color, timing, camera movement,
+    subject appearance, background elements. Output a concise paragraph (50-80 words)
+    describing what the reference video has that the generated video does not.
+
+# ============================================================================
+# Operating Modes
+# ============================================================================
+# Mode 1 — Faithful Reproduction (DEFAULT):
+#   T_m=1.0, λ_dis=0, ρ_s=0, full η_inv
+#   Goal: Maximize CLIP/XCLIP/SSIM/LPIPS similarity to V_ref
+#
+# Mode 2 — Motion Transfer (OPTIONAL):
+#   T_m=0.3, λ_dis=0.1, ρ_s=0.1, filtered η_motion
+#   Goal: Transfer motion pattern to new content
+#   To enable: set velocity_matching.T_m=0.3, disentangle.lambda_dis=0.1,
+#              spectral_decomposition.rho_s=0.1
+
+# ============================================================================
+# Pipeline Control
+# ============================================================================
+pipeline:
+  use_spectral: true            # Use spectral decomposition
+  use_position_aware: true      # Use position-aware velocity matching
+  use_token_decode: true        # Use velocity-preserving token decoder
+  run_phase_a: true             # Noise prior extraction
+  run_phase_b: true             # Embedding optimization
+  run_phase_c: true             # Token decoding
+
+# ── Runtime Control ──
+runtime:
+  seed: 42
+  output_dir: "outputs"
+  save_intermediates: true
+  verbose: false
+  device: "cuda"
