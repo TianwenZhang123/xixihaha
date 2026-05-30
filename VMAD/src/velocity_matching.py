@@ -86,7 +86,6 @@ from typing import Optional, List, Dict, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -251,17 +250,11 @@ class PositionAwareVelocityMatcher:
         encoder_hidden_states: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Model forward pass with gradient checkpointing for VRAM efficiency.
+        Direct model forward pass (with grad for Δe).
 
-        Uses torch.utils.checkpoint (use_reentrant=False) to wrap the entire
-        model forward. This discards all intermediate activations during forward
-        and recomputes them during backward, reducing peak VRAM from ~60GB to ~4GB
-        for the backward pass. The trade-off is ~2x forward compute per step.
-
-        use_reentrant=False is chosen because:
-        - It correctly handles inputs where only some require grad (encoder_hidden_states)
-        - It does not depend on model.training mode
-        - It does not conflict with any internal model checkpoint logic
+        No gradient checkpointing — for small latents (e.g. 33 frames / 5 latent
+        frames) the full forward+backward fits in 80GB. For larger inputs,
+        reduce --num_frames.
         """
         model = self._get_model()
 
@@ -269,25 +262,16 @@ class PositionAwareVelocityMatcher:
             timestep = timestep.unsqueeze(0)
         timestep = timestep.to(device=latents.device, dtype=latents.dtype)
 
-        def _run_model(h, t, e):
-            out = model(
-                hidden_states=h,
-                timestep=t,
-                encoder_hidden_states=e,
-                return_dict=False,
-            )
-            if isinstance(out, tuple):
-                return out[0]
-            return out
-
-        v_pred = torch_checkpoint(
-            _run_model,
-            latents,
-            timestep.expand(latents.shape[0]),
-            encoder_hidden_states,
-            use_reentrant=False,
+        model_output = model(
+            hidden_states=latents,
+            timestep=timestep.expand(latents.shape[0]),
+            encoder_hidden_states=encoder_hidden_states,
+            return_dict=False,
         )
-        return v_pred
+
+        if isinstance(model_output, tuple):
+            return model_output[0]
+        return model_output
 
     def optimize(
         self,
