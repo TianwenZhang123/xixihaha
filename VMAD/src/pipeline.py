@@ -762,7 +762,11 @@ class VMADPipeline:
         return video.clamp(0, 1)
 
     def _encode_prompt(self, prompt: str) -> torch.Tensor:
-        """Encode text to embedding via T5 text encoder."""
+        """Encode text to embedding via T5 text encoder.
+
+        For Wan2.1: output shape is (1, 512, 4096) — UMT5-XXL hidden_size=4096,
+        max_sequence_length=512.
+        """
         if hasattr(self.pipe, "encode_prompt"):
             sig = inspect.signature(self.pipe.encode_prompt)
             params = sig.parameters
@@ -773,12 +777,14 @@ class VMADPipeline:
                 kwargs["num_videos_per_prompt"] = 1
             if "do_classifier_free_guidance" in params:
                 kwargs["do_classifier_free_guidance"] = False
+            if "max_sequence_length" in params:
+                kwargs["max_sequence_length"] = 512
             result = self.pipe.encode_prompt(**kwargs)
             return result[0] if isinstance(result, tuple) else result
         else:
             inputs = self.pipe.tokenizer(
                 prompt, padding="max_length",
-                max_length=self.pipe.tokenizer.model_max_length,
+                max_length=512,
                 truncation=True, return_tensors="pt",
             )
             return self.pipe.text_encoder(inputs.input_ids.to(self.device))[0]

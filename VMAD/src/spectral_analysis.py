@@ -95,14 +95,16 @@ class SpectralBoundaryEstimator:
         model = self._get_model()
         model.eval()
 
-        timesteps = torch.linspace(0, 1, self.num_timesteps, device=self.device)
+        timesteps_norm = torch.linspace(0, 1, self.num_timesteps, device=self.device)
         motion_sensitivity = []
         content_sensitivity = []
 
-        for t in timesteps:
+        for t_norm in timesteps_norm:
             eta = torch.randn_like(z0)
-            x_t = (1 - t) * eta + t * z0
-            t_tensor = t.unsqueeze(0).to(dtype=z0.dtype)
+            x_t = (1 - t_norm) * eta + t_norm * z0
+            # DiT expects timestep in [0, 1000]
+            t_model = (t_norm * 1000.0).unsqueeze(0).to(dtype=z0.dtype)
+            t_tensor = t_model
 
             # Content sensitivity: variance across different content embeddings
             v_content_preds = []
@@ -224,13 +226,14 @@ class PositionBiasAnalyzer:
                 hooks.append(module.register_forward_hook(hook_fn))
 
         # Forward pass
-        t = torch.tensor([timestep], device=self.device, dtype=z0.dtype)
+        # timestep param is in [0,1]; DiT expects [0,1000]
+        t_model = torch.tensor([timestep * 1000.0], device=self.device, dtype=z0.dtype)
         eta = torch.randn_like(z0)
         x_t = (1 - timestep) * eta + timestep * z0
 
         model(
             hidden_states=x_t,
-            timestep=t.expand(x_t.shape[0]),
+            timestep=t_model.expand(x_t.shape[0]),
             encoder_hidden_states=embedding,
             return_dict=False,
         )
@@ -289,15 +292,16 @@ class PositionBiasAnalyzer:
         model.eval()
 
         seq_len = delta_e.shape[-2] if delta_e.dim() == 3 else delta_e.shape[0]
-        timesteps = torch.linspace(0.05, 0.5, num_timesteps, device=self.device)
+        timesteps_norm = torch.linspace(0.05, 0.5, num_timesteps, device=self.device)
 
         influence_map = torch.zeros(num_timesteps, seq_len)
 
         with torch.no_grad():
-            for ti, t in enumerate(timesteps):
+            for ti, t_norm in enumerate(timesteps_norm):
                 eta = torch.randn_like(z0)
-                x_t = (1 - t) * eta + t * z0
-                t_tensor = t.unsqueeze(0).to(dtype=z0.dtype)
+                x_t = (1 - t_norm) * eta + t_norm * z0
+                # DiT expects timestep in [0, 1000]
+                t_tensor = (t_norm * 1000.0).unsqueeze(0).to(dtype=z0.dtype)
 
                 # Reference velocity
                 e_full = e0 + delta_e
@@ -400,9 +404,11 @@ class ThreeLayerInformationAnalyzer:
         eta_random = torch.randn_like(z0)
         v_target = z0 - eta_random  # Ideal velocity
 
-        t = torch.tensor(0.15, device=self.device, dtype=z0.dtype)
-        x_t = (1 - 0.15) * eta_random + 0.15 * z0
-        t_tensor = t.unsqueeze(0)
+        t_norm = 0.15
+        # DiT expects timestep in [0, 1000]
+        t_model = torch.tensor(t_norm * 1000.0, device=self.device, dtype=z0.dtype)
+        x_t = (1 - t_norm) * eta_random + t_norm * z0
+        t_tensor = t_model.unsqueeze(0)
 
         def compute_vel_error(embedding, latents=None):
             if embedding.dim() == 2:

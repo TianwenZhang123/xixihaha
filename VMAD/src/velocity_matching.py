@@ -340,13 +340,16 @@ class PositionAwareVelocityMatcher:
         for step in range(self.num_opt_steps):
             optimizer.zero_grad()
 
-            # ─── Sample timestep t ~ U(0, T_m) [spectral boundary] ───
-            t = torch.rand(1, device=self.device) * self.T_m
+            # ─── Sample timestep t_norm ~ U(0, T_m) [spectral boundary] ───
+            # t_norm is in [0, 1] for flow matching interpolation formula
+            # t_model is in [0, 1000] for DiT input (Wan2.1 convention)
+            t_norm = torch.rand(1, device=self.device) * self.T_m
+            t_model = t_norm * 1000.0
 
             # ─── Construct interpolation x_t = (1-t)·η_inv + t·z₀ ───
             # Use the INVERTED noise η_inv (not random noise) to stay on the
             # deterministic ODE trajectory of the reference video
-            x_t = (1 - t) * eta_inv + t * z0
+            x_t = (1 - t_norm) * eta_inv + t_norm * z0
 
             # ─── Target velocity: v* = z₀ - η_inv ───
             # The ideal velocity field along the reference ODE trajectory
@@ -354,7 +357,7 @@ class PositionAwareVelocityMatcher:
 
             # ─── Velocity matching loss ───
             e_current = e0 + delta_e  # Inject motion token
-            v_pred = self._model_forward(x_t, t, e_current)
+            v_pred = self._model_forward(x_t, t_model, e_current)
             loss_vel = ((v_pred - v_star) ** 2).mean()
 
             # ─── Content disentanglement loss (after warmup, every N steps) ───
@@ -367,7 +370,7 @@ class PositionAwareVelocityMatcher:
                 and step % self.dis_every_n_steps == 0
             ):
                 loss_dis = self._compute_disentangle_loss(
-                    x_t, t, delta_e, aug_embeddings
+                    x_t, t_model, delta_e, aug_embeddings
                 )
 
             # ─── Position-aware regularization ───
@@ -509,12 +512,13 @@ class PositionAwareVelocityMatcher:
         model.eval()
 
         with torch.no_grad():
-            t = torch.tensor(self.T_m / 2, device=self.device)
+            t_norm = torch.tensor(self.T_m / 2, device=self.device)
+            t_model = t_norm * 1000.0
             eta = torch.randn_like(z0)
-            x_t = (1 - t) * eta + t * z0
+            x_t = (1 - t_norm) * eta + t_norm * z0
 
             # Full prediction
-            v_full = self._model_forward(x_t, t, e0 + delta_e)
+            v_full = self._model_forward(x_t, t_model, e0 + delta_e)
 
             # Per-position ablation
             seq_len = delta_e.shape[-2] if delta_e.dim() == 3 else delta_e.shape[0]
@@ -527,7 +531,7 @@ class PositionAwareVelocityMatcher:
                 else:
                     delta_e_ablated[j, :] = 0
 
-                v_ablated = self._model_forward(x_t, t, e0 + delta_e_ablated)
+                v_ablated = self._model_forward(x_t, t_model, e0 + delta_e_ablated)
                 influence = ((v_full - v_ablated) ** 2).mean().item()
                 influences.append(influence)
 

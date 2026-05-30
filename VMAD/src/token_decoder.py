@@ -442,12 +442,14 @@ class VelocityPreservingTokenDecoder:
 
         # Reference velocity field
         with torch.no_grad():
-            t_eval = torch.tensor(0.15, device=self.device)  # Mid-range of T_m
+            t_norm = 0.15  # Mid-range of T_m (in [0,1])
+            t_eval = torch.tensor(t_norm, device=self.device)
+            t_model = torch.tensor(t_norm * 1000.0, device=self.device)  # DiT expects [0,1000]
             eta = torch.randn_like(z0)
             x_t = (1 - t_eval) * eta + t_eval * z0
 
             e_ref = (e0 + delta_e).unsqueeze(0) if (e0 + delta_e).dim() == 2 else (e0 + delta_e)
-            timestep = t_eval.unsqueeze(0).to(dtype=z0.dtype)
+            timestep = t_model.unsqueeze(0).to(dtype=z0.dtype)
 
             v_ref = model(
                 hidden_states=x_t,

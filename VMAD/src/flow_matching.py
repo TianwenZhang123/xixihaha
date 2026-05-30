@@ -165,10 +165,12 @@ class FlowMatchingInverter:
         logger.info(f"  [Inversion/Euler] {self.num_steps} steps, dt={dt:.4f}")
 
         for i in range(self.num_steps):
-            t = torch.tensor(i * dt, device=self.device)
+            # t_norm in [0, 1] for interpolation, t_model in [0, 1000] for DiT
+            t_norm = i * dt
+            t_model = torch.tensor(t_norm * 1000.0, device=self.device)
 
             # 预测速度场 (无条件)
-            v = self._model_forward(x, t, prompt_embeds)
+            v = self._model_forward(x, t_model, prompt_embeds)
 
             # Euler 步进: x_{t+dt} = x_t + v * dt
             x = x + v * dt
@@ -204,15 +206,16 @@ class FlowMatchingInverter:
         logger.info(f"  [Inversion/Midpoint] {self.num_steps} steps, dt={dt:.4f}")
 
         for i in range(self.num_steps):
-            t = torch.tensor(i * dt, device=self.device)
-            t_mid = torch.tensor((i + 0.5) * dt, device=self.device)
+            # t_norm in [0, 1] for interpolation, t_model in [0, 1000] for DiT
+            t_model = torch.tensor(i * dt * 1000.0, device=self.device)
+            t_mid_model = torch.tensor((i + 0.5) * dt * 1000.0, device=self.device)
 
             # Stage 1: 计算中点
-            k1 = self._model_forward(x, t, prompt_embeds)
+            k1 = self._model_forward(x, t_model, prompt_embeds)
             x_mid = x + 0.5 * dt * k1
 
             # Stage 2: 用中点速度更新
-            k2 = self._model_forward(x_mid, t_mid, prompt_embeds)
+            k2 = self._model_forward(x_mid, t_mid_model, prompt_embeds)
             x = x + dt * k2
 
         return x
