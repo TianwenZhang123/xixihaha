@@ -453,6 +453,10 @@ class MotionAssetManager:
             + ((1 - alpha_scaled) ** 0.5) * eta_random
         )
 
+        # Ensure 5D (B, C, F, H, W) for WanPipeline compatibility
+        if eta_init.dim() == 4:
+            eta_init = eta_init.unsqueeze(0)
+
         return eta_init
 
     # =========================================================================
