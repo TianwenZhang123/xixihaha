@@ -344,28 +344,55 @@ class PositionAwareVelocityMatcher:
             f"warmup={self.warmup_steps} steps"
         )
 
+        # Detach all constant tensors to ensure no stale computation graph
+        # is retained across optimization steps. These tensors are fixed targets
+        # and must not participate in any gradient computation.
+        z0 = z0.detach()
+        eta_inv = eta_inv.detach()
+        e0 = e0.detach()
+
+        # Debug: verify detach worked
+        logger.info(
+            f"    [DEBUG] z0.requires_grad={z0.requires_grad}, "
+            f"eta_inv.requires_grad={eta_inv.requires_grad}, "
+            f"e0.requires_grad={e0.requires_grad}, "
+            f"delta_e.requires_grad={delta_e.requires_grad}"
+        )
+        logger.info(
+            f"    [DEBUG] z0.grad_fn={z0.grad_fn}, "
+            f"eta_inv.grad_fn={eta_inv.grad_fn}, "
+            f"e0.grad_fn={e0.grad_fn}"
+        )
+
         for step in range(self.num_opt_steps):
             optimizer.zero_grad()
+            logger.info(f"    [DEBUG] step {step}: zero_grad done")
 
             # ─── Sample timestep t_norm ~ U(0, T_m) [spectral boundary] ───
-            # t_norm is in [0, 1] for flow matching interpolation formula
-            # t_model is in [0, 1000] for DiT input (Wan2.1 convention)
             t_norm = torch.rand(1, device=self.device, dtype=z0.dtype) * self.T_m
             t_model = t_norm * 1000.0
 
             # ─── Construct interpolation x_t = (1-t)·η_inv + t·z₀ ───
-            # Use the INVERTED noise η_inv (not random noise) to stay on the
-            # deterministic ODE trajectory of the reference video
             x_t = (1 - t_norm) * eta_inv + t_norm * z0
+            logger.info(f"    [DEBUG] step {step}: x_t computed, grad_fn={x_t.grad_fn}")
 
             # ─── Target velocity: v* = z₀ - η_inv ───
-            # The ideal velocity field along the reference ODE trajectory
             v_star = z0 - eta_inv
+            logger.info(f"    [DEBUG] step {step}: v_star computed, grad_fn={v_star.grad_fn}")
 
             # ─── Velocity matching loss ───
             e_current = e0 + delta_e  # Inject motion token
+            logger.info(f"    [DEBUG] step {step}: e_current computed, grad_fn={e_current.grad_fn}")
+
             v_pred = self._model_forward(x_t, t_model, e_current)
+            logger.info(
+                f"    [DEBUG] step {step}: model_forward done, "
+                f"v_pred.grad_fn={v_pred.grad_fn}, "
+                f"v_pred.shape={v_pred.shape}"
+            )
+
             loss_vel = ((v_pred - v_star) ** 2).mean()
+            logger.info(f"    [DEBUG] step {step}: loss_vel={loss_vel.item():.6f}, grad_fn={loss_vel.grad_fn}")
 
             # ─── Content disentanglement loss (after warmup, every N steps) ───
             loss_dis = torch.tensor(0.0, device=self.device)
@@ -387,6 +414,7 @@ class PositionAwareVelocityMatcher:
                     delta_e.unsqueeze(0) if delta_e.dim() == 2 else delta_e,
                     position_weights,
                 )
+            logger.info(f"    [DEBUG] step {step}: loss_pos={loss_pos.item():.6f}, grad_fn={loss_pos.grad_fn}")
 
             # ─── Total loss ───
             loss_total = (
@@ -394,9 +422,11 @@ class PositionAwareVelocityMatcher:
                 + self.lambda_dis * loss_dis
                 + self.lambda_pos * loss_pos
             )
+            logger.info(f"    [DEBUG] step {step}: loss_total={loss_total.item():.6f}, calling backward...")
 
             # ─── Backward pass ───
             loss_total.backward()
+            logger.info(f"    [DEBUG] step {step}: backward done, delta_e.grad norm={delta_e.grad.norm().item() if delta_e.grad is not None else 'None'}")
 
             # ─── Position-aware gradient scaling (amplify high-influence positions) ───
             if self.position_aware and delta_e.grad is not None:
