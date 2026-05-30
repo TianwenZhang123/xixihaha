@@ -311,19 +311,22 @@ class PositionAwareVelocityMatcher:
         """
         model = self._get_model()
 
-        # Freeze model parameters
-        model.eval()
+        # Freeze model parameters but keep train() mode
+        # IMPORTANT: gradient checkpointing in diffusers only activates when
+        # model.training=True. We freeze all params to prevent weight updates
+        # but keep training mode so checkpoint recomputation works correctly.
         for param in model.parameters():
             param.requires_grad_(False)
+        model.train()  # Must be train mode for gradient checkpointing to activate
 
         # Enable model-level gradient checkpointing (diffusers ModelMixin API)
         # This makes each transformer block recompute activations in backward
         if hasattr(model, "enable_gradient_checkpointing"):
             model.enable_gradient_checkpointing()
-            logger.info("    Model-level gradient checkpointing enabled")
+            logger.info("    Model-level gradient checkpointing enabled (train mode)")
         elif hasattr(model, "gradient_checkpointing_enable"):
             model.gradient_checkpointing_enable()
-            logger.info("    Model-level gradient checkpointing enabled (HF API)")
+            logger.info("    Model-level gradient checkpointing enabled (HF API, train mode)")
         else:
             logger.warning("    Model does not support gradient checkpointing!")
 
