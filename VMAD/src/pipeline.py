@@ -140,9 +140,9 @@ class VMADConfig:
 
     # -- Layer 3: Structural Prior (Noise Space) --
     inversion_steps: int = 50        # ODE integration steps
-    rho_s: float = 0.0              # Spatial filtering (0=keep all for reproduction)
-    rho_m: float = 1.0              # Temporal retention (1.0=keep all)
-    alpha: float = 0.001            # Noise prior blend weight
+    rho_s: float = 0.1              # Spatial filtering (P-Flow: 0.1 removes appearance priors)
+    rho_m: float = 0.9              # Temporal retention (P-Flow: 0.9 keeps motion dynamics)
+    alpha: float = 0.001            # Noise prior blend weight (P-Flow: 0.001 = minimal injection)
 
     # -- Layer 2: Semantic Embedding (Token Space) --
     T_m: float = 1.0               # Full timestep range for reproduction (0.3 for motion transfer)
@@ -631,12 +631,29 @@ class VMADPipeline:
             full_prompt = f"{content_prompt}, {asset.motion_text}"
             logger.info(f"  [Layer 1] Text fusion: {full_prompt[:80]}...")
 
-        # -- Layer 2: Inject delta_e (embedding-level motion) --
-        e_content = self._encode_prompt(full_prompt)
-        e_final = self._asset_manager.apply_to_embedding(e_content, asset, strength)
-        logger.info(f"  [Layer 2] Embedding injection: strength={strength}")
+        # -- Layer 2: Prepare delta_e hook (embedding-level motion) --
+        # IMPORTANT: We inject delta_e via a text encoder hook instead of passing
+        # prompt_embeds directly. This preserves the pipeline's normal prompt
+        # processing path (CFG, negative prompt encoding, attention masks, etc.)
+        # which is critical for generation quality.
+        # Reference: P-Flow (2025) uses prompt string path exclusively.
+        delta_e = None
+        if asset.delta_e is not None and cfg.use_velocity:
+            delta_e = asset.delta_e.to(device=self.device, dtype=torch.bfloat16)
+            if delta_e.dim() == 2:
+                delta_e = delta_e.unsqueeze(0)
+            # Scale strength to be very gentle (P-Flow insight: minimal guidance)
+            effective_strength = strength * cfg.alpha  # e.g. 1.0 * 0.001 = 0.001
+            logger.info(
+                f"  [Layer 2] Embedding hook: strength={strength}, "
+                f"effective={effective_strength:.6f}, ||delta_e||={delta_e.norm():.2f}"
+            )
+        else:
+            effective_strength = 0.0
+            logger.info("  [Layer 2] Skipped (no delta_e or velocity disabled)")
 
         # -- Layer 3: Noise prior blending (structural guidance) --
+        # Following P-Flow: alpha=0.001 provides minimal but sufficient structural guidance
         latents = self._asset_manager.apply_noise_prior(
             asset, alpha=cfg.alpha, strength=strength, generator=generator
         )
@@ -644,8 +661,15 @@ class VMADPipeline:
             logger.info(f"  [Layer 3] Noise prior: alpha={cfg.alpha}")
 
         # -- Generate video with three-layer guidance --
+        # Key fix: Use prompt STRING path (not prompt_embeds) to preserve CFG behavior.
+        # If delta_e exists, inject via hook on the text encoder output.
         logger.info("  Generating video with three-layer motion guidance...")
-        gen_video = self._generate(full_prompt, latents, generator, e_final)
+        if delta_e is not None and effective_strength > 0:
+            gen_video = self._generate_with_embedding_hook(
+                full_prompt, latents, generator, delta_e, effective_strength
+            )
+        else:
+            gen_video = self._generate(full_prompt, latents, generator)
 
         # Save output
         video_path = str(out / "generated.mp4")
@@ -794,6 +818,84 @@ class VMADPipeline:
         if video.min() < 0:
             video = denormalize_video(video)
         return video.clamp(0, 1)
+
+    def _generate_with_embedding_hook(
+        self,
+        prompt: str,
+        latents: Optional[torch.Tensor],
+        generator: torch.Generator,
+        delta_e: torch.Tensor,
+        strength: float,
+    ) -> torch.Tensor:
+        """
+        Generate video with delta_e injected via text encoder hook.
+
+        This preserves the pipeline's normal prompt processing path (CFG,
+        negative prompt encoding, attention masks) while adding a gentle
+        delta_e perturbation to the encoded prompt embedding.
+
+        The hook intercepts the text encoder's output and adds:
+            e_final = e_original + strength * delta_e
+
+        This is analogous to P-Flow's noise prior: minimal perturbation
+        that provides guidance without disrupting the generation process.
+        """
+        cfg = self.config
+
+        # Install hook on text encoder to inject delta_e
+        text_encoder = self.pipe.text_encoder
+        hook_handle = None
+        hook_applied = [False]  # Use list for mutability in closure
+
+        def text_encoder_hook(module, input, output):
+            """Add delta_e to text encoder output (positive prompt only)."""
+            if hook_applied[0]:
+                return output  # Only apply once (for positive prompt, not negative)
+
+            # output is typically (hidden_states,) or BaseModelOutput
+            if isinstance(output, tuple):
+                hidden_states = output[0]
+            elif hasattr(output, "last_hidden_state"):
+                hidden_states = output.last_hidden_state
+            else:
+                hidden_states = output
+
+            # Inject delta_e with gentle strength
+            de = delta_e.to(device=hidden_states.device, dtype=hidden_states.dtype)
+            if de.shape[1] != hidden_states.shape[1]:
+                # Truncate or pad delta_e to match sequence length
+                min_len = min(de.shape[1], hidden_states.shape[1])
+                de_aligned = torch.zeros_like(hidden_states)
+                de_aligned[:, :min_len, :] = de[:, :min_len, :]
+                de = de_aligned
+
+            hidden_states = hidden_states + strength * de
+            hook_applied[0] = True
+
+            if isinstance(output, tuple):
+                return (hidden_states,) + output[1:]
+            elif hasattr(output, "last_hidden_state"):
+                output.last_hidden_state = hidden_states
+                return output
+            else:
+                return hidden_states
+
+        # Register hook
+        hook_handle = text_encoder.register_forward_hook(text_encoder_hook)
+
+        try:
+            # Generate normally with prompt string — pipeline handles everything
+            video = self._generate(prompt, latents, generator)
+        finally:
+            # Always remove hook
+            if hook_handle is not None:
+                hook_handle.remove()
+
+        logger.info(
+            f"    Hook applied: {hook_applied[0]}, "
+            f"delta_e injection strength={strength:.6f}"
+        )
+        return video
 
     def _encode_prompt(self, prompt: str) -> torch.Tensor:
         """Encode text to embedding via T5 text encoder.
