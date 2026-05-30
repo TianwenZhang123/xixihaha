@@ -146,11 +146,11 @@ class SpectralBoundaryEstimator:
 
         # Find crossover point
         T_m_star = 0.3  # Default
-        for i in range(len(timesteps) - 1):
+        for i in range(len(timesteps_norm) - 1):
             if (motion_sensitivity[i] > content_sensitivity[i] and
                     motion_sensitivity[i + 1] <= content_sensitivity[i + 1]):
                 # Linear interpolation for precise crossover
-                t1, t2 = timesteps[i].item(), timesteps[i + 1].item()
+                t1, t2 = timesteps_norm[i].item(), timesteps_norm[i + 1].item()
                 m1, m2 = motion_sensitivity[i], motion_sensitivity[i + 1]
                 c1, c2 = content_sensitivity[i], content_sensitivity[i + 1]
                 # Solve: m1 + (m2-m1)*α = c1 + (c2-c1)*α
@@ -166,7 +166,7 @@ class SpectralBoundaryEstimator:
             "T_m_star": T_m_star,
             "motion_sensitivity": motion_sensitivity,
             "content_sensitivity": content_sensitivity,
-            "timesteps": timesteps.cpu().tolist(),
+            "timesteps": timesteps_norm.cpu().tolist(),
             "crossover_timestep": T_m_star,
         }
 
@@ -340,7 +340,7 @@ class PositionBiasAnalyzer:
 
         return {
             "influence_map": influence_map.tolist(),
-            "timesteps": timesteps.cpu().tolist(),
+            "timesteps": timesteps_norm.cpu().tolist(),
             "position_indices": list(range(seq_len)),
             "position_0_total_influence": influence_map[:, 0].sum().item(),
             "total_influence": influence_map.sum().item(),

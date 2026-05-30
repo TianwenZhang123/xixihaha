@@ -221,12 +221,16 @@ class SpectralMotionDecomposer:
         """
         eta_spatial = torch.zeros_like(eta)
         min_dim = min(C, H * W)
-        k_s = max(1, int(self.rho_s * min_dim))
+        k_s = int(self.rho_s * min_dim)  # 0 when rho_s=0 (reproduction mode: no removal)
 
         logger.debug(
             f"  [Spectral/Spatial] F={F}, matrix=({C}, {H*W}), "
             f"removing top-{k_s} singular values (ρ_s={self.rho_s})"
         )
+
+        # If k_s=0 (reproduction mode), skip SVD entirely — preserve all info
+        if k_s == 0:
+            return eta.clone()
 
         for f in range(F):
             frame = eta[:, f, :, :].reshape(C, H * W)  # (C, H*W)
@@ -273,6 +277,10 @@ class SpectralMotionDecomposer:
             f"  [Spectral/Temporal] matrix=({F}, {C*H*W}), "
             f"retaining top-{k_m} singular values (ρ_m={self.rho_m})"
         )
+
+        # If k_m == min_dim (rho_m=1.0), skip SVD — retain all info
+        if k_m >= min_dim:
+            return eta_spatial.clone()
 
         U_t, S_t, Vh_t = torch.linalg.svd(temporal, full_matrices=False)
 

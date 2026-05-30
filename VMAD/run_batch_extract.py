@@ -18,13 +18,13 @@ VMAD Batch Extraction + Application Script.
         --output-dir ./outputs/vmad_full_batch \
         --content "a white cat"
 
-    # 快速模式 (跳过 VLM)
+    # 启用 VLM 文本解码 (默认关闭，开启会生成 2 个对比视频/样本)
     python run_batch_extract.py \
         --video-dir ../P-Flow/data/videos_200 \
         --caption-dir ../P-Flow/data/captions_qwen \
-        --output-dir ./outputs/vmad_fast_batch \
+        --output-dir ./outputs/vmad_with_vlm \
         --content "a white cat" \
-        --no-text_decode
+        --text_decode
 
     # 消融: 无解耦
     python run_batch_extract.py \
@@ -112,8 +112,13 @@ def parse_args():
     parser.add_argument("--no-blend", action="store_true")
     parser.add_argument("--no-velocity", action="store_true")
     parser.add_argument("--no-disentangle", action="store_true")
-    parser.add_argument("--no-text_decode", action="store_true")
+    parser.add_argument("--no-text_decode", action="store_true",
+                        help="Disable VLM text decode (already off by default)")
+    parser.add_argument("--text_decode", action="store_true",
+                        help="Enable VLM text decode (generates 2 comparison videos per sample!)")
     parser.add_argument("--no-token_decode", action="store_true")
+    parser.add_argument("--no-position_aware", action="store_true",
+                        help="Disable position-aware gradient scaling (use uniform)")
     parser.add_argument("--midpoint", action="store_true")
 
     # ── 超参数 ──
@@ -186,8 +191,12 @@ def build_config(args) -> VMADConfig:
         config.use_disentangle = False
     if args.no_text_decode:
         config.use_text_decode = False
+    if args.text_decode:
+        config.use_text_decode = True
     if args.no_token_decode:
         config.use_token_decode = False
+    if args.no_position_aware:
+        config.use_position_aware = False
     if args.midpoint:
         config.use_midpoint = True
 
@@ -387,7 +396,9 @@ def main():
                     logging.info(f"  Done: {result['time_seconds']:.1f}s -> {gen_video_path}")
 
                 except Exception as e:
+                    import traceback
                     logging.error(f"  Apply failed ({video_id}): {e}")
+                    traceback.print_exc()
                     apply_results.append({
                         "id": video_id, "content": content,
                         "status": "failed", "error": str(e),

@@ -1,53 +1,73 @@
 """
-VMAD Pipeline — Video Motion Asset Distillation via Iterative Spectral Refinement.
+VMAD Pipeline — Video Prompt Inversion via Three-Layer Progressive Encoding.
 
-Core Approach:
-    The fundamental idea is simple: optimize an embedding residual delta_e so that
-    the video generated with (e_0 + delta_e) faithfully reproduces the motion of
-    the reference video. Then decode delta_e into a text prompt as the portable
-    motion asset.
+Core Problem: Video Prompt Inversion
+    Given a reference video V_ref and a frozen text-to-video model v_θ, find the
+    optimal input conditioning (text, embedding, noise) such that the model
+    faithfully reproduces the reference video. This is the inverse problem of
+    text-to-video generation: instead of "text → video", we solve "video → prompt".
 
-    This is achieved through velocity field matching:
-        min_{delta_e} E_t [||v_theta(x_t, t, e_0 + delta_e) - v*||^2]
-    where v* = z_0 - eta is the target velocity field derived from the reference.
+    The key insight is that a single text prompt cannot fully specify a video —
+    there is an enormous information gap between what text can express (~100 bits)
+    and what a video contains (~10M bits). VMAD bridges this gap through three
+    complementary layers of progressive encoding.
 
-    The extracted delta_e captures motion semantics that text alone cannot express:
-    acceleration curves, rhythmic patterns, phase relationships, timing details.
+Three-Layer Progressive Encoding (Information-Theoretic View):
+    Each layer encodes a different spectral band of the video's information,
+    motivated by the spectral autoregression property of flow matching models:
 
-Three-Layer Progressive Encoding:
-    The pipeline packages motion into three complementary layers, each capturing
-    a different spectral band (motivated by spectral autoregression theory):
+    Layer 1 - Text (~100 bits, highest portability):
+        Human-readable prompt optimized via LLM rewriting (Subject-First +
+        Temporal Action Chain). Cross-model transferable, user-editable.
+        Captures: subject identity, scene layout, action category.
 
-    Layer 1 - Text (lowest frequency, highest portability):
-        Human-readable motion prompt decoded from delta_e via velocity-preserving
-        token decoding. Cross-model transferable, user-editable.
+    Layer 2 - Embedding Δe (~100K bits, CORE CONTRIBUTION):
+        Continuous embedding residual optimized via velocity field matching:
+            min_{Δe} E_t[||v_θ(x_t, t, e₀+Δe) - v*||²]
+        Captures: timing, acceleration, rhythm, phase, style details.
+        This is what text CANNOT express but the model CAN understand.
 
-    Layer 2 - Embedding delta_e (mid frequency, CORE):
-        Continuous motion embedding optimized via velocity field matching.
-        Captures timing, acceleration, rhythm that text cannot express.
+    Layer 3 - Noise Prior η_inv (~1M bits, lowest portability):
+        Inverted initial noise via Flow Matching Inversion (ODE reversal).
+        Captures: exact spatial structure, pixel-level layout, fine texture.
+        Provides structural guidance during earliest denoising steps.
 
-    Layer 3 - Noise Prior eta_motion (highest frequency, lowest portability):
-        Structural motion trajectories extracted via flow matching inversion +
-        spectral decomposition. Provides spatial guidance during early denoising.
+    Together: Text provides semantic scaffold → Δe adds dynamic precision →
+    η_inv locks spatial structure. Each layer encodes the RESIDUAL of the previous.
 
-Pipeline Modes:
-    Extract: V_ref -> [Inversion + SVD + VelocityMatch + TokenDecode] -> MotionAsset
-    Apply:   MotionAsset + new_prompt -> [TextFusion + EmbedInject + NoisePrior] -> V_new
+Architecture: Extract + Apply (builds on P-Flow)
+    Extract: V_ref → [Inversion + VelocityMatch + LLM Rewrite] → VideoAsset
+        - Phase A: Flow Matching Inversion → η_inv (Layer 3)
+        - Phase B: Velocity Field Matching → Δe (Layer 2)
+        - Phase C: LLM Caption Rewriting → optimized text (Layer 1)
+        NOTE: Extract phase does NOT require video generation by default.
+              VLM text decode (which generates comparison videos) is OPTIONAL.
+
+    Apply: VideoAsset + prompt → [TextFusion + EmbedInject + NoisePrior] → V_new
+        - Layer 1: content_prompt + motion_text fusion
+        - Layer 2: e_content + strength * Δe injection
+        - Layer 3: noise prior blending with η_inv
+
+    Relationship to P-Flow:
+        P-Flow = Layer 1 only (LLM rewriting, iterative VLM feedback)
+        VMAD = P-Flow + Layer 2 (Δe) + Layer 3 (η_inv)
+        VMAD's Layer 1 reuses P-Flow's proven V4 rewriting strategy.
 
 Module Flags:
-    --inversion     Flow Matching Inversion (video -> noise)
-    --spectral      Spectral Motion-Content Decomposition (noise -> motion prior)
-    --blend         Noise Prior Injection (motion prior -> initial latent)
-    --velocity      Position-Aware Velocity Field Matching (core: optimize delta_e)
-    --disentangle   Cross-Content Consistency Regularization (purify delta_e)
-    --token_decode  Velocity-Preserving Token Decoding (delta_e -> prompt)
-    --text_decode   VLM Motion Text Decoding (comparative video description)
+    --inversion     Flow Matching Inversion (video → noise, Layer 3)
+    --spectral      Spectral Decomposition (noise → motion prior, Layer 3)
+    --blend         Noise Prior Injection (motion prior → initial latent, Layer 3)
+    --velocity      Position-Aware Velocity Field Matching (core, Layer 2)
+    --disentangle   Cross-Content Consistency Regularization (Layer 2, motion transfer only)
+    --token_decode  Velocity-Preserving Token Decoding (Δe → tokens, Layer 1↔2 bridge)
+    --text_decode   VLM Comparative Text Decoding (OPTIONAL, requires video generation)
 
 References:
     - Dieleman (2024): Spectral autoregression in diffusion models
     - Reenact Anything (SIGGRAPH 2025): Motion-textual inversion
-    - DiTFlow (CVPR 2025): DiT attention-based motion transfer
-    - BCD (ICCV 2025): Bitrate-controlled disentanglement
+    - FlowEdit (ICCV 2025): Inversion-free editing via velocity interpolation
+    - RF-Solver (ICML 2025): High-order flow matching inversion
+    - SiD-DiT (Apple 2025): Score identity distillation for flow matching
     - TPSO (2025): Token-Prompt dual-space optimization
 """
 
@@ -87,12 +107,12 @@ NEGATIVE_PROMPT = (
 @dataclass
 class VMADConfig:
     """
-    VMAD Configuration - Iterative Spectral Refinement Parameters.
+    VMAD Configuration — Video Prompt Inversion Parameters.
 
-    Organized by spectral layer to reflect the theoretical framework:
+    Organized by spectral layer to reflect the three-layer architecture:
     - Layer 3 (Structural): Inversion + Spectral Decomposition + Blending
     - Layer 2 (Semantic): Velocity Matching + Disentanglement + Position-Aware
-    - Layer 1 (Interpretable): Token Decoding + Text Decoding
+    - Layer 1 (Interpretable): LLM Rewriting + Token Decoding
     """
 
     # -- Model --
@@ -115,7 +135,7 @@ class VMADConfig:
     use_disentangle: bool = True     # Layer 2: Content disentanglement
     use_position_aware: bool = True  # Layer 2: Position-aware optimization
     use_token_decode: bool = True    # Layer 1<->2: Token decoding bridge
-    use_text_decode: bool = True     # Layer 1: VLM text decoding
+    use_text_decode: bool = False    # Layer 1: VLM text decoding (OPTIONAL, generates 2 videos!)
     use_midpoint: bool = False       # Inversion solver order
 
     # -- Layer 3: Structural Prior (Noise Space) --
@@ -186,20 +206,27 @@ class VMADConfig:
 
 class VMADPipeline:
     """
-    VMAD Pipeline: Extract motion from video, package as reusable asset.
+    VMAD Pipeline: Video Prompt Inversion via Three-Layer Progressive Encoding.
 
-    Core workflow (Extract):
-        1. Flow Matching Inversion: video -> inverted noise eta_inv
-        2. Spectral Decomposition: eta_inv -> motion prior eta_motion (trajectory)
-        3. Velocity Field Matching: optimize delta_e to reproduce reference motion
-        4. Token Decoding: delta_e -> human-readable motion prompt
-        5. Package: (delta_e, eta_motion, prompt) -> MotionAsset
+    Solves the inverse problem: given a reference video, find optimal conditioning
+    (text + embedding + noise) that makes a frozen T2V model reproduce it faithfully.
+
+    Core workflow (Extract) — NO video generation required by default:
+        Phase A (Layer 3): Flow Matching Inversion → η_inv
+        Phase B (Layer 2): Position-Aware Velocity Matching → Δe
+        Phase C (Layer 1): Token Decoding (optional) + LLM Rewriting
+        Package: (Δe, η_inv, optimized_text) → VideoAsset
 
     Core workflow (Apply):
-        1. Text fusion: content_prompt + motion_text
-        2. Embedding injection: e_content + strength * delta_e
-        3. Noise prior: blend eta_motion into initial noise
-        4. Generate video with three-layer guidance
+        Layer 1: content_prompt + motion_text fusion
+        Layer 2: e_content + strength * Δe injection
+        Layer 3: noise prior blending with η_inv
+        Generate: single T2V forward pass → output video
+
+    Relationship to P-Flow:
+        P-Flow handles Layer 1 (text optimization via LLM + VLM iteration).
+        VMAD adds Layer 2 (Δe via velocity matching) and Layer 3 (η_inv via inversion).
+        Combined, the three layers provide progressively finer video reproduction.
     """
 
     def __init__(self, config: VMADConfig):
@@ -268,26 +295,28 @@ class VMADPipeline:
         caption: str = "",
     ) -> Dict[str, Any]:
         """
-        Extract motion asset via Iterative Spectral Refinement.
+        Extract video asset via Three-Layer Progressive Encoding.
 
-        The extraction follows the spectral hierarchy from fine to coarse:
-            Phase A (Structural Layer - Noise Space):
-                1. Flow Matching Inversion: video -> eta_inv
-                2. Spectral Decomposition: eta_inv -> eta_motion
-            Phase B (Semantic Layer - Embedding Space):
-                3. Position-Aware Velocity Matching: (z0, eta_inv) -> delta_e
-                4. Content Disentanglement: regularize delta_e
-            Phase C (Interpretable Layer - Token Space):
-                5. Velocity-Preserving Token Decoding: delta_e -> tokens
-                6. VLM Motion Text Decoding: comparative description
+        This is the core "Video Prompt Inversion" operation: given a reference
+        video, compute the optimal conditioning that reproduces it. By default,
+        NO video generation is performed during extraction — only mathematical
+        optimization (inversion, velocity matching, token projection).
 
-        Each phase captures progressively finer spectral information,
-        and the final asset contains all three complementary layers.
+        Phases (each captures progressively finer information):
+            Phase A (Layer 3 - Noise Space):
+                1. Flow Matching Inversion: video → η_inv
+                2. Spectral Decomposition: η_inv → η_motion (optional filtering)
+            Phase B (Layer 2 - Embedding Space):
+                3. Position-Aware Velocity Matching: (z₀, η_inv) → Δe
+                4. Content Disentanglement: regularize Δe (motion transfer only)
+            Phase C (Layer 1 - Token/Text Space):
+                5. Token Decoding: Δe → motion tokens (optional)
+                6. VLM Text Decoding: comparative description (OPTIONAL, costs 2 videos!)
 
         Args:
             video_path: Path to reference video
             output_dir: Output directory for extracted asset
-            caption: Initial caption (auto-generated if empty)
+            caption: Initial caption (from VLM or LLM rewrite; auto-generated if empty)
 
         Returns:
             Result dictionary with asset path, metrics, and diagnostics
@@ -302,7 +331,7 @@ class VMADPipeline:
         generator = torch.Generator(device=self.device).manual_seed(seed)
 
         flags = cfg.active_flags()
-        logger.info("[VMAD Extract] Iterative Spectral Refinement")
+        logger.info("[VMAD Extract] Video Prompt Inversion — Three-Layer Encoding")
         logger.info(f"  Active layers: {flags}")
 
         # -- Prerequisite: Load reference video --
@@ -540,12 +569,12 @@ class VMADPipeline:
         with open(out / "extract_result.json", "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2, ensure_ascii=False)
 
-        logger.info(f"[VMAD Extract] Iterative Spectral Refinement complete in {elapsed:.1f}s")
+        logger.info(f"[VMAD Extract] Video Prompt Inversion complete in {elapsed:.1f}s")
         logger.info(f"  Asset: {asset_dir}")
         return result
 
     # =========================================================================
-    # Apply Mode: Three-Layer Motion Transfer
+    # Apply Mode: Three-Layer Video Reproduction / Motion Transfer
     # =========================================================================
 
     def apply(
@@ -556,9 +585,9 @@ class VMADPipeline:
         strength: float = 1.0,
     ) -> Dict[str, Any]:
         """
-        Apply three-layer motion asset to new content.
+        Apply three-layer motion asset to reproduce or transfer video.
 
-        Combines all spectral layers for comprehensive motion transfer:
+        Combines all spectral layers for comprehensive motion guidance:
             Layer 1 (Text): Append motion description to content prompt
             Layer 2 (Embedding): e_final = e_content + strength * delta_e
             Layer 3 (Noise): eta_init = sqrt(alpha*s)*eta_motion + sqrt(1-alpha*s)*eta_random
@@ -568,8 +597,13 @@ class VMADPipeline:
         - Embedding provides precise mid-frequency motion control
         - Noise prior guides the earliest denoising steps with structural info
 
+        Operating Modes:
+        - Reproduction (content_prompt = original caption): faithfully reproduce the source video
+        - Motion Transfer (content_prompt ≠ original caption): transfer motion to new content
+
         Args:
-            content_prompt: New content description
+            content_prompt: Content description (original caption for reproduction,
+                          new description for motion transfer)
             asset_dir: Path to motion asset directory
             output_dir: Output directory
             strength: Motion intensity [0, 1+]
@@ -585,7 +619,7 @@ class VMADPipeline:
         seed = cfg.seed
         generator = torch.Generator(device=self.device).manual_seed(seed)
 
-        logger.info("[VMAD Apply] Three-Layer Motion Transfer")
+        logger.info("[VMAD Apply] Three-Layer Video Reproduction")
         logger.info(f"  Content: '{content_prompt[:60]}', strength={strength}")
 
         # -- Load three-layer asset --
