@@ -86,7 +86,6 @@ from typing import Optional, List, Dict, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -257,9 +256,9 @@ class PositionAwareVelocityMatcher:
         the computation graph of Δe, allowing gradients to flow back through
         the cross-attention mechanism to update Δe.
 
-        Uses torch.utils.checkpoint to trade compute for VRAM — intermediate
-        activations are discarded during forward and recomputed during backward,
-        reducing peak activation memory from O(N_layers) to O(1).
+        Memory optimization is handled by model-level gradient checkpointing
+        (enabled in optimize()), which checkpoints each transformer block
+        individually — no outer-level checkpoint wrapper needed.
         """
         model = self._get_model()
 
@@ -267,22 +266,11 @@ class PositionAwareVelocityMatcher:
             timestep = timestep.unsqueeze(0)
         timestep = timestep.to(device=latents.device, dtype=latents.dtype)
 
-        def _fwd(hidden_states, t, enc_hidden):
-            return model(
-                hidden_states=hidden_states,
-                timestep=t,
-                encoder_hidden_states=enc_hidden,
-                return_dict=False,
-            )
-
-        # use_reentrant=False is required for inputs that don't require grad
-        # (latents, timestep) while still propagating grad through enc_hidden (Δe)
-        model_output = torch_checkpoint(
-            _fwd,
-            latents,
-            timestep.expand(latents.shape[0]),
-            encoder_hidden_states,
-            use_reentrant=False,
+        model_output = model(
+            hidden_states=latents,
+            timestep=timestep.expand(latents.shape[0]),
+            encoder_hidden_states=encoder_hidden_states,
+            return_dict=False,
         )
 
         if isinstance(model_output, tuple):
