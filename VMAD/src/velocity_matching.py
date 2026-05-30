@@ -86,6 +86,7 @@ from typing import Optional, List, Dict, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +256,10 @@ class PositionAwareVelocityMatcher:
         The model parameters are frozen, but encoder_hidden_states contains
         the computation graph of Δe, allowing gradients to flow back through
         the cross-attention mechanism to update Δe.
+
+        Uses torch.utils.checkpoint to trade compute for VRAM — intermediate
+        activations are discarded during forward and recomputed during backward,
+        reducing peak activation memory from O(N_layers) to O(1).
         """
         model = self._get_model()
 
@@ -262,11 +267,22 @@ class PositionAwareVelocityMatcher:
             timestep = timestep.unsqueeze(0)
         timestep = timestep.to(device=latents.device, dtype=latents.dtype)
 
-        model_output = model(
-            hidden_states=latents,
-            timestep=timestep.expand(latents.shape[0]),
-            encoder_hidden_states=encoder_hidden_states,
-            return_dict=False,
+        def _fwd(hidden_states, t, enc_hidden):
+            return model(
+                hidden_states=hidden_states,
+                timestep=t,
+                encoder_hidden_states=enc_hidden,
+                return_dict=False,
+            )
+
+        # use_reentrant=False is required for inputs that don't require grad
+        # (latents, timestep) while still propagating grad through enc_hidden (Δe)
+        model_output = torch_checkpoint(
+            _fwd,
+            latents,
+            timestep.expand(latents.shape[0]),
+            encoder_hidden_states,
+            use_reentrant=False,
         )
 
         if isinstance(model_output, tuple):
@@ -312,6 +328,21 @@ class PositionAwareVelocityMatcher:
         for param in model.parameters():
             param.requires_grad_(False)
 
+        # Enable model-level gradient checkpointing (diffusers ModelMixin API)
+        # This makes each transformer block recompute activations in backward
+        if hasattr(model, "enable_gradient_checkpointing"):
+            model.enable_gradient_checkpointing()
+            logger.info("    Model-level gradient checkpointing enabled")
+        elif hasattr(model, "gradient_checkpointing_enable"):
+            model.gradient_checkpointing_enable()
+            logger.info("    Model-level gradient checkpointing enabled (HF API)")
+        else:
+            logger.warning("    Model does not support gradient checkpointing!")
+
+        # Free VRAM from inversion phase before optimization
+        torch.cuda.empty_cache()
+        logger.info(f"    GPU memory after cleanup: {torch.cuda.memory_allocated() / 1e9:.1f}GB allocated")
+
         # Initialize Δe
         delta_e = torch.zeros_like(e0, requires_grad=True)
         optimizer = torch.optim.Adam([delta_e], lr=self.lr)
@@ -343,7 +374,7 @@ class PositionAwareVelocityMatcher:
             # ─── Sample timestep t_norm ~ U(0, T_m) [spectral boundary] ───
             # t_norm is in [0, 1] for flow matching interpolation formula
             # t_model is in [0, 1000] for DiT input (Wan2.1 convention)
-            t_norm = torch.rand(1, device=self.device) * self.T_m
+            t_norm = torch.rand(1, device=self.device, dtype=z0.dtype) * self.T_m
             t_model = t_norm * 1000.0
 
             # ─── Construct interpolation x_t = (1-t)·η_inv + t·z₀ ───
@@ -429,6 +460,8 @@ class PositionAwareVelocityMatcher:
             final_loss_dis = loss_dis.item() if isinstance(loss_dis, torch.Tensor) else 0
 
         # Restore model state
+        if hasattr(model, "disable_gradient_checkpointing"):
+            model.disable_gradient_checkpointing()
         model.train()
 
         # Compute position energy distribution for analysis
