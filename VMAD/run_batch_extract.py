@@ -85,7 +85,10 @@ def parse_args():
     parser.add_argument("--video-dir", type=Path, required=True,
                         help="Directory containing source videos ({id}.mp4)")
     parser.add_argument("--caption-dir", type=Path, required=True,
-                        help="Directory containing captions ({id}.txt)")
+                        help="Directory containing captions ({id}.txt) for extraction (e0)")
+    parser.add_argument("--apply-caption-dir", type=Path, default=None,
+                        help="Directory containing captions for apply phase. "
+                             "If not set, uses --caption-dir. Used with --content SELF.")
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="Output directory for all results")
 
@@ -341,7 +344,14 @@ def main():
             else:
                 # Standard mode: use first content, output as {id}.mp4
                 # "SELF" means use the video's own caption for reproduction validation
-                content = item["caption"] if args.content[0] == "SELF" else args.content[0]
+                if args.content[0] == "SELF":
+                    if args.apply_caption_dir:
+                        apply_cap_path = args.apply_caption_dir / f"{video_id}.txt"
+                        content = apply_cap_path.read_text(encoding="utf-8").strip()
+                    else:
+                        content = item["caption"]
+                else:
+                    content = args.content[0]
                 gen_video_path = generated_dir / f"{video_id}.mp4"
 
                 if args.resume and gen_video_path.exists():
