@@ -16,3 +16,4 @@ test_run_*/
 
 # OS
 Thumbs.db
+node_modules/
