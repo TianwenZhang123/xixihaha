@@ -110,6 +110,7 @@ def parse_args():
     parser.add_argument("--no-velocity", action="store_true")
     parser.add_argument("--no-disentangle", action="store_true")
     parser.add_argument("--no-text_decode", action="store_true")
+    parser.add_argument("--no-token_decode", action="store_true")
     parser.add_argument("--midpoint", action="store_true")
 
     # ── 超参数 ──
@@ -127,6 +128,8 @@ def parse_args():
     parser.add_argument("--config", type=str, default=None)
 
     # ── 其他 ──
+    parser.add_argument("--sample-ids", type=str, nargs="+", default=None,
+                        help="Only process these specific video IDs (e.g. 7 17 21 31)")
     parser.add_argument("--limit", type=int, default=0,
                         help="Only process first N videos (0 = all)")
     parser.add_argument("--seed", type=int, default=42)
@@ -180,6 +183,8 @@ def build_config(args) -> VMADConfig:
         config.use_disentangle = False
     if args.no_text_decode:
         config.use_text_decode = False
+    if args.no_token_decode:
+        config.use_token_decode = False
     if args.midpoint:
         config.use_midpoint = True
 
@@ -216,6 +221,12 @@ def main():
 
     # Find videos
     items = find_videos(args.video_dir, args.caption_dir, limit=args.limit)
+
+    # Filter by sample IDs if specified
+    if args.sample_ids:
+        id_set = set(args.sample_ids)
+        items = [item for item in items if item["id"] in id_set]
+
     if not items:
         logging.error(f"No videos found in {args.video_dir} with captions in {args.caption_dir}")
         sys.exit(1)
@@ -252,7 +263,7 @@ def main():
             asset_output = str(assets_dir / video_id)
 
             # Resume check
-            if args.resume and (Path(asset_output) / "asset" / "metadata.json").exists():
+            if args.resume and (Path(asset_output) / "asset" / "asset.json").exists():
                 logging.info(f"[{idx}/{len(items)}] {video_id} - SKIP (already exists)")
                 extract_results.append({"id": video_id, "status": "skipped"})
                 continue
@@ -329,7 +340,8 @@ def main():
                         })
             else:
                 # Standard mode: use first content, output as {id}.mp4
-                content = args.content[0]
+                # "SELF" means use the video's own caption for reproduction validation
+                content = item["caption"] if args.content[0] == "SELF" else args.content[0]
                 gen_video_path = generated_dir / f"{video_id}.mp4"
 
                 if args.resume and gen_video_path.exists():
