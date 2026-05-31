@@ -1,6 +1,6 @@
 # VMAD 实验 TODO 与命令手册
 
-> **最后更新**：2025-05-31
+> **最后更新**：2025-06-01
 > **环境**：AutoDL A800 80GB, Wan2.1-T2V-1.3B-Diffusers
 > **数据**：10 个样本 (7, 17, 21, 31, 32, 33, 34, 43, 46, 47)
 
@@ -21,7 +21,8 @@
 | 1 | Phase 1: α 扫描 (0.0/0.001/0.01/0.1/1.0) | ⬜ 待跑 | 1-2h | 无 |
 | 2 | Phase 3a: 完整三层 baseline caption | ✅ 已完成 | 4h | Phase 1 确认 α |
 | 2b | Layer 2 Strength 扫描 (alpha=0.001/0.01/0.05/0.1) | ✅ 已完成 | 1h | Phase 3a |
-| 3 | Caption 消融: baseline vs V4 caption | ⬜ 待跑 | 3-4h | 与 Phase 3a 并行 |
+| 3 | Caption 消融: V4 caption + Layer 2 单样本验证 | ✅ 已完成 | 0.5h | Phase 3a |
+| **3b** | **V4 caption + Layer 2 多样本验证（10样本）** | **⬜ 待跑** | **4.5h** | **#3 确认有效** |
 | 4 | Phase 3b: 步数扫描 50/100/200/500 | ⬜ 待跑 | 6-8h | Phase 3a |
 | 5 | Phase 3c: Position-Aware vs Uniform | ⬜ 待跑 | 3-4h | Phase 3a |
 | 6 | Phase 3d: T_m 扫描 0.3/0.5/0.7/1.0 | ⬜ 待跑 | 6-8h | Phase 3a |
@@ -38,6 +39,7 @@
 | Phase 1 跑完 | α=0.001 vs α=0.0 的 CLIP 差值 | >0.01→有实用价值；<0.005→需做 Phase 2 RF-Solver |
 | Phase 3a 跑完 | CLIP 是否超过 0.884 (P-Flow V4上限) | 是→Layer 2 验证成功，进消融；否→需调参 |
 | Caption 消融跑完 | baseline vs V4 的 CLIP 差值 | baseline更好→确认方向正确；V4更好→后续改用 V4 |
+| Caption 消融单样本 ✅ | D(XCLIP) > C(XCLIP) | 是(+0.0226)→Δe 在时序维度有独特价值，扩 10 样本验证 |
 
 ---
 
@@ -158,30 +160,59 @@ python run_batch_extract.py \
 
 ---
 
-### Caption 消融: baseline vs V4 改写
+### Caption 消融: V4 caption + Layer 2（✅ 单样本已完成，待扩 10 样本）
 
-**目的**：定量回答"如果 e₀ 已经被 V4 优化过，Δe 还能做多少增量？" 对比两组，其余配置完全相同。
+**目的**：定量回答"如果 e₀ 已经被 V4 优化过，Δe 还能做多少增量？"
 
-**预期**：V4 caption 的初始 CLIP 更高（起点好），但 Δe 优化后的最终 CLIP 提升幅度可能更小（优化空间被挤压）。
+**单样本结论（sample #7）**：V4 caption 主攻 CLIP（+0.0247），Δe 主攻 XCLIP（+0.0226）。两者互补，但贡献维度不同。
+
+**10 样本验证命令**（待跑，预计 4.5h）：
 
 ```bash
 cd /root/autodl-tmp/videofake/VMAD
 
-outdir=/root/autodl-tmp/outputs/vmad_phase3a_v4caption
+# 实验组：V4 caption + Layer 2 α=0.01（10 样本）
+outdir=/root/autodl-tmp/outputs/vmad_v4caption_l2_10samples
 mkdir -p ${outdir}
 python run_batch_extract.py \
     --video-dir /root/autodl-tmp/data/video-200/water_mark_out \
     --caption-dir /root/autodl-tmp/outputs/hybrid_iter_v4/captions_iter0 \
     --output-dir ${outdir} \
     --sample-ids 7 17 21 31 32 33 34 43 46 47 \
-    --alpha 0.001 \
+    --alpha 0.01 \
     --num_opt_steps 200 \
-    --no-svd \
-    --no-disentangle \
+    --no-svd --no-disentangle --no-blend --no-token_decode \
     --content SELF \
-    --resume \
-    -v \
+    --resume -v \
     2>&1 | tee ${outdir}/run.log
+
+# 对照组：V4 caption + 三层全关（10 样本）
+outdir_ctrl=/root/autodl-tmp/outputs/vmad_v4caption_pure_10samples
+mkdir -p ${outdir_ctrl}
+python run_batch_extract.py \
+    --video-dir /root/autodl-tmp/data/video-200/water_mark_out \
+    --caption-dir /root/autodl-tmp/outputs/hybrid_iter_v4/captions_iter0 \
+    --output-dir ${outdir_ctrl} \
+    --sample-ids 7 17 21 31 32 33 34 43 46 47 \
+    --alpha 0.01 \
+    --num_opt_steps 200 \
+    --no-svd --no-disentangle --no-blend --no-token_decode --no-velocity \
+    --content SELF \
+    --resume -v \
+    2>&1 | tee ${outdir_ctrl}/run.log
+
+# 评测
+python evaluation/run_reproduction_eval.py \
+    --orig-dir /root/autodl-tmp/data/video-200/water_mark_out \
+    --gen-dir ${outdir}/generated \
+    --caption-dir /root/autodl-tmp/outputs/hybrid_iter_v4/captions_iter0 \
+    --output-dir ${outdir}/eval
+
+python evaluation/run_reproduction_eval.py \
+    --orig-dir /root/autodl-tmp/data/video-200/water_mark_out \
+    --gen-dir ${outdir_ctrl}/generated \
+    --caption-dir /root/autodl-tmp/outputs/hybrid_iter_v4/captions_iter0 \
+    --output-dir ${outdir_ctrl}/eval
 ```
 
 ---
