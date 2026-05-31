@@ -627,9 +627,11 @@ class VMADPipeline:
 
         # -- Layer 1: Combine text (semantic guidance) --
         full_prompt = content_prompt
-        if asset.motion_text:
+        if asset.motion_text and cfg.use_token_decode:
             full_prompt = f"{content_prompt}, {asset.motion_text}"
             logger.info(f"  [Layer 1] Text fusion: {full_prompt[:80]}...")
+        else:
+            logger.info(f"  [Layer 1] Pure prompt (no motion_text): {full_prompt[:80]}...")
 
         # -- Layer 2: Prepare delta_e hook (embedding-level motion) --
         # IMPORTANT: We inject delta_e via a text encoder hook instead of passing
@@ -654,11 +656,15 @@ class VMADPipeline:
 
         # -- Layer 3: Noise prior blending (structural guidance) --
         # Following P-Flow: alpha=0.001 provides minimal but sufficient structural guidance
-        latents = self._asset_manager.apply_noise_prior(
-            asset, alpha=cfg.alpha, strength=strength, generator=generator
-        )
-        if latents is not None:
-            logger.info(f"  [Layer 3] Noise prior: alpha={cfg.alpha}")
+        if cfg.use_blend:
+            latents = self._asset_manager.apply_noise_prior(
+                asset, alpha=cfg.alpha, strength=strength, generator=generator
+            )
+            if latents is not None:
+                logger.info(f"  [Layer 3] Noise prior: alpha={cfg.alpha}")
+        else:
+            latents = None
+            logger.info("  [Layer 3] Skipped (use_blend=False)")
 
         # -- Generate video with three-layer guidance --
         # Key fix: Use prompt STRING path (not prompt_embeds) to preserve CFG behavior.
