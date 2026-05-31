@@ -1,6 +1,6 @@
 # VMAD 实验 TODO 与命令手册
 
-> **最后更新**：2025-06-01
+> **最后更新**：2025-05-31
 > **环境**：AutoDL A800 80GB, Wan2.1-T2V-1.3B-Diffusers
 > **数据**：10 个样本 (7, 17, 21, 31, 32, 33, 34, 43, 46, 47)
 
@@ -17,8 +17,10 @@
 
 | # | 实验 | 状态 | 预计耗时 | 依赖 |
 |---|------|------|---------|------|
+| 0 | Bug 修复 + Pipeline 等价性验证 | ✅ 已完成 | 2h | 无 |
 | 1 | Phase 1: α 扫描 (0.0/0.001/0.01/0.1/1.0) | ⬜ 待跑 | 1-2h | 无 |
-| 2 | Phase 3a: 完整三层 baseline caption | ⬜ 待跑 | 3-4h | Phase 1 确认 α |
+| 2 | Phase 3a: 完整三层 baseline caption | ✅ 已完成 | 4h | Phase 1 确认 α |
+| 2b | Layer 2 Strength 扫描 (alpha=0.001/0.01/0.05/0.1) | ✅ 已完成 | 1h | Phase 3a |
 | 3 | Caption 消融: baseline vs V4 caption | ⬜ 待跑 | 3-4h | 与 Phase 3a 并行 |
 | 4 | Phase 3b: 步数扫描 50/100/200/500 | ⬜ 待跑 | 6-8h | Phase 3a |
 | 5 | Phase 3c: Position-Aware vs Uniform | ⬜ 待跑 | 3-4h | Phase 3a |
@@ -331,14 +333,36 @@ python evaluation/run_clip_xclip_eval.py \
 | 0.1 | | | | | |
 | 1.0 | | | | | 理论重建上限 |
 
+### Bug 修复 + Pipeline 等价性验证（sample 7）
+
+| 实验配置 | orig_gen_clip | orig_gen_xclip | 说明 |
+|----------|--------------|----------------|------|
+| P-Flow baseline | 0.9159 | 0.7108 | 参考锚点 |
+| P-Flow reseed (同 caption/seed) | 0.9159 | 0.7108 | 确认可复现 |
+| VMAD 原版（修复前） | 0.8007 | — | Bug 1+2 |
+| VMAD --no-blend 修复后 | 0.8986 | 0.6384 | Bug 2 残留 |
+| **VMAD 纯净基线（三层全关）** | **0.9150** | **0.7077** | **= P-Flow ✅** |
+
+### Layer 2 (Δe) Strength 扫描结果（sample 7）
+
+| Alpha | Effective Strength | orig_gen_clip | orig_gen_xclip | Δ CLIP vs 基线 |
+|-------|-------------------|--------------|----------------|---------------|
+| 0 (基线) | 0 | **0.9150** | **0.7077** | — |
+| 0.001 | 0.001 | 0.9086 | 0.6857 | -0.0064 |
+| **0.01** | **0.01** | **0.9192** | **0.6987** | **+0.0042** |
+| 0.05 | 0.05 | 0.8999 | 0.5925 | -0.0151 |
+| 0.1 | 0.1 | 0.9016 | 0.5670 | -0.0134 |
+
+**结论**：alpha=0.01 是当前最优注入强度，CLIP 超过 P-Flow baseline。曲线呈倒 U 形。
+
 ### Phase 3a: 完整三层结果
 
 | 配置 | CLIP | XCLIP | 备注 |
 |------|------|-------|------|
 | P-Flow V4 iter1 (Layer 1上限) | 0.8842 | 0.7430 | 锚点 |
-| Phase 1 最优 α (仅 L1+L3) | | | |
-| Phase 3a (L1+L2+L3, baseline caption) | | | |
-| Phase 3a (L1+L2+L3, V4 caption) | | | |
+| Phase 1 最优 α (仅 L1+L3) | — | — | 待跑 |
+| Phase 3a (L1+L2+L3, baseline caption) | — | — | 需以 alpha=0.01 重跑 |
+| Phase 3a (L1+L2+L3, V4 caption) | — | — | 待跑 |
 
 ### Phase 3b/3c/3d 消融结果
 
