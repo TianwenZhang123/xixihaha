@@ -93,8 +93,8 @@ def main():
     cfg = VMADConfig()
 
     logger.info("Loading model...")
-    pipe = load_model_single_gpu(MODEL_PATH, torch_dtype=torch.bfloat16)
-    pipe = pipe.to(DEVICE)
+    pipe = load_model_single_gpu(MODEL_PATH, dtype=torch.bfloat16)
+    # pipe is already on DEVICE after load_model_single_gpu
 
     # === First, inspect what WanPipeline.__call__ accepts for prompt_embeds ===
     logger.info("=" * 60)
