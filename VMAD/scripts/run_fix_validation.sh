@@ -54,6 +54,23 @@ APPLY_CAPTION_DIR="$HOME/autodl-tmp/videofake/P-Flow/data/captions_iter1"
 OUTPUT_BASE="$HOME/autodl-tmp/videofake/VMAD/outputs/fix_validation"
 SAMPLE_IDS="7 17 21 31 32 33 34 43 46 47"
 
+# ─── 断点续跑支持 ───
+# 用法: bash run_fix_validation.sh          # 从头跑（跳过已完成的实验）
+#        bash run_fix_validation.sh --from 3 # 从 Exp 3 开始跑
+START_FROM=${1:-0}
+if [[ "$1" == "--from" ]]; then
+    START_FROM=${2:-0}
+fi
+
+# 检查某个实验是否已完成（eval 输出存在）
+exp_done() {
+    local exp_dir="$1"
+    if [ -f "$exp_dir/eval/eval_summary.md" ]; then
+        return 0  # done
+    fi
+    return 1  # not done
+}
+
 # ─── 公共参数 ───
 COMMON_ARGS="--video-dir $VIDEO_DIR \
     --caption-dir $CAPTION_DIR \
@@ -64,6 +81,7 @@ COMMON_ARGS="--video-dir $VIDEO_DIR \
     --no-token_decode \
     --sample-ids $SAMPLE_IDS \
     --seed 42 \
+    --resume \
     -v"
 
 cd "$VMAD_DIR"
@@ -71,6 +89,7 @@ mkdir -p logs
 
 echo "================================================================"
 echo "VMAD Fix Validation - $(date)"
+echo "Start from: Exp $START_FROM"
 echo "================================================================"
 echo ""
 
@@ -79,10 +98,11 @@ echo ""
 # ================================================================
 # 目的: 建立 baseline，确认 per-sample-seed 对齐后控制组依然是 0.8842/0.7431
 # 这是对比其他实验的基准。
+OUTPUT_0="$OUTPUT_BASE/exp0_ctrl"
+if [[ $START_FROM -le 0 ]] && ! exp_done "$OUTPUT_0"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 0] Control group: no L2, no L3 (pure P-Flow equivalent)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-OUTPUT_0="$OUTPUT_BASE/exp0_ctrl"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_0" \
@@ -96,6 +116,9 @@ python evaluation/run_reproduction_eval.py \
     --caption-dir "$APPLY_CAPTION_DIR" \
     --output-dir "$OUTPUT_0/eval" \
     --method-name "ctrl_no_L2_no_L3"
+else
+echo "[Exp 0] SKIP (already done or --from > 0)"
+fi
 echo ""
 
 # ================================================================
@@ -103,10 +126,11 @@ echo ""
 # ================================================================
 # 目的: blend_alpha=0.0001 时应该 ≈ 不开 blend
 # 如果结果和 Exp 0 一致，说明 prepare_latents 路径修复正确
+OUTPUT_1="$OUTPUT_BASE/exp1_l3_path_verify"
+if [[ $START_FROM -le 1 ]] && ! exp_done "$OUTPUT_1"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 1] Layer 3 path fix verify: blend_alpha=0.0001, no L2"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-OUTPUT_1="$OUTPUT_BASE/exp1_l3_path_verify"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_1" \
@@ -120,6 +144,9 @@ python evaluation/run_reproduction_eval.py \
     --caption-dir "$APPLY_CAPTION_DIR" \
     --output-dir "$OUTPUT_1/eval" \
     --method-name "L3_path_verify_ba0001"
+else
+echo "[Exp 1] SKIP (already done or --from > 1)"
+fi
 echo ""
 
 # ================================================================
@@ -128,10 +155,11 @@ echo ""
 # 目的: 单独测试修复后的 Layer 2 注入
 # embed_strength=0.1 = 注入 ||e0|| 的 10% 强度
 # 不开 Layer 3 以隔离变量
+OUTPUT_2="$OUTPUT_BASE/exp2_l2_only_es01"
+if [[ $START_FROM -le 2 ]] && ! exp_done "$OUTPUT_2"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 2] Layer 2 only: embed_strength=0.1, no L3"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-OUTPUT_2="$OUTPUT_BASE/exp2_l2_only_es01"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_2" \
@@ -145,6 +173,9 @@ python evaluation/run_reproduction_eval.py \
     --caption-dir "$APPLY_CAPTION_DIR" \
     --output-dir "$OUTPUT_2/eval" \
     --method-name "L2_only_es0.1"
+else
+echo "[Exp 2] SKIP (already done or --from > 2)"
+fi
 echo ""
 
 # ================================================================
@@ -153,10 +184,11 @@ echo ""
 # 目的: 测试修复后的 noise prior 是否不再暴跌
 # 之前: Layer 3 → CLIP 暴跌 -0.10~-0.15
 # 修复后预期: CLIP 几乎不变或微升
+OUTPUT_3="$OUTPUT_BASE/exp3_l3_only_ba001"
+if [[ $START_FROM -le 3 ]] && ! exp_done "$OUTPUT_3"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 3] Layer 3 only: blend_alpha=0.001, no L2"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-OUTPUT_3="$OUTPUT_BASE/exp3_l3_only_ba001"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_3" \
@@ -170,6 +202,9 @@ python evaluation/run_reproduction_eval.py \
     --caption-dir "$APPLY_CAPTION_DIR" \
     --output-dir "$OUTPUT_3/eval" \
     --method-name "L3_only_ba0.001"
+else
+echo "[Exp 3] SKIP (already done or --from > 3)"
+fi
 echo ""
 
 # ================================================================
@@ -178,12 +213,17 @@ echo ""
 # 目的: 寻找 embed_strength 最优值
 # 扫描范围: 0.01, 0.05, 0.1, 0.2
 # 过小 → 信号太弱无效果; 过大 → 扰动太强破坏质量
+if [[ $START_FROM -le 4 ]]; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 4] Layer 2 strength sweep: es=0.01, 0.05, 0.2"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 for ES in 0.01 0.05 0.2; do
     OUTPUT_4="$OUTPUT_BASE/exp4_l2_es${ES}"
+    if exp_done "$OUTPUT_4"; then
+        echo "  [Exp 4] es=$ES SKIP (already done)"
+        continue
+    fi
     echo "  [Exp 4] embed_strength=$ES ..."
     python run_batch_extract.py \
         $COMMON_ARGS \
@@ -198,6 +238,9 @@ for ES in 0.01 0.05 0.2; do
         --output-dir "$OUTPUT_4/eval" \
         --method-name "L2_es${ES}"
 done
+else
+echo "[Exp 4] SKIP (--from > 4)"
+fi
 echo ""
 
 # ================================================================
@@ -205,10 +248,11 @@ echo ""
 # ================================================================
 # 目的: 验证两层修复后叠加效果
 # 理论预期: L2 提升 XCLIP (时序), L3 提升 CLIP (外观), 互补正增益
+OUTPUT_5="$OUTPUT_BASE/exp5_l2_l3_combined"
+if [[ $START_FROM -le 5 ]] && ! exp_done "$OUTPUT_5"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 5] Layer 2 + Layer 3 combined"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-OUTPUT_5="$OUTPUT_BASE/exp5_l2_l3_combined"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_5" \
@@ -222,6 +266,9 @@ python evaluation/run_reproduction_eval.py \
     --caption-dir "$APPLY_CAPTION_DIR" \
     --output-dir "$OUTPUT_5/eval" \
     --method-name "L2_es0.1_L3_ba0.001"
+else
+echo "[Exp 5] SKIP (already done or --from > 5)"
+fi
 echo ""
 
 # ================================================================
