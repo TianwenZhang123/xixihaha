@@ -20,11 +20,17 @@ VMAD 的解决思路是三层渐进逼近：
 
 **第一层（文字）**—— 先让 AI 看一遍参考视频，用视觉语言模型（VLM）写一段尽可能详细的描述，然后迭代优化用词，直到描述本身能引导出最接近原视频的生成结果。这一层的天花板大约是 CLIP +1.4%。
 
+> ⚠️ **代码实现注释**：代码中的"Layer 1"实际是 Token Decode（已验证有害），而上述描述的"VLM + 迭代优化"对应的是 P-Flow V4 caption 系统（独立于 VMAD 代码之外的预处理步骤）。V4 caption 作为 prompt 输入确实有效（CLIP +0.025）。
+
 **第二层（隐式指令 Δe）**—— 文字的极限到了，我们就绕过文字，直接在「embedding 空间」里微调指令。具体做法是：先用数学方法算出「理想的画笔轨迹」（目标速度场 v*），然后反复调整一个小小的残差向量 Δe，让画师在每个时刻的实际画笔轨迹都尽可能贴合理想轨迹。这就是 Velocity Field Matching。一个关键发现是：画师在读指令时，对第一个词特别敏感（position 0 的注意力权重是其他位置的 10-15 倍），所以我们把优化力度集中在这个位置，收敛速度大大加快。
 
 **第三层（起笔位置 η_inv）**—— 画师的创作起点（初始噪声）对最终结果影响巨大。如果我们能计算出「从成品倒推回去的起点」，那再正向画一遍就能得到完美复现。Flow Matching Inversion 正是做这件事：沿着 ODE 把成品 z₀ 反演到噪声空间，得到 η_inv。实验表明哪怕只混入千分之一的 η_inv（α=0.001），也能带来可观的保真度提升。
 
+> ⚠️ **实验更新**：Layer 3 在当前实现中被验证为**有害**（CLIP -0.10~-0.15）。根因是代码中外部 `torch.randn` 与 pipeline 内部 `randn_tensor` 产生不同随机数，导致 blend 路径的生成质量严重下降。理论是正确的，但实现有 bug。
+
 三层组合的效果就像分辨率逐步提升的编码：文字给出语义草图，Δe 补充动态细节，η_inv 锁定完整结构。每一层编码的都是前一层的「残差信息」，互不冗余。
+
+> ⚠️ **实验更新**：目前只有 Layer 2（Δe）被验证有效。"三层互不冗余"是设计目标但尚未达成。
 
 ---
 
@@ -84,12 +90,24 @@ w_j ∝ attention_mass(j)  (从预训练模型的 attention map 统计得到)
 
 ### 2.5 实验现状
 
-| 配置 | CLIP | XCLIP | 层级 |
+> ⚠️ **以下为早期数据，已过时。** 最新实验结果见 `方法有效性总结.md`。
+
+| 配置 | CLIP | XCLIP | 层级 | 状态 |
+|------|------|-------|------|------|
+| VLM caption (baseline) | 0.8703 | 0.7164 | Layer 1 raw | 已验证 |
+| V4 iterative prompt | 0.8842 | 0.7430 | Layer 1 optimized | 已验证 |
+| + SVD noise prior α=0.001 | 0.8912 | 0.7342 | Layer 1+3 | ❌ Layer3有害 |
+| + Velocity matching (待验证) | — | — | Layer 1+2+3 | ✅ 已验证有效 |
+
+**最新最优结果（2025-05-29，10样本验证）**:
+
+| 配置 | CLIP | XCLIP | 说明 |
 |------|------|-------|------|
-| VLM caption (baseline) | 0.8703 | 0.7164 | Layer 1 raw |
-| V4 iterative prompt | 0.8842 | 0.7430 | Layer 1 optimized |
-| + SVD noise prior α=0.001 | 0.8912 | 0.7342 | Layer 1+3 |
-| + Velocity matching (待验证) | — | — | Layer 1+2+3 |
+| V4 caption + Layer2 α=0.005, no-blend | **0.9446** | 0.7541 | CLIP 最优 |
+| V4 caption + Layer2 α=0.008, no-blend | 0.9395 | **0.7581** | XCLIP 最优 |
+| V4 caption only (baseline) | 0.9192 | 0.7316 | 纯文本基线 |
+
+**结论**: Layer 2 (Velocity Field Matching) 有效，Layer 3 (Noise Prior) 有害，Layer 1 (Token Decode) 有害。
 
 ---
 
