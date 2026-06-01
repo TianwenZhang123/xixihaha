@@ -141,6 +141,8 @@ def parse_args():
     parser.add_argument("--limit", type=int, default=0,
                         help="Only process first N videos (0 = all)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--per-sample-seed", action="store_true",
+                        help="Use seed=base_seed+sample_id (P-Flow compatible)")
     parser.add_argument("--resume", action="store_true",
                         help="Skip already processed videos")
     parser.add_argument("--verbose", "-v", action="store_true")
@@ -368,6 +370,12 @@ def main():
                     continue
 
                 logging.info(f"[{idx}/{len(items)}] Applying to '{content[:40]}' ...")
+
+                # Per-sample seed (P-Flow compatible: seed = base + sample_id)
+                if args.per_sample_seed:
+                    sample_seed = args.seed + int(video_id)
+                    pipeline.config.seed = sample_seed
+                    logging.info(f"    seed={sample_seed} (base={args.seed} + id={video_id})")
 
                 try:
                     apply_output = str(out_dir / "apply_tmp" / video_id)
