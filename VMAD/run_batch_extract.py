@@ -129,6 +129,10 @@ def parse_args():
     parser.add_argument("--rho_s", type=float, default=None)
     parser.add_argument("--rho_m", type=float, default=None)
     parser.add_argument("--alpha", type=float, default=None)
+    parser.add_argument("--blend-alpha", type=float, default=None,
+                        help="Layer 3 noise blending alpha (independent of --alpha for Layer 2)")
+    parser.add_argument("--embed-strength", type=float, default=None,
+                        help="Layer 2 Δe injection strength relative to e0 norm (default 0.1 = 10%%)")
 
     # ── 模型 ──
     parser.add_argument("--model-path", type=str, default=None)
@@ -212,6 +216,14 @@ def build_config(args) -> VMADConfig:
         val = getattr(args, arg_name, None)
         if val is not None:
             setattr(config, cfg_name, val)
+
+    # Layer 3 独立参数
+    if args.blend_alpha is not None:
+        config.blend_alpha = args.blend_alpha
+
+    # Layer 2 独立参数
+    if args.embed_strength is not None:
+        config.embed_strength = args.embed_strength
 
     if args.model_path:
         config.t2v_path = args.model_path

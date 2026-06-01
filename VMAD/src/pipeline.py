@@ -144,6 +144,14 @@ class VMADConfig:
     rho_m: float = 0.9              # Temporal retention (P-Flow: 0.9 keeps motion dynamics)
     alpha: float = 0.001            # Noise prior blend weight (P-Flow: 0.001 = minimal injection)
 
+    # -- Layer 3 (Apply): Independent blend alpha --
+    blend_alpha: float = 0.001      # Noise prior blend weight (INDEPENDENT of Layer 2 alpha)
+
+    # -- Layer 2 (Apply): Embedding injection strength --
+    embed_strength: float = 0.1     # Δe injection scaling relative to e0 norm
+                                    # 0.1 = inject at 10% of original embedding magnitude
+                                    # This is independent of alpha (which is for Layer 3)
+
     # -- Layer 2: Semantic Embedding (Token Space) --
     T_m: float = 1.0               # Full timestep range for reproduction (0.3 for motion transfer)
     num_opt_steps: int = 100        # Optimization iterations
@@ -639,32 +647,47 @@ class VMADPipeline:
         # processing path (CFG, negative prompt encoding, attention masks, etc.)
         # which is critical for generation quality.
         # Reference: P-Flow (2025) uses prompt string path exclusively.
+        #
+        # FIX: Layer 2 now uses 'embed_strength' (independent of Layer 3's alpha).
+        # The injection is NORMALIZED relative to e0's norm to prevent collapse:
+        #   effective_delta = embed_strength * (||e0|| / ||delta_e||) * delta_e
+        # This ensures the perturbation magnitude is proportional to the
+        # original embedding signal regardless of delta_e's absolute norm.
         delta_e = None
         if asset.delta_e is not None and cfg.use_velocity:
             delta_e = asset.delta_e.to(device=self.device, dtype=torch.bfloat16)
             if delta_e.dim() == 2:
                 delta_e = delta_e.unsqueeze(0)
-            # Scale strength to be very gentle (P-Flow insight: minimal guidance)
-            effective_strength = strength * cfg.alpha  # e.g. 1.0 * 0.001 = 0.001
+            # Normalize delta_e relative to e0 to get consistent injection strength
+            # embed_strength=0.1 means inject at 10% of original signal magnitude
+            effective_strength = strength * cfg.embed_strength
             logger.info(
-                f"  [Layer 2] Embedding hook: strength={strength}, "
-                f"effective={effective_strength:.6f}, ||delta_e||={delta_e.norm():.2f}"
+                f"  [Layer 2] Embedding hook: embed_strength={cfg.embed_strength}, "
+                f"strength_scale={strength}, effective={effective_strength:.6f}, "
+                f"||delta_e||={delta_e.norm():.2f}"
             )
         else:
             effective_strength = 0.0
             logger.info("  [Layer 2] Skipped (no delta_e or velocity disabled)")
 
         # -- Layer 3: Noise prior blending (structural guidance) --
-        # Following P-Flow: alpha=0.001 provides minimal but sufficient structural guidance
-        if cfg.use_blend:
-            latents = self._asset_manager.apply_noise_prior(
-                asset, alpha=cfg.alpha, strength=strength, generator=generator
+        # FIX: Use pipeline's own prepare_latents to generate baseline noise,
+        # then blend eta_motion externally. This preserves the random number path.
+        # blend_alpha is INDEPENDENT of Layer 2's alpha parameter.
+        if cfg.use_blend and asset.eta_motion is not None:
+            blend_alpha = cfg.blend_alpha
+            latents = self._prepare_blended_latents(
+                eta_motion=asset.eta_motion,
+                alpha=blend_alpha * strength,
+                generator=generator,
             )
-            if latents is not None:
-                logger.info(f"  [Layer 3] Noise prior: alpha={cfg.alpha}")
+            logger.info(f"  [Layer 3] Noise prior (fixed path): blend_alpha={blend_alpha}")
         else:
             latents = None
-            logger.info("  [Layer 3] Skipped (use_blend=False)")
+            if not cfg.use_blend:
+                logger.info("  [Layer 3] Skipped (use_blend=False)")
+            else:
+                logger.info("  [Layer 3] Skipped (no eta_motion in asset)")
 
         # -- Generate video with three-layer guidance --
         # Key fix: Use prompt STRING path (not prompt_embeds) to preserve CFG behavior.
@@ -706,6 +729,72 @@ class VMADPipeline:
     # =========================================================================
     # Internal Methods
     # =========================================================================
+
+    def _prepare_blended_latents(
+        self,
+        eta_motion: torch.Tensor,
+        alpha: float,
+        generator: torch.Generator,
+    ) -> torch.Tensor:
+        """
+        Layer 3 修复版：用 pipeline 内部路径生成基础噪声，再 blend eta_motion。
+
+        这保证了基础噪声与 "不开 blend" 时的噪声路径完全一致，
+        eta_motion 只做方向性引导，不破坏随机数路径。
+
+        公式：latents = √α·η_motion + √(1-α)·η_baseline
+        其中 η_baseline 由 pipeline 的 prepare_latents 生成（randn_tensor 路径）
+        """
+        cfg = self.config
+
+        # 计算 latent shape（与 WanPipeline.__call__ 内部逻辑一致）
+        vae_scale_factor_temporal = self.pipe.vae_scale_factor_temporal
+        vae_scale_factor_spatial = self.pipe.vae_scale_factor_spatial
+
+        num_channels_latents = self.pipe.transformer.config.in_channels
+        height = cfg.height // vae_scale_factor_spatial
+        width = cfg.width // vae_scale_factor_spatial
+        num_frames = (cfg.num_frames - 1) // vae_scale_factor_temporal + 1
+
+        shape = (1, num_channels_latents, num_frames, height, width)
+
+        # 用 pipeline 内部的 prepare_latents 生成基础噪声
+        # 这与不传 latents 时 pipeline 内部走的路径完全一致
+        eta_baseline = self.pipe.prepare_latents(
+            shape=shape,
+            dtype=torch.bfloat16,
+            device=self.device,
+            generator=generator,
+        )
+
+        # Blend eta_motion into baseline noise
+        alpha_scaled = min(alpha, 1.0)
+        eta_motion = eta_motion.to(device=self.device, dtype=eta_baseline.dtype)
+
+        # 确保 shape 一致
+        if eta_motion.dim() == 4:
+            eta_motion = eta_motion.unsqueeze(0)
+        if eta_motion.shape != eta_baseline.shape:
+            logger.warning(
+                f"Shape mismatch: eta_motion={eta_motion.shape}, "
+                f"eta_baseline={eta_baseline.shape}. Truncating/padding."
+            )
+            # 尝试对齐 — 取较小的 shape
+            min_shape = [min(a, b) for a, b in zip(eta_motion.shape, eta_baseline.shape)]
+            eta_motion_aligned = torch.zeros_like(eta_baseline)
+            slices = tuple(slice(0, s) for s in min_shape)
+            eta_motion_aligned[slices] = eta_motion[slices]
+            eta_motion = eta_motion_aligned
+
+        latents = (alpha_scaled ** 0.5) * eta_motion + ((1 - alpha_scaled) ** 0.5) * eta_baseline
+
+        logger.info(
+            f"    Blended latents: α={alpha_scaled:.4f}, "
+            f"||η_motion||={eta_motion.norm():.1f}, ||η_baseline||={eta_baseline.norm():.1f}, "
+            f"||latents||={latents.norm():.1f}"
+        )
+
+        return latents
 
     def _compute_inversion(self, ref_video: torch.Tensor, prompt: str) -> torch.Tensor:
         """Flow Matching Inversion: V_ref -> eta_inv."""
@@ -866,7 +955,10 @@ class VMADPipeline:
             else:
                 hidden_states = output
 
-            # Inject delta_e with gentle strength
+            # Inject delta_e with norm-adaptive strength
+            # FIX: Normalize delta_e relative to hidden_states norm to prevent
+            # the injection from overwhelming the original embedding signal.
+            # effective_injection = strength * (||e0|| / ||delta_e||) * delta_e
             de = delta_e.to(device=hidden_states.device, dtype=hidden_states.dtype)
             if de.shape[1] != hidden_states.shape[1]:
                 # Truncate or pad delta_e to match sequence length
@@ -875,7 +967,16 @@ class VMADPipeline:
                 de_aligned[:, :min_len, :] = de[:, :min_len, :]
                 de = de_aligned
 
-            hidden_states = hidden_states + strength * de
+            # Norm-adaptive scaling: ensure injection is proportional to signal
+            e0_norm = hidden_states.norm()
+            de_norm = de.norm()
+            if de_norm > 1e-8:
+                # Scale de so that (strength * scaled_de) has magnitude
+                # = strength * e0_norm (i.e., strength fraction of original signal)
+                norm_scale = e0_norm / de_norm
+                hidden_states = hidden_states + strength * norm_scale * de
+            else:
+                hidden_states = hidden_states + strength * de
             hook_applied[0] = True
 
             if isinstance(output, tuple):
