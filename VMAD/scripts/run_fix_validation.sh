@@ -45,13 +45,14 @@
 # ================================================================
 
 set -e
+export OMP_NUM_THREADS=4
 
 # ─── 环境变量 ───
-VMAD_DIR="$HOME/autodl-tmp/videofake/VMAD"
-VIDEO_DIR="$HOME/autodl-tmp/videofake/P-Flow/data/generated_videos"
-CAPTION_DIR="$HOME/autodl-tmp/videofake/P-Flow/data/captions_qwen"
-APPLY_CAPTION_DIR="$HOME/autodl-tmp/videofake/P-Flow/data/captions_iter1"
-OUTPUT_BASE="$HOME/autodl-tmp/videofake/VMAD/outputs/fix_validation"
+VMAD_DIR="/root/autodl-tmp/videofake/VMAD"
+VIDEO_DIR="/root/autodl-tmp/data/video-200/water_mark_out"
+CAPTION_DIR="/root/autodl-tmp/outputs/hybrid_iter_v4/captions_iter0"
+ASSETS_DIR="/root/autodl-tmp/outputs/vmad_v4_10samples/assets"
+OUTPUT_BASE="/root/autodl-tmp/outputs/fix_validation"
 SAMPLE_IDS="7 17 21 31 32 33 34 43 46 47"
 
 # ─── 断点续跑支持 ───
@@ -72,9 +73,9 @@ exp_done() {
 }
 
 # ─── 公共参数 ───
+# 注意: 每个实验需要先 mkdir + ln -sfn assets 再跑
 COMMON_ARGS="--video-dir $VIDEO_DIR \
     --caption-dir $CAPTION_DIR \
-    --apply-caption-dir $APPLY_CAPTION_DIR \
     --content SELF \
     --apply-only \
     --per-sample-seed \
@@ -83,6 +84,15 @@ COMMON_ARGS="--video-dir $VIDEO_DIR \
     --seed 42 \
     --resume \
     -v"
+
+# 辅助函数: 为实验目录准备 assets 软链接
+prepare_output() {
+    local out_dir="$1"
+    mkdir -p "$out_dir"
+    if [ ! -e "$out_dir/assets" ]; then
+        ln -sfn "$ASSETS_DIR" "$out_dir/assets"
+    fi
+}
 
 cd "$VMAD_DIR"
 mkdir -p logs
@@ -103,6 +113,7 @@ if [[ $START_FROM -le 0 ]] && ! exp_done "$OUTPUT_0"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 0] Control group: no L2, no L3 (pure P-Flow equivalent)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+prepare_output "$OUTPUT_0"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_0" \
@@ -113,7 +124,7 @@ echo "[Exp 0] Evaluating..."
 python evaluation/run_reproduction_eval.py \
     --orig-dir "$VIDEO_DIR" \
     --gen-dir "$OUTPUT_0/generated" \
-    --caption-dir "$APPLY_CAPTION_DIR" \
+    --caption-dir "$CAPTION_DIR" \
     --output-dir "$OUTPUT_0/eval" \
     --method-name "ctrl_no_L2_no_L3"
 else
@@ -131,6 +142,7 @@ if [[ $START_FROM -le 1 ]] && ! exp_done "$OUTPUT_1"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 1] Layer 3 path fix verify: blend_alpha=0.0001, no L2"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+prepare_output "$OUTPUT_1"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_1" \
@@ -141,7 +153,7 @@ echo "[Exp 1] Evaluating..."
 python evaluation/run_reproduction_eval.py \
     --orig-dir "$VIDEO_DIR" \
     --gen-dir "$OUTPUT_1/generated" \
-    --caption-dir "$APPLY_CAPTION_DIR" \
+    --caption-dir "$CAPTION_DIR" \
     --output-dir "$OUTPUT_1/eval" \
     --method-name "L3_path_verify_ba0001"
 else
@@ -160,6 +172,7 @@ if [[ $START_FROM -le 2 ]] && ! exp_done "$OUTPUT_2"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 2] Layer 2 only: embed_strength=0.1, no L3"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+prepare_output "$OUTPUT_2"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_2" \
@@ -170,7 +183,7 @@ echo "[Exp 2] Evaluating..."
 python evaluation/run_reproduction_eval.py \
     --orig-dir "$VIDEO_DIR" \
     --gen-dir "$OUTPUT_2/generated" \
-    --caption-dir "$APPLY_CAPTION_DIR" \
+    --caption-dir "$CAPTION_DIR" \
     --output-dir "$OUTPUT_2/eval" \
     --method-name "L2_only_es0.1"
 else
@@ -189,6 +202,7 @@ if [[ $START_FROM -le 3 ]] && ! exp_done "$OUTPUT_3"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 3] Layer 3 only: blend_alpha=0.001, no L2"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+prepare_output "$OUTPUT_3"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_3" \
@@ -199,7 +213,7 @@ echo "[Exp 3] Evaluating..."
 python evaluation/run_reproduction_eval.py \
     --orig-dir "$VIDEO_DIR" \
     --gen-dir "$OUTPUT_3/generated" \
-    --caption-dir "$APPLY_CAPTION_DIR" \
+    --caption-dir "$CAPTION_DIR" \
     --output-dir "$OUTPUT_3/eval" \
     --method-name "L3_only_ba0.001"
 else
@@ -225,6 +239,7 @@ for ES in 0.01 0.05 0.2; do
         continue
     fi
     echo "  [Exp 4] embed_strength=$ES ..."
+    prepare_output "$OUTPUT_4"
     python run_batch_extract.py \
         $COMMON_ARGS \
         --output-dir "$OUTPUT_4" \
@@ -234,7 +249,7 @@ for ES in 0.01 0.05 0.2; do
     python evaluation/run_reproduction_eval.py \
         --orig-dir "$VIDEO_DIR" \
         --gen-dir "$OUTPUT_4/generated" \
-        --caption-dir "$APPLY_CAPTION_DIR" \
+        --caption-dir "$CAPTION_DIR" \
         --output-dir "$OUTPUT_4/eval" \
         --method-name "L2_es${ES}"
 done
@@ -253,6 +268,7 @@ if [[ $START_FROM -le 5 ]] && ! exp_done "$OUTPUT_5"; then
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "[Exp 5] Layer 2 + Layer 3 combined"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+prepare_output "$OUTPUT_5"
 python run_batch_extract.py \
     $COMMON_ARGS \
     --output-dir "$OUTPUT_5" \
@@ -263,7 +279,7 @@ echo "[Exp 5] Evaluating..."
 python evaluation/run_reproduction_eval.py \
     --orig-dir "$VIDEO_DIR" \
     --gen-dir "$OUTPUT_5/generated" \
-    --caption-dir "$APPLY_CAPTION_DIR" \
+    --caption-dir "$CAPTION_DIR" \
     --output-dir "$OUTPUT_5/eval" \
     --method-name "L2_es0.1_L3_ba0.001"
 else
