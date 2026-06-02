@@ -148,9 +148,9 @@ class VMADConfig:
     blend_alpha: float = 0.001      # Noise prior blend weight (INDEPENDENT of Layer 2 alpha)
 
     # -- Layer 2 (Apply): Embedding injection strength --
-    embed_strength: float = 0.1     # Δe injection scaling relative to e0 norm
-                                    # 0.1 = inject at 10% of original embedding magnitude
-                                    # This is independent of alpha (which is for Layer 3)
+    embed_strength: float = 0.005   # Δe direct injection weight (no norm-adaptive scaling)
+                                    # Proven optimal: 0.005 (CLIP=0.9446) or 0.008 (XCLIP=0.7581)
+                                    # This is the raw multiplier: injection = embed_strength * delta_e
 
     # -- Layer 2: Semantic Embedding (Token Space) --
     T_m: float = 1.0               # Full timestep range for reproduction (0.3 for motion transfer)
@@ -648,21 +648,19 @@ class VMADPipeline:
         # which is critical for generation quality.
         # Reference: P-Flow (2025) uses prompt string path exclusively.
         #
-        # FIX: Layer 2 now uses 'embed_strength' (independent of Layer 3's alpha).
-        # The injection is NORMALIZED relative to e0's norm to prevent collapse:
-        #   effective_delta = embed_strength * (||e0|| / ||delta_e||) * delta_e
-        # This ensures the perturbation magnitude is proportional to the
-        # original embedding signal regardless of delta_e's absolute norm.
+        # Injection formula: hidden_states += embed_strength * delta_e
+        # NO norm-adaptive scaling — proven harmful (amplifies by 40-80x).
+        # Optimal embed_strength ≈ 0.005~0.008 (validated on sample #7).
         delta_e = None
         if asset.delta_e is not None and cfg.use_velocity:
             delta_e = asset.delta_e.to(device=self.device, dtype=torch.bfloat16)
             if delta_e.dim() == 2:
                 delta_e = delta_e.unsqueeze(0)
-            # Normalize delta_e relative to e0 to get consistent injection strength
-            # embed_strength=0.1 means inject at 10% of original signal magnitude
+            # Direct scaling: embed_strength is the raw multiplier on delta_e
+            # No norm-adaptive — that was proven to be 80x too aggressive
             effective_strength = strength * cfg.embed_strength
             logger.info(
-                f"  [Layer 2] Embedding hook: embed_strength={cfg.embed_strength}, "
+                f"  [Layer 2] Embedding hook (direct): embed_strength={cfg.embed_strength}, "
                 f"strength_scale={strength}, effective={effective_strength:.6f}, "
                 f"||delta_e||={delta_e.norm():.2f}"
             )
@@ -956,10 +954,9 @@ class VMADPipeline:
             else:
                 hidden_states = output
 
-            # Inject delta_e with norm-adaptive strength
-            # FIX: Normalize delta_e relative to hidden_states norm to prevent
-            # the injection from overwhelming the original embedding signal.
-            # effective_injection = strength * (||e0|| / ||delta_e||) * delta_e
+            # Inject delta_e with DIRECT scaling (no norm-adaptive)
+            # Proven: norm-adaptive (||e0||/||de|| ≈ 40x) amplifies injection
+            # to catastrophic levels. Direct addition with small strength works.
             de = delta_e.to(device=hidden_states.device, dtype=hidden_states.dtype)
             if de.shape[1] != hidden_states.shape[1]:
                 # Truncate or pad delta_e to match sequence length
@@ -968,16 +965,10 @@ class VMADPipeline:
                 de_aligned[:, :min_len, :] = de[:, :min_len, :]
                 de = de_aligned
 
-            # Norm-adaptive scaling: ensure injection is proportional to signal
-            e0_norm = hidden_states.norm()
-            de_norm = de.norm()
-            if de_norm > 1e-8:
-                # Scale de so that (strength * scaled_de) has magnitude
-                # = strength * e0_norm (i.e., strength fraction of original signal)
-                norm_scale = e0_norm / de_norm
-                hidden_states = hidden_states + strength * norm_scale * de
-            else:
-                hidden_states = hidden_states + strength * de
+            # Direct injection: hidden_states += strength * delta_e
+            # strength ≈ 0.005 means ||injection|| ≈ 0.18 vs ||e0|| ≈ 1448
+            # i.e., ~0.01% perturbation — gentle enough to guide without collapse
+            hidden_states = hidden_states + strength * de
             hook_applied[0] = True
 
             if isinstance(output, tuple):
