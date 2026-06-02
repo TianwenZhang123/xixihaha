@@ -19,11 +19,13 @@
 #   Exp 3: L2 embed_strength=0.003（边界探索）
 #   Exp 4: L2 embed_strength=0.01（对照）
 #
-# 预估时间: 10 sample × 2.7min × 5组 ≈ 2.3 小时
+# 预估时间: 10 sample × 2.2min × 5组 ≈ 1.8 小时
+#
+# 重要: 使用固定 seed=42（不用 per-sample-seed），与历史实验对齐
 #
 # 成功标准:
 #   - Exp 1 CLIP ≥ 0.92, XCLIP ≥ 0.74 （多样本上复现 sample #7 的增益方向）
-#   - 任一实验 CLIP > 0.8842 （超过控制组）
+#   - 任一实验 CLIP > ctrl （超过控制组）
 # ================================================================
 
 set -e
@@ -56,11 +58,11 @@ prepare_output() {
     fi
 }
 
+# 注意：使用固定 seed=42，不用 --per-sample-seed（已验证与历史基线对齐）
 COMMON_ARGS="--video-dir $VIDEO_DIR \
     --caption-dir $CAPTION_DIR \
     --content SELF \
     --apply-only \
-    --per-sample-seed \
     --no-token_decode \
     --no-blend \
     --sample-ids $SAMPLE_IDS \
