@@ -4,7 +4,7 @@
 # ================================================================
 #
 # 只开 Layer 3 噪声先验（η_motion blend），不开 Layer 2
-# 验证修复后的 _prepare_blended_latents() 是否有效
+# 验证修复后的 _get_blended_latents() (P-Flow style) 是否有效
 #
 # 对照：使用之前已跑的 ctrl 组（l2_direct_validation/ctrl, CLIP=0.8840）
 #

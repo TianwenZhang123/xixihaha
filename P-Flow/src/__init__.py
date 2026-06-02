@@ -1,5 +1,5 @@
 """
-P-Flow: Video Reproduction via Iterative Prompt Optimization + Noise Prior.
+P-Flow: Video Reproduction via Iterative Prompt Optimization + Noise Prior + Velocity Matching.
 
 通过命令行 flag 控制各改动点，一个管线搞定所有配置。
 
@@ -16,6 +16,7 @@ P-Flow: Video Reproduction via Iterative Prompt Optimization + Noise Prior.
     ├─────────────────────────────────────────────────────────────────────┤
     │  flow_matching.py    — FlowMatchingInverter (Euler + Midpoint)       │
     │  svd_filter.py       — SVDFilter (空间去内容 + 时间保运动)           │
+    │  velocity_matching.py — VelocityMatcher (轻量版Δe优化, 30步)        │
     │  vlm_client.py       — Local/DashScope/Mock VLM 客户端              │
     │  video_utils.py      — 视频 I/O 和处理工具                          │
     │  distributed.py      — 单 GPU 推理工具                              │
@@ -25,17 +26,25 @@ P-Flow: Video Reproduction via Iterative Prompt Optimization + Noise Prior.
     --inversion    Flow Matching Inversion (从参考视频反演噪声)
     --svd          SVD 两阶段滤波 (空间去内容 + 时间保运动)
     --blend        噪声混合 (η = √α·η_temporal + √(1-α)·η_random)
+    --velocity     Velocity Field Matching (Δe embedding 注入, 轻量版)
     --iter N       迭代 VLM 优化 (N轮反馈循环)
     --midpoint     二阶中点法 ODE 求解器 (替代 Euler)
     --composite    三面板垂直拼接 (ref|prev|current 送 VLM 对比)
 
+组合示例:
+    baseline:     无任何 flag → caption + 一次生成
+    +noise_prior: --inversion --svd --blend → 噪声先验引导
+    +velocity:    --inversion --velocity → Δe embedding 注入 (需要 inversion)
+    +full:        --inversion --svd --blend --velocity --iter 10 → 全功能
+
 用法:
-    python run.py --video ref.mp4 --caption "..." --inversion --svd --blend --iter 10
+    python run.py --video ref.mp4 --caption "..." --inversion --svd --blend --velocity
 """
 
-__version__ = "5.0.0"
+__version__ = "6.0.0"
 __task__ = "video_reproduction"
 
 from .pipeline import PFlowConfig, PFlowPipeline
+from .velocity_matching import VelocityMatcher
 
-__all__ = ["PFlowConfig", "PFlowPipeline"]
+__all__ = ["PFlowConfig", "PFlowPipeline", "VelocityMatcher"]

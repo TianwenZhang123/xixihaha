@@ -38,7 +38,7 @@ Phase C (可解释层/文本空间)    ──────→     Layer 1 (Prompt
 
 | Phase/Layer | 状态 | 说明 |
 |---|---|---|
-| Phase A → Layer 3 | **待验证** | P-Flow 中证明有效；VMAD 此前因噪声路径 bug 一直关闭（`--no-blend`），已修复 `_prepare_blended_latents()`，正在跑验证实验 |
+| Phase A → Layer 3 | **改进中** | P-Flow 中证明有效；VMAD 此前 `_prepare_blended_latents()` 使用 `randn_tensor` 导致 CLIP -0.10 退化，已改用 P-Flow 风格的 `_get_blended_latents()`（直接 `torch.randn`），待重新验证 |
 | Phase B → Layer 2 | **存疑** | es=0.005 在 10 样本上无增益（CLIP -0.0048）。根本问题：Δe 基于原始 caption 的 e₀ 优化，但应用时加在了 LLM 改写后 caption 的 embedding 上，两者不一致导致方向失效 |
 | Phase C → Layer 1 | **未测试** | 依赖 Phase B 产出的 Δe，Phase B 无效则 Phase C 无意义。一直用 `--no-token_decode` 跳过 |
 

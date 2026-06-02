@@ -33,6 +33,7 @@ import torch
 from .distributed import setup_single_gpu, load_model_single_gpu, cleanup_gpu_memory
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
 from .svd_filter import SVDFilter
+from .velocity_matching import VelocityMatcher
 from .video_utils import (
     load_video, save_video_tensor, normalize_video, denormalize_video,
     create_vertical_composite,
@@ -69,6 +70,7 @@ class PFlowConfig:
     use_inversion: bool = False    # Flow Matching Inversion
     use_svd: bool = False          # SVD Filtering
     use_blend: bool = False        # Noise Blending (α mixing)
+    use_velocity: bool = False     # Velocity Field Matching (Layer 2, Δe embedding)
     use_iter: bool = False         # Iterative VLM Optimization
     use_midpoint: bool = False     # Midpoint ODE Solver
     use_composite: bool = False    # Vertical Composite for VLM
@@ -78,6 +80,12 @@ class PFlowConfig:
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
     inversion_steps: int = 50     # 反演ODE步数
+
+    # ── Velocity Matching 参数 ──
+    velocity_steps: int = 30      # Δe 优化步数 (轻量版, VMAD用100)
+    velocity_lr: float = 1e-3     # Δe 优化学习率
+    velocity_T_m: float = 1.0     # 时间步范围 (1.0=复现, 0.3=运动迁移)
+    embed_strength: float = 0.005 # Δe 注入强度 (验证最优: 0.005)
 
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
@@ -98,6 +106,8 @@ class PFlowConfig:
             flags.append("svd")
         if self.use_blend:
             flags.append("blend")
+        if self.use_velocity:
+            flags.append("velocity")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -160,7 +170,6 @@ class PFlowPipeline:
     # 主入口
     # ─────────────────────────────────────────────────────────────
 
-    @torch.no_grad()
     def run(
         self,
         video_path: str,
@@ -170,6 +179,9 @@ class PFlowPipeline:
     ) -> Dict[str, Any]:
         """
         运行管线。根据 config 中的 flag 自动决定执行哪些步骤。
+
+        注意: 不再使用 @torch.no_grad() 装饰器，因为 velocity matching 需要梯度。
+        各不需要梯度的步骤（inversion, generation）内部自己管理 no_grad 上下文。
 
         Args:
             video_path: 参考视频路径
@@ -216,8 +228,14 @@ class PFlowPipeline:
 
         # ── Step 3: 计算噪声先验 (如果启用) ──
         eta_temporal = None
+        eta_inv_raw = None  # 未经 SVD 的原始反演噪声，供 velocity matching 使用
         if cfg.use_inversion:
-            eta_temporal = self._compute_noise_prior(ref_video, caption)
+            eta_temporal, eta_inv_raw = self._compute_noise_prior(ref_video, caption)
+
+        # ── Step 3.5: Velocity Field Matching — 计算 Δe (如果启用) ──
+        delta_e = None
+        if cfg.use_velocity and cfg.use_inversion and eta_inv_raw is not None:
+            delta_e = self._compute_delta_e(ref_video, caption, eta_inv_raw)
 
         # ── Step 4: 生成循环 ──
         num_iters = cfg.i_max if cfg.use_iter else 1
@@ -231,8 +249,13 @@ class PFlowPipeline:
             # 获取噪声
             latents = self._get_latents(eta_temporal, generator)
 
-            # 生成视频
-            gen_video = self._generate(current_prompt, latents, generator)
+            # 生成视频（如果有 Δe，通过 embedding hook 注入）
+            if delta_e is not None:
+                gen_video = self._generate_with_embedding_hook(
+                    current_prompt, latents, generator, delta_e, cfg.embed_strength
+                )
+            else:
+                gen_video = self._generate(current_prompt, latents, generator)
             video_path_i = str(out / f"iter_{i:02d}.mp4")
             save_video_tensor(gen_video, video_path_i, fps=cfg.fps)
 
@@ -278,11 +301,14 @@ class PFlowPipeline:
 
     def _compute_noise_prior(
         self, ref_video: torch.Tensor, prompt: str
-    ) -> torch.Tensor:
+    ) -> tuple:
         """
         改动点: Inversion + SVD → η_temporal
 
         流程: V_ref → VAE encode → Flow Inversion → (SVD filter) → η_temporal
+
+        Returns:
+            (eta_temporal, eta_inv_raw): SVD滤波后的噪声 和 原始反演噪声
         """
         logger.info("  [Inversion] encoding reference → latent...")
         ref_norm = normalize_video(ref_video).unsqueeze(0)
@@ -308,6 +334,9 @@ class PFlowPipeline:
                 ref_latents, prompt_embeds, prompt_embeds
             )
 
+        # 保留原始反演噪声 (velocity matching 需要)
+        eta_inv_raw = eta_inv
+
         # SVD Filtering (如果启用)
         if self.config.use_svd:
             logger.info(f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}")
@@ -321,7 +350,7 @@ class PFlowPipeline:
         logger.info(
             f"  η_temporal: mean={eta_temporal.mean():.4f}, std={eta_temporal.std():.4f}"
         )
-        return eta_temporal
+        return eta_temporal, eta_inv_raw
 
     def _get_latents(
         self,
@@ -350,6 +379,7 @@ class PFlowPipeline:
         )
         return eta
 
+    @torch.no_grad()
     def _generate(
         self,
         prompt: str,
@@ -433,6 +463,120 @@ class PFlowPipeline:
             logger.warning(f"  VLM failed at iter {iteration}: {e}")
 
         return current_prompt
+
+    def _compute_delta_e(
+        self, ref_video: torch.Tensor, caption: str, eta_inv: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        改动点: Velocity Field Matching → Δe
+
+        使用轻量版 velocity matching (30步) 计算 embedding 残差，
+        捕获文本无法表达的运动细节。
+
+        Args:
+            ref_video: 参考视频张量
+            caption: 当前 caption
+            eta_inv: 原始反演噪声 (未经SVD滤波)
+
+        Returns:
+            delta_e: embedding 残差 (B, L, D)
+        """
+        logger.info("  [Velocity] Computing Δe via lightweight velocity matching...")
+        cfg = self.config
+
+        # Encode reference video to latent
+        ref_norm = normalize_video(ref_video).unsqueeze(0)
+        z0 = encode_video_to_latents(self.pipe, ref_norm, self.device)
+
+        # Encode caption to embedding
+        e0 = self._encode_prompt(caption)
+
+        # Run velocity matching optimization
+        matcher = VelocityMatcher(
+            pipe=self.pipe,
+            T_m=cfg.velocity_T_m,
+            num_opt_steps=cfg.velocity_steps,
+            lr=cfg.velocity_lr,
+            device=self.device,
+        )
+
+        result = matcher.optimize(z0=z0, e0=e0, eta_inv=eta_inv)
+        delta_e = result["delta_e"]
+
+        logger.info(
+            f"  [Velocity] Done: ||Δe||={delta_e.norm().item():.4f}, "
+            f"final_loss={result['final_loss']:.6f}"
+        )
+        return delta_e
+
+    def _generate_with_embedding_hook(
+        self,
+        prompt: str,
+        latents: Optional[torch.Tensor],
+        generator: torch.Generator,
+        delta_e: torch.Tensor,
+        strength: float,
+    ) -> torch.Tensor:
+        """
+        改动点: 通过 text encoder hook 注入 Δe 生成视频。
+
+        保留 pipeline 的正常 prompt 处理路径 (CFG, negative prompt, attention masks)，
+        仅在 text encoder 输出上叠加一个微小的 Δe 扰动。
+
+        公式: e_final = e_original + strength * delta_e
+        strength ≈ 0.005 时 ||injection|| ≈ 0.18 vs ||e0|| ≈ 1448 (约0.01%扰动)
+        """
+        # Install hook on text encoder
+        text_encoder = self.pipe.text_encoder
+        hook_handle = None
+        hook_applied = [False]
+
+        def text_encoder_hook(module, input, output):
+            """Add delta_e to text encoder output (positive prompt only)."""
+            if hook_applied[0]:
+                return output  # Only apply once (positive prompt, not negative)
+
+            if isinstance(output, tuple):
+                hidden_states = output[0]
+            elif hasattr(output, "last_hidden_state"):
+                hidden_states = output.last_hidden_state
+            else:
+                hidden_states = output
+
+            # Align delta_e shape with hidden_states
+            de = delta_e.to(device=hidden_states.device, dtype=hidden_states.dtype)
+            if de.shape[1] != hidden_states.shape[1]:
+                min_len = min(de.shape[1], hidden_states.shape[1])
+                de_aligned = torch.zeros_like(hidden_states)
+                de_aligned[:, :min_len, :] = de[:, :min_len, :]
+                de = de_aligned
+
+            # Inject: hidden_states += strength * delta_e
+            hidden_states = hidden_states + strength * de
+            hook_applied[0] = True
+
+            if isinstance(output, tuple):
+                return (hidden_states,) + output[1:]
+            elif hasattr(output, "last_hidden_state"):
+                output.last_hidden_state = hidden_states
+                return output
+            else:
+                return hidden_states
+
+        # Register hook
+        hook_handle = text_encoder.register_forward_hook(text_encoder_hook)
+
+        try:
+            video = self._generate(prompt, latents, generator)
+        finally:
+            if hook_handle is not None:
+                hook_handle.remove()
+
+        logger.info(
+            f"    [Velocity] Hook applied: {hook_applied[0]}, "
+            f"injection strength={strength:.6f}"
+        )
+        return video
 
     def _encode_prompt(self, prompt: str) -> torch.Tensor:
         """编码文本到 embedding。"""

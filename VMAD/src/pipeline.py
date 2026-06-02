@@ -669,17 +669,17 @@ class VMADPipeline:
             logger.info("  [Layer 2] Skipped (no delta_e or velocity disabled)")
 
         # -- Layer 3: Noise prior blending (structural guidance) --
-        # FIX: Use pipeline's own prepare_latents to generate baseline noise,
-        # then blend eta_motion externally. This preserves the random number path.
-        # blend_alpha is INDEPENDENT of Layer 2's alpha parameter.
+        # Matches P-Flow's _get_latents(): use torch.randn on same device/shape
+        # as eta_motion, then pass blended latents directly via kwargs["latents"].
+        # This avoids randn_tensor's RNG path issues.
         if cfg.use_blend and asset.eta_motion is not None:
             blend_alpha = cfg.blend_alpha
-            latents = self._prepare_blended_latents(
+            latents = self._get_blended_latents(
                 eta_motion=asset.eta_motion,
                 alpha=blend_alpha * strength,
                 generator=generator,
             )
-            logger.info(f"  [Layer 3] Noise prior (fixed path): blend_alpha={blend_alpha}")
+            logger.info(f"  [Layer 3] Noise prior (P-Flow style): blend_alpha={blend_alpha}")
         else:
             latents = None
             if not cfg.use_blend:
@@ -728,68 +728,46 @@ class VMADPipeline:
     # Internal Methods
     # =========================================================================
 
-    def _prepare_blended_latents(
+    def _get_blended_latents(
         self,
         eta_motion: torch.Tensor,
         alpha: float,
         generator: torch.Generator,
     ) -> torch.Tensor:
         """
-        Layer 3 修复版：用 pipeline 内部路径生成基础噪声，再 blend eta_motion。
+        Layer 3: P-Flow style noise blending.
 
-        这保证了基础噪声与 "不开 blend" 时的噪声路径完全一致，
-        eta_motion 只做方向性引导，不破坏随机数路径。
+        与 P-Flow._get_latents() 完全一致的实现：
+        - 用 torch.randn() 直接在 eta_motion 的 shape/device 上生成随机噪声
+        - 不使用 randn_tensor（避免 diffusers 内部 RNG 路径问题）
+        - blend 后直接作为 latents 传入 pipeline
 
-        公式：latents = √α·η_motion + √(1-α)·η_baseline
-        其中 η_baseline 由 pipeline 的 prepare_latents 生成（randn_tensor 路径）
+        公式：latents = √α · η_motion + √(1-α) · η_random
         """
-        cfg = self.config
-
-        # 计算 latent shape（与 WanPipeline.__call__ 内部逻辑一致）
-        vae_scale_factor_temporal = self.pipe.vae_scale_factor_temporal
-        vae_scale_factor_spatial = self.pipe.vae_scale_factor_spatial
-
-        num_channels_latents = self.pipe.transformer.config.in_channels
-        height = cfg.height // vae_scale_factor_spatial
-        width = cfg.width // vae_scale_factor_spatial
-        num_frames = (cfg.num_frames - 1) // vae_scale_factor_temporal + 1
-
-        shape = (1, num_channels_latents, num_frames, height, width)
-
-        # 用 randn_tensor 生成基础噪声（与 WanPipeline.prepare_latents 内部路径一致）
-        # 直接调用 randn_tensor 而非 prepare_latents，避免接口签名差异
-        from diffusers.utils.torch_utils import randn_tensor
-        eta_baseline = randn_tensor(
-            shape,
-            generator=generator,
-            device=self.device,
-            dtype=torch.bfloat16,
-        )
-
-        # Blend eta_motion into baseline noise
         alpha_scaled = min(alpha, 1.0)
-        eta_motion = eta_motion.to(device=self.device, dtype=eta_baseline.dtype)
 
-        # 确保 shape 一致
+        # 确保 eta_motion 在正确设备上
+        eta_motion = eta_motion.to(device=self.device, dtype=torch.bfloat16)
         if eta_motion.dim() == 4:
             eta_motion = eta_motion.unsqueeze(0)
-        if eta_motion.shape != eta_baseline.shape:
-            logger.warning(
-                f"Shape mismatch: eta_motion={eta_motion.shape}, "
-                f"eta_baseline={eta_baseline.shape}. Truncating/padding."
-            )
-            # 尝试对齐 — 取较小的 shape
-            min_shape = [min(a, b) for a, b in zip(eta_motion.shape, eta_baseline.shape)]
-            eta_motion_aligned = torch.zeros_like(eta_baseline)
-            slices = tuple(slice(0, s) for s in min_shape)
-            eta_motion_aligned[slices] = eta_motion[slices]
-            eta_motion = eta_motion_aligned
 
-        latents = (alpha_scaled ** 0.5) * eta_motion + ((1 - alpha_scaled) ** 0.5) * eta_baseline
+        # P-Flow 方式：直接 torch.randn，与 eta_motion 同 shape/dtype/device
+        eta_random = torch.randn(
+            eta_motion.shape,
+            dtype=eta_motion.dtype,
+            device=eta_motion.device,
+            generator=generator,
+        )
+
+        # Blend: √α · η_motion + √(1-α) · η_random
+        latents = (
+            torch.sqrt(torch.tensor(alpha_scaled, device=self.device)) * eta_motion
+            + torch.sqrt(torch.tensor(1.0 - alpha_scaled, device=self.device)) * eta_random
+        )
 
         logger.info(
-            f"    Blended latents: α={alpha_scaled:.4f}, "
-            f"||η_motion||={eta_motion.norm():.1f}, ||η_baseline||={eta_baseline.norm():.1f}, "
+            f"    Blended latents (P-Flow style): α={alpha_scaled:.4f}, "
+            f"||η_motion||={eta_motion.norm():.1f}, ||η_random||={eta_random.norm():.1f}, "
             f"||latents||={latents.norm():.1f}"
         )
 

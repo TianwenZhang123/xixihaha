@@ -9,11 +9,17 @@ P-Flow Runner - 通过命令行 flag 控制各改动点。
     # 启用噪声先验 (inversion + svd + blend)
     python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend
 
+    # 启用 Velocity Matching (Δe embedding 注入)
+    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --velocity
+
+    # 噪声先验 + Velocity (推荐最强组合)
+    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --velocity
+
     # 启用迭代优化 (10轮VLM反馈)
     python run.py --video /path/to/ref.mp4 --caption "a cat" --iter 10
 
     # 完整 P-Flow (所有改动点)
-    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --iter 10 --composite
+    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --velocity --iter 10 --composite
 
     # 用中点法替代Euler
     python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --midpoint
@@ -25,13 +31,15 @@ P-Flow Runner - 通过命令行 flag 控制各改动点。
     --inversion    启用 Flow Matching Inversion (从参考视频反演噪声)
     --svd          启用 SVD 两阶段滤波 (空间去内容 + 时间保运动)
     --blend        启用噪声混合 (η = sqrt(α)*η_temporal + sqrt(1-α)*η_random)
+    --velocity     启用 Velocity Field Matching (Δe embedding 注入, 需 --inversion)
     --iter N       启用迭代VLM优化 (N轮反馈循环)
     --midpoint     使用二阶中点法ODE求解器 (替代默认Euler)
     --composite    启用三面板垂直拼接 (ref|prev|current 送VLM对比)
 
 快捷组合:
     --noise_prior  等价于 --inversion --svd --blend
-    --full         等价于 --inversion --svd --blend --iter 10 --composite
+    --velocity_full 等价于 --inversion --svd --blend --velocity
+    --full         等价于 --inversion --svd --blend --velocity --iter 10 --composite
 """
 
 import sys
@@ -63,18 +71,23 @@ def parse_args():
     p.add_argument("--inversion", action="store_true", help="启用 Flow Matching Inversion")
     p.add_argument("--svd", action="store_true", help="启用 SVD 滤波")
     p.add_argument("--blend", action="store_true", help="启用噪声混合")
+    p.add_argument("--velocity", action="store_true", help="启用 Velocity Field Matching (Δe, 需 --inversion)")
     p.add_argument("--iter", type=int, default=0, help="迭代轮数 (0=不迭代)")
     p.add_argument("--midpoint", action="store_true", help="使用中点法ODE求解器")
     p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
 
     # ── 快捷组合 ──
     p.add_argument("--noise_prior", action="store_true", help="快捷: --inversion --svd --blend")
+    p.add_argument("--velocity_full", action="store_true", help="快捷: --inversion --svd --blend --velocity")
     p.add_argument("--full", action="store_true", help="快捷: 全部启用 (iter=10)")
 
     # ── 参数调节 ──
     p.add_argument("--alpha", type=float, default=0.001, help="噪声混合权重")
     p.add_argument("--rho_s", type=float, default=0.1, help="空间SVD阈值")
     p.add_argument("--rho_m", type=float, default=0.9, help="时间SVD阈值")
+    p.add_argument("--embed_strength", type=float, default=0.005, help="Δe 注入强度")
+    p.add_argument("--velocity_steps", type=int, default=30, help="Velocity matching 优化步数")
+    p.add_argument("--velocity_lr", type=float, default=1e-3, help="Velocity matching 学习率")
     p.add_argument("--steps", type=int, default=30, help="推理步数")
     p.add_argument("--guidance", type=float, default=5.0, help="CFG scale")
     p.add_argument("--seed", type=int, default=42, help="随机种子")
@@ -102,14 +115,26 @@ def build_config(args) -> PFlowConfig:
         args.inversion = True
         args.svd = True
         args.blend = True
+        args.velocity = True
         args.composite = True
         if args.iter == 0:
             args.iter = 10
+
+    if args.velocity_full:
+        args.inversion = True
+        args.svd = True
+        args.blend = True
+        args.velocity = True
 
     if args.noise_prior:
         args.inversion = True
         args.svd = True
         args.blend = True
+
+    # velocity 依赖 inversion
+    if args.velocity and not args.inversion:
+        print("警告: --velocity 需要 --inversion，自动启用 --inversion")
+        args.inversion = True
 
     return PFlowConfig(
         t2v_path=args.model_path,
@@ -123,12 +148,16 @@ def build_config(args) -> PFlowConfig:
         use_inversion=args.inversion,
         use_svd=args.svd,
         use_blend=args.blend,
+        use_velocity=args.velocity,
         use_iter=args.iter > 0,
         use_midpoint=args.midpoint,
         use_composite=args.composite,
         alpha=args.alpha,
         rho_s=args.rho_s,
         rho_m=args.rho_m,
+        embed_strength=args.embed_strength,
+        velocity_steps=args.velocity_steps,
+        velocity_lr=args.velocity_lr,
         inversion_steps=50,
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,
@@ -218,6 +247,8 @@ def main():
     print(f"  Flags: {flags or ['baseline (无改动)']}")
     if config.use_blend:
         print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
+    if config.use_velocity:
+        print(f"  velocity: steps={config.velocity_steps}, lr={config.velocity_lr}, embed_strength={config.embed_strength}")
     if config.use_iter:
         print(f"  iterations={config.i_max}")
     print()
