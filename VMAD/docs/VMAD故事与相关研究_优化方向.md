@@ -4,6 +4,50 @@
 
 ---
 
+## 提取（Extract）与应用（Apply）的三层对应关系
+
+VMAD 的工作流分为两个阶段：**提取**（从参考视频中提取运动资产）和**应用**（用提取的资产引导生成新视频）。提取阶段的三个 Phase 分别产出应用阶段三个 Layer 所需的素材：
+
+```
+提取阶段 (Extract)                        应用阶段 (Apply)
+─────────────────                        ─────────────────
+Phase A (结构层/噪声空间)     ──────→     Layer 3 (Noise Blend)
+  ① Flow Matching Inversion:              将 η_motion 与随机噪声混合
+     视频 latents 反向积分→η_inv           作为生成起始噪声，提供结构引导
+  ② SVD 频谱分解:                         公式: η = √α·η_motion + √(1-α)·η_random
+     η_inv 去外观保运动→η_motion           α=0.001 (极轻微的方向性偏置)
+  耗时: ~2-3 min/样本
+
+Phase B (语义层/Embedding 空间) ──────→   Layer 2 (Embedding Hook)
+  ① Position-Aware Velocity Matching:     将 Δe 注入 T5 text encoder 输出
+     梯度优化求解 Δe，使模型的              公式: e_final = e_original + es * Δe
+     velocity field 对齐目标轨迹            通过 hook 方式保留 CFG 等正常流程
+  ② Content Disentanglement:
+     正则化 Δe，只保留运动信息
+  耗时: ~2-5 min/样本
+
+Phase C (可解释层/文本空间)    ──────→     Layer 1 (Prompt 增强)
+  ① Token Decoding:                       将 motion_text 拼接到 content_prompt
+     Δe 投影到 token vocabulary             变成更完整的生成指令
+  ② VLM Text Decoding (可选):
+     对比生成视频差异，描述运动
+  耗时: 几秒 / ~4 min(VLM)
+```
+
+### 当前实验验证状态（2025-06 更新）
+
+| Phase/Layer | 状态 | 说明 |
+|---|---|---|
+| Phase A → Layer 3 | **待验证** | P-Flow 中证明有效；VMAD 此前因噪声路径 bug 一直关闭（`--no-blend`），已修复 `_prepare_blended_latents()`，正在跑验证实验 |
+| Phase B → Layer 2 | **存疑** | es=0.005 在 10 样本上无增益（CLIP -0.0048）。根本问题：Δe 基于原始 caption 的 e₀ 优化，但应用时加在了 LLM 改写后 caption 的 embedding 上，两者不一致导致方向失效 |
+| Phase C → Layer 1 | **未测试** | 依赖 Phase B 产出的 Δe，Phase B 无效则 Phase C 无意义。一直用 `--no-token_decode` 跳过 |
+
+### 当前实际有效的组合
+
+目前真正在用的是：**P-Flow LLM 改写 caption（外部预处理） + Layer 3（SVD noise blend，验证中）**。Layer 2 和 Phase C 暂为死代码。
+
+---
+
 ## 第一部分：通俗故事 — "教 AI 重画一模一样的视频"
 
 ### 一句话版本
