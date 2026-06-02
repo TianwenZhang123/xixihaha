@@ -758,13 +758,14 @@ class VMADPipeline:
 
         shape = (1, num_channels_latents, num_frames, height, width)
 
-        # 用 pipeline 内部的 prepare_latents 生成基础噪声
-        # 这与不传 latents 时 pipeline 内部走的路径完全一致
-        eta_baseline = self.pipe.prepare_latents(
-            shape=shape,
-            dtype=torch.bfloat16,
-            device=self.device,
+        # 用 randn_tensor 生成基础噪声（与 WanPipeline.prepare_latents 内部路径一致）
+        # 直接调用 randn_tensor 而非 prepare_latents，避免接口签名差异
+        from diffusers.utils.torch_utils import randn_tensor
+        eta_baseline = randn_tensor(
+            shape,
             generator=generator,
+            device=self.device,
+            dtype=torch.bfloat16,
         )
 
         # Blend eta_motion into baseline noise
