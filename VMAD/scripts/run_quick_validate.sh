@@ -14,6 +14,8 @@
 # 如果 ctrl 不对 → pipeline 其他地方有改动
 # 如果 es=0.005 不对 → 需要检查注入逻辑
 #
+# 重要：历史实验使用固定 seed=42（非 per-sample-seed），必须对齐！
+#
 # 预估时间：2 个视频生成 ≈ 5-6 分钟
 # ================================================================
 
@@ -40,16 +42,15 @@ echo "================================================================"
 echo ""
 
 # ─── 公共参数 ───
+# 注意：历史实验用固定 seed=42，不用 --per-sample-seed
 COMMON_ARGS="--video-dir $VIDEO_DIR \
     --caption-dir $CAPTION_DIR \
     --content SELF \
     --apply-only \
-    --per-sample-seed \
     --no-token_decode \
     --no-blend \
     --sample-ids $SAMPLE_ID \
     --seed 42 \
-    --resume \
     -v"
 
 # ================================================================
@@ -134,7 +135,7 @@ echo "  ✓ ctrl CLIP 与 0.9397 差距 < 0.005 → pipeline 正确"
 echo "  ✓ es0.005 CLIP > ctrl CLIP → L2 注入有正向增益"
 echo "  ✓ es0.005 接近 0.9446 → 修复成功，可扩到全样本"
 echo ""
-echo "如果 ctrl 偏差大: 检查 seed 策略 (--per-sample-seed)"
+echo "如果 ctrl 偏差大: 检查 assets 是否用同一 caption 提取"
 echo "如果 es0.005 无增益: 检查 hook 是否正确挂载"
 echo "================================================================"
 echo "Validation complete — $(date)"
