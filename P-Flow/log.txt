@@ -1,300 +1,298 @@
-root@autodl-container-a4d74c9dd1-c1c138bc:~# ls
-autodl-tmp  miniconda3  models  tf-logs
-root@autodl-container-a4d74c9dd1-c1c138bc:~# cd autodl-tmp/
-root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp# ls
-1.txt  dit_position_experiment.py  log.txt  outputs     position_scan.py             pure_position_results  yu.tar.gz
-data   experiment_results          models   outputs111  pure_position_experiment.py  videofake
-root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp# cd videofake/
-root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp/videofake# git pull
-remote: Enumerating objects: 20, done.
-remote: Counting objects: 100% (20/20), done.
-remote: Compressing objects: 100% (3/3), done.
-remote: Total 11 (delta 8), reused 11 (delta 8), pack-reused 0 (from 0)
-Unpacking objects: 100% (11/11), 7.62 KiB | 2.54 MiB/s, done.
-From https://github.com/TianwenZhang123/xixihaha
-   b011bad..5f0770a  main       -> origin/main
-Updating b011bad..5f0770a
-Fast-forward
- ...-Flow_\345\256\214\346\225\264\346\212\200\346\234\257\346\226\207\346\241\243.md" | 830 -----------------------------------------
- ...25\205\344\272\213\344\270\216\346\212\200\346\234\257\346\274\224\350\277\233.md" |  48 ++-
- "P-Flow/docs/TODO_\344\274\230\345\214\226\346\226\271\345\220\221.md"                | 127 +++++++
- P-Flow/run.py                                                                         |  38 +-
- P-Flow/src/flow_matching.py                                                           |  55 +++
- P-Flow/src/pipeline.py                                                                |  16 +-
- P-Flow/src/velocity_matching.py                                                       | 120 +++++-
- 7 files changed, 388 insertions(+), 846 deletions(-)
- delete mode 100644 "P-Flow/docs/P-Flow_\345\256\214\346\225\264\346\212\200\346\234\257\346\226\207\346\241\243.md"
- create mode 100644 "P-Flow/docs/TODO_\344\274\230\345\214\226\346\226\271\345\220\221.md"
-root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp/videofake# ls
-P-Flow  VMAD  test
-root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp/videofake# cd P-Flow/
-root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp/videofake/P-Flow# ls
-README.md  configs  docs        generate_all.log  outputs           run.py   src
-USAGE.txt  data     evaluation  log.txt           requirements.txt  scripts  记忆.md
-root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp/videofake/P-Flow# # 全部一起开（position-aware + RF-Solver）
+root@autodl-container-a4d74c9dd1-c1c138bc:~# cd autodl-tmp/videofake/
+root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp/videofake# cd /root/autodl-tmp/videofake/P-Flow
+
 python run.py \
     --data_dir /root/autodl-tmp/data/video-200/water_mark_out \
     --caption_dir /root/autodl-tmp/outputs/hybrid_iter_v4/captions_iter0 \
-    --output_dir /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt \
+    --output_dir /root/autodl-tmp/outputs/velocity_steps60 \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
     --velocity_full --alpha 0.004 --embed_strength 0.02 \
-    --position_aware --rfsolver \
+    --velocity_steps 60 \
     --steps 30 --guidance 5.0 --seed 42 --resume
 
-libgomp: Invalid value for environment variable OMP_NUM_THREADS
-P-Flow | pflow_inversion_svd_blend_velocity_position_aware_rfsolver
-  Flags: ['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-  alpha=0.004, rho_s=0.1, rho_m=0.9
-  velocity: steps=30, lr=0.001, embed_strength=0.02
-  position_aware: lambda_pos=0.01
-  inversion: RF-Solver (2nd-order Taylor)
-
-2026-06-03 17:18:40,586 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
-找到 10 个样本
-实验: pflow_inversion_svd_blend_velocity_position_aware_rfsolver
-Flags: ['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-
-  [1/10] 处理 7...
-2026-06-03 17:18:40,588 [INFO] [P-Flow] sample=7, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 17:18:43,204 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 17:18:43,220 [INFO] Loading Wan 2.1-1.3B (t2v) from: /root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers
-2026-06-03 17:18:43,220 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
-
-libgomp: Invalid value for environment variable OMP_NUM_THREADS
-Loading checkpoint shards: 100%|█████████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  1.91it/s]
-Loading checkpoint shards: 100%|█████████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.58it/s]
-Loading pipeline components...: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:04<00:00,  1.21it/s]
-2026-06-03 17:18:53,454 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
-2026-06-03 17:18:53,455 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
-2026-06-03 17:18:56,232 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 17:20:30,683 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 17:20:31,542 [INFO]   η_temporal: mean=0.0014, std=0.3750
-2026-06-03 17:20:31,544 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 17:20:33,906 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 17:20:34,154 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 17:20:41,874 [INFO]     step   0/30: L_vel=0.652344, L_pos=0.000000, ||Δe||=1.4453, lr=9.98e-04
-2026-06-03 17:21:58,932 [INFO]     step  10/30: L_vel=0.176758, L_pos=0.000015, ||Δe||=6.8750, lr=7.33e-04
-2026-06-03 17:23:16,049 [INFO]     step  20/30: L_vel=0.145508, L_pos=0.000027, ||Δe||=8.8750, lr=2.85e-04
-2026-06-03 17:24:25,482 [INFO]     step  29/30: L_vel=0.178711, L_pos=0.000030, ||Δe||=9.3125, lr=1.00e-04
-2026-06-03 17:24:25,488 [INFO]   [Velocity] Done: ||Δe||=9.3125, final_loss=0.178711
-2026-06-03 17:24:25,491 [INFO]   iter 1/1: Two small sailboats floating on a cup of coffee. The first b...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.85s/it]
-2026-06-03 17:26:25,271 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 17:26:26,345 [INFO] [P-Flow] Done in 465.8s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_7/7.mp4
-  [2/10] 处理 17...
-2026-06-03 17:26:26,346 [INFO] [P-Flow] sample=17, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 17:26:28,779 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 17:26:31,140 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 17:28:06,248 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 17:28:07,055 [INFO]   η_temporal: mean=-0.0002, std=0.2988
-2026-06-03 17:28:07,058 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 17:28:09,433 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 17:28:09,472 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 17:28:17,168 [INFO]     step   0/30: L_vel=0.750000, L_pos=0.000000, ||Δe||=1.4453, lr=9.98e-04
-2026-06-03 17:29:34,363 [INFO]     step  10/30: L_vel=0.283203, L_pos=0.000015, ||Δe||=6.7812, lr=7.33e-04
-2026-06-03 17:30:51,623 [INFO]     step  20/30: L_vel=0.177734, L_pos=0.000027, ||Δe||=8.7500, lr=2.85e-04
-2026-06-03 17:32:01,076 [INFO]     step  29/30: L_vel=0.175781, L_pos=0.000030, ||Δe||=9.1875, lr=1.00e-04
-2026-06-03 17:32:01,083 [INFO]   [Velocity] Done: ||Δe||=9.1875, final_loss=0.175781
-2026-06-03 17:32:01,086 [INFO]   iter 1/1: White SUV driving on a dirt road through a scenic mountainou...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.85s/it]
-2026-06-03 17:34:00,607 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 17:34:01,827 [INFO] [P-Flow] Done in 455.5s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_17/17.mp4
-  [3/10] 处理 21...
-2026-06-03 17:34:01,828 [INFO] [P-Flow] sample=21, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 17:34:04,459 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 17:34:06,823 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 17:35:42,014 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 17:35:42,825 [INFO]   η_temporal: mean=-0.0001, std=0.2812
-2026-06-03 17:35:42,828 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 17:35:45,205 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 17:35:45,246 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 17:35:52,978 [INFO]     step   0/30: L_vel=0.098633, L_pos=0.000000, ||Δe||=1.4375, lr=9.98e-04
-2026-06-03 17:37:10,269 [INFO]     step  10/30: L_vel=0.111328, L_pos=0.000015, ||Δe||=6.8438, lr=7.33e-04
-2026-06-03 17:38:27,453 [INFO]     step  20/30: L_vel=0.429688, L_pos=0.000028, ||Δe||=9.0000, lr=2.85e-04
-2026-06-03 17:39:37,023 [INFO]     step  29/30: L_vel=0.328125, L_pos=0.000032, ||Δe||=9.4375, lr=1.00e-04
-2026-06-03 17:39:37,031 [INFO]   [Velocity] Done: ||Δe||=9.4375, final_loss=0.328125
-2026-06-03 17:39:37,035 [INFO]   iter 1/1: Colorful paper airplanes flying through a vibrant and lush j...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.85s/it]
-2026-06-03 17:41:36,661 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 17:41:37,809 [INFO] [P-Flow] Done in 456.0s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_21/21.mp4
-  [4/10] 处理 31...
-2026-06-03 17:41:37,810 [INFO] [P-Flow] sample=31, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 17:41:40,348 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 17:41:42,707 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 17:43:17,788 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 17:43:18,596 [INFO]   η_temporal: mean=0.0009, std=0.3047
-2026-06-03 17:43:18,599 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 17:43:20,973 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 17:43:21,015 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 17:43:28,743 [INFO]     step   0/30: L_vel=0.314453, L_pos=0.000000, ||Δe||=1.4453, lr=9.98e-04
-2026-06-03 17:44:45,894 [INFO]     step  10/30: L_vel=0.255859, L_pos=0.000014, ||Δe||=6.4688, lr=7.33e-04
-2026-06-03 17:46:03,033 [INFO]     step  20/30: L_vel=0.378906, L_pos=0.000021, ||Δe||=7.8750, lr=2.85e-04
-2026-06-03 17:47:12,426 [INFO]     step  29/30: L_vel=0.601562, L_pos=0.000023, ||Δe||=8.1875, lr=1.00e-04
-2026-06-03 17:47:12,433 [INFO]   [Velocity] Done: ||Δe||=8.1875, final_loss=0.601562
-2026-06-03 17:47:12,436 [INFO]   iter 1/1: Giant whale swimming gracefully through an underwater citysc...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.85s/it]
-2026-06-03 17:49:11,860 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 17:49:12,986 [INFO] [P-Flow] Done in 455.2s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_31/31.mp4
-  [5/10] 处理 32...
-2026-06-03 17:49:12,987 [INFO] [P-Flow] sample=32, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 17:49:15,444 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 17:49:17,804 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 17:50:52,790 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 17:50:53,597 [INFO]   η_temporal: mean=0.0001, std=0.3340
-2026-06-03 17:50:53,600 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 17:50:55,971 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 17:50:56,200 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 17:51:03,914 [INFO]     step   0/30: L_vel=0.414062, L_pos=0.000000, ||Δe||=1.4453, lr=9.98e-04
-2026-06-03 17:52:20,920 [INFO]     step  10/30: L_vel=0.539062, L_pos=0.000017, ||Δe||=7.2188, lr=7.33e-04
-2026-06-03 17:53:37,989 [INFO]     step  20/30: L_vel=0.091309, L_pos=0.000027, ||Δe||=8.7500, lr=2.85e-04
-2026-06-03 17:54:47,372 [INFO]     step  29/30: L_vel=0.269531, L_pos=0.000029, ||Δe||=9.0000, lr=1.00e-04
-2026-06-03 17:54:47,379 [INFO]   [Velocity] Done: ||Δe||=9.0000, final_loss=0.269531
-2026-06-03 17:54:47,383 [INFO]   iter 1/1: Two adorable golden retriever puppies waddling through deep ...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.85s/it]
-2026-06-03 17:56:46,791 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 17:56:47,862 [INFO] [P-Flow] Done in 454.9s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_32/32.mp4
-  [6/10] 处理 33...
-2026-06-03 17:56:47,863 [INFO] [P-Flow] sample=33, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 17:56:50,337 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 17:56:52,693 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 17:58:27,577 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 17:58:28,383 [INFO]   η_temporal: mean=0.0168, std=0.4102
-2026-06-03 17:58:28,386 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 17:58:30,752 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 17:58:30,793 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 17:58:38,500 [INFO]     step   0/30: L_vel=0.425781, L_pos=0.000000, ||Δe||=1.4453, lr=9.98e-04
-2026-06-03 17:59:55,494 [INFO]     step  10/30: L_vel=0.281250, L_pos=0.000014, ||Δe||=6.5625, lr=7.33e-04
-2026-06-03 18:01:12,442 [INFO]     step  20/30: L_vel=0.136719, L_pos=0.000022, ||Δe||=7.9375, lr=2.85e-04
-2026-06-03 18:02:21,826 [INFO]     step  29/30: L_vel=0.131836, L_pos=0.000024, ||Δe||=8.2500, lr=1.00e-04
-2026-06-03 18:02:21,833 [INFO]   [Velocity] Done: ||Δe||=8.2500, final_loss=0.131836
-2026-06-03 18:02:21,836 [INFO]   iter 1/1: Man wearing a white tank top running in place against a dark...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.85s/it]
-2026-06-03 18:04:21,274 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 18:04:22,324 [INFO] [P-Flow] Done in 454.5s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_33/33.mp4
-  [7/10] 处理 34...
-2026-06-03 18:04:22,325 [INFO] [P-Flow] sample=34, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 18:04:24,889 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 18:04:27,253 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 18:06:02,274 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 18:06:03,084 [INFO]   η_temporal: mean=-0.0001, std=0.2539
-2026-06-03 18:06:03,087 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 18:06:05,459 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 18:06:05,497 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 18:06:13,347 [INFO]     step   0/30: L_vel=0.137695, L_pos=0.000000, ||Δe||=1.4375, lr=9.98e-04
-2026-06-03 18:07:30,413 [INFO]     step  10/30: L_vel=0.182617, L_pos=0.000012, ||Δe||=6.0625, lr=7.33e-04
-2026-06-03 18:08:47,364 [INFO]     step  20/30: L_vel=0.121094, L_pos=0.000022, ||Δe||=7.9688, lr=2.85e-04
-2026-06-03 18:09:56,665 [INFO]     step  29/30: L_vel=0.125977, L_pos=0.000025, ||Δe||=8.4375, lr=1.00e-04
-2026-06-03 18:09:56,672 [INFO]   [Velocity] Done: ||Δe||=8.4375, final_loss=0.125977
-2026-06-03 18:09:56,675 [INFO]   iter 1/1: Three playful puppies with light gray fur and expressive eye...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.84s/it]
-2026-06-03 18:11:56,021 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 18:11:57,216 [INFO] [P-Flow] Done in 454.9s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_34/34.mp4
-  [8/10] 处理 43...
-2026-06-03 18:11:57,217 [INFO] [P-Flow] sample=43, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 18:11:59,655 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 18:12:02,018 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 18:13:37,255 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 18:13:38,066 [INFO]   η_temporal: mean=-0.0007, std=0.3340
-2026-06-03 18:13:38,069 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 18:13:40,440 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 18:13:40,483 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 18:13:48,183 [INFO]     step   0/30: L_vel=1.281250, L_pos=0.000000, ||Δe||=1.4453, lr=9.98e-04
-2026-06-03 18:15:05,407 [INFO]     step  10/30: L_vel=0.361328, L_pos=0.000018, ||Δe||=7.3438, lr=7.33e-04
-2026-06-03 18:16:22,668 [INFO]     step  20/30: L_vel=0.253906, L_pos=0.000028, ||Δe||=8.8750, lr=2.85e-04
-2026-06-03 18:17:32,251 [INFO]     step  29/30: L_vel=0.236328, L_pos=0.000030, ||Δe||=9.1875, lr=1.00e-04
-2026-06-03 18:17:32,257 [INFO]   [Velocity] Done: ||Δe||=9.1875, final_loss=0.236328
-2026-06-03 18:17:32,261 [INFO]   iter 1/1: Orange and white cat walking gracefully through a serene gar...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.85s/it]
-2026-06-03 18:19:31,834 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 18:19:32,959 [INFO] [P-Flow] Done in 455.7s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_43/43.mp4
-  [9/10] 处理 46...
-2026-06-03 18:19:32,960 [INFO] [P-Flow] sample=46, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 18:19:35,471 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 18:19:37,834 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 18:21:12,985 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 18:21:13,798 [INFO]   η_temporal: mean=0.0001, std=0.3340
-2026-06-03 18:21:13,801 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 18:21:16,173 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 18:21:16,437 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 18:21:24,168 [INFO]     step   0/30: L_vel=0.275391, L_pos=0.000000, ||Δe||=1.4453, lr=9.98e-04
-2026-06-03 18:22:41,352 [INFO]     step  10/30: L_vel=0.347656, L_pos=0.000015, ||Δe||=6.7812, lr=7.33e-04
-2026-06-03 18:23:58,586 [INFO]     step  20/30: L_vel=0.130859, L_pos=0.000026, ||Δe||=8.6250, lr=2.85e-04
-2026-06-03 18:25:08,052 [INFO]     step  29/30: L_vel=0.119141, L_pos=0.000029, ||Δe||=9.0000, lr=1.00e-04
-2026-06-03 18:25:08,059 [INFO]   [Velocity] Done: ||Δe||=9.0000, final_loss=0.119141
-2026-06-03 18:25:08,062 [INFO]   iter 1/1: Massive volcanic eruption from a high vantage point, showcas...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.85s/it]
-2026-06-03 18:27:07,485 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 18:27:08,547 [INFO] [P-Flow] Done in 455.6s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_46/46.mp4
-  [10/10] 处理 47...
-2026-06-03 18:27:08,548 [INFO] [P-Flow] sample=47, flags=['inversion', 'svd', 'blend', 'velocity', 'position_aware', 'rfsolver']
-2026-06-03 18:27:11,067 [INFO]   [Inversion] encoding reference → latent...
-2026-06-03 18:27:13,422 [INFO]   [Inversion] RF-Solver (2nd-order Taylor)...
-2026-06-03 18:28:48,461 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
-2026-06-03 18:28:49,269 [INFO]   η_temporal: mean=-0.0003, std=0.3594
-2026-06-03 18:28:49,272 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
-2026-06-03 18:28:51,641 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
-2026-06-03 18:28:51,681 [INFO]   [VelocityMatch] Lightweight optimization: steps=30, T_m=1.0, lr=0.001, position_aware=True
-2026-06-03 18:28:59,406 [INFO]     step   0/30: L_vel=0.550781, L_pos=0.000000, ||Δe||=1.4453, lr=9.98e-04
-2026-06-03 18:30:16,587 [INFO]     step  10/30: L_vel=0.257812, L_pos=0.000015, ||Δe||=6.6875, lr=7.33e-04
-2026-06-03 18:31:33,806 [INFO]     step  20/30: L_vel=0.253906, L_pos=0.000024, ||Δe||=8.3750, lr=2.85e-04
-2026-06-03 18:32:43,323 [INFO]     step  29/30: L_vel=0.135742, L_pos=0.000027, ||Δe||=8.7500, lr=1.00e-04
-2026-06-03 18:32:43,330 [INFO]   [Velocity] Done: ||Δe||=8.7500, final_loss=0.135742
-2026-06-03 18:32:43,333 [INFO]   iter 1/1: Two dogs, one white and one tan, walking in an urban environ...
-100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.85s/it]
-2026-06-03 18:34:42,900 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
-huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
-To disable this warning, you can either:
-        - Avoid using `tokenizers` before the fork if possible
-        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
-2026-06-03 18:34:44,068 [INFO] [P-Flow] Done in 455.5s → /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_47/47.mp4
-
-批量完成! 输出: /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt
-root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp/videofake/P-Flow# mkdir -p /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt_flat
-for f in /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt/sample_*/*.mp4; do
-    ln -sf "$f" /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt_flat/$(basename "$f")
+mkdir -p /root/autodl-tmp/outputs/velocity_steps60_flat
+for f in /root/autodl-tmp/outputs/velocity_steps60/sample_*/*.mp4; do
+    ln -sf "$f" /root/autodl-tmp/outputs/velocity_steps60_flat/$(basename "$f")
 done
 
 python evaluation/run_clip_xclip_eval.py \
     --orig-dir /root/autodl-tmp/data/video-200/water_mark_out \
-    --gen-dir /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt_flat \
+    --gen-dir /root/autodl-tmp/outputs/velocity_steps60_flat \
     --caption-dir /root/autodl-tmp/outputs/hybrid_iter_v4/captions_iter0 \
-    --output-dir /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt_flat/eval_clip
+    --output-dir /root/autodl-tmp/outputs/velocity_steps60_flat/eval_clip
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+P-Flow | pflow_inversion_svd_blend_velocity
+  Flags: ['inversion', 'svd', 'blend', 'velocity']
+  alpha=0.004, rho_s=0.1, rho_m=0.9
+  velocity: steps=60, lr=0.001, embed_strength=0.02
+
+2026-06-03 19:24:43,725 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 10 个样本
+实验: pflow_inversion_svd_blend_velocity
+Flags: ['inversion', 'svd', 'blend', 'velocity']
+
+  [1/10] 处理 7...
+2026-06-03 19:24:43,727 [INFO] [P-Flow] sample=7, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 19:24:46,357 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 19:24:46,373 [INFO] Loading Wan 2.1-1.3B (t2v) from: /root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-03 19:24:46,373 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|█████████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  1.98it/s]
+Loading checkpoint shards: 100%|█████████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.64it/s]
+Loading pipeline components...: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.26it/s]
+2026-06-03 19:24:56,274 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-03 19:24:56,275 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-03 19:24:58,789 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 19:26:31,726 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 19:26:32,562 [INFO]   η_temporal: mean=0.0014, std=0.3730
+2026-06-03 19:26:32,565 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 19:26:34,901 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 19:26:34,929 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 19:26:42,531 [INFO]     step   0/60: L_vel=0.652344, ||Δe||=1.4453, lr=9.99e-04
+2026-06-03 19:27:58,517 [INFO]     step  10/60: L_vel=0.173828, ||Δe||=7.1875, lr=9.27e-04
+2026-06-03 19:29:14,569 [INFO]     step  20/60: L_vel=0.125000, ||Δe||=10.3750, lr=7.54e-04
+2026-06-03 19:30:30,635 [INFO]     step  30/60: L_vel=0.075195, ||Δe||=12.0625, lr=5.26e-04
+2026-06-03 19:31:46,667 [INFO]     step  40/60: L_vel=0.058594, ||Δe||=13.0625, lr=3.05e-04
+2026-06-03 19:33:02,795 [INFO]     step  50/60: L_vel=0.109375, ||Δe||=13.3750, lr=1.49e-04
+2026-06-03 19:34:11,347 [INFO]     step  59/60: L_vel=0.057373, ||Δe||=13.4375, lr=1.00e-04
+2026-06-03 19:34:11,354 [INFO]   [Velocity] Done: ||Δe||=13.4375, final_loss=0.057373
+2026-06-03 19:34:11,357 [INFO]   iter 1/1: Two small sailboats floating on a cup of coffee. The first b...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:54<00:00,  3.80s/it]
+2026-06-03 19:36:09,490 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 19:36:10,548 [INFO] [P-Flow] Done in 686.8s → /root/autodl-tmp/outputs/velocity_steps60/sample_7/7.mp4
+  [2/10] 处理 17...
+2026-06-03 19:36:10,550 [INFO] [P-Flow] sample=17, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 19:36:13,198 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 19:36:15,536 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 19:37:49,403 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 19:37:50,202 [INFO]   η_temporal: mean=-0.0002, std=0.2988
+2026-06-03 19:37:50,205 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 19:37:52,554 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 19:37:52,586 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 19:38:00,185 [INFO]     step   0/60: L_vel=0.750000, ||Δe||=1.4453, lr=9.99e-04
+2026-06-03 19:39:16,395 [INFO]     step  10/60: L_vel=0.275391, ||Δe||=7.0938, lr=9.27e-04
+2026-06-03 19:40:32,541 [INFO]     step  20/60: L_vel=0.146484, ||Δe||=10.3125, lr=7.54e-04
+2026-06-03 19:41:48,636 [INFO]     step  30/60: L_vel=0.227539, ||Δe||=12.0000, lr=5.26e-04
+2026-06-03 19:43:04,762 [INFO]     step  40/60: L_vel=0.046875, ||Δe||=12.7500, lr=3.05e-04
+2026-06-03 19:44:20,962 [INFO]     step  50/60: L_vel=0.090332, ||Δe||=13.1250, lr=1.49e-04
+2026-06-03 19:45:29,499 [INFO]     step  59/60: L_vel=0.051758, ||Δe||=13.1875, lr=1.00e-04
+2026-06-03 19:45:29,506 [INFO]   [Velocity] Done: ||Δe||=13.1875, final_loss=0.051758
+2026-06-03 19:45:29,509 [INFO]   iter 1/1: White SUV driving on a dirt road through a scenic mountainou...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+2026-06-03 19:47:27,434 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 19:47:28,611 [INFO] [P-Flow] Done in 678.1s → /root/autodl-tmp/outputs/velocity_steps60/sample_17/17.mp4
+  [3/10] 处理 21...
+2026-06-03 19:47:28,612 [INFO] [P-Flow] sample=21, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 19:47:30,986 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 19:47:33,328 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 19:49:07,338 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 19:49:08,141 [INFO]   η_temporal: mean=-0.0001, std=0.2812
+2026-06-03 19:49:08,144 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 19:49:10,497 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 19:49:10,528 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 19:49:18,159 [INFO]     step   0/60: L_vel=0.098633, ||Δe||=1.4375, lr=9.99e-04
+2026-06-03 19:50:34,500 [INFO]     step  10/60: L_vel=0.111816, ||Δe||=7.1562, lr=9.27e-04
+2026-06-03 19:51:50,734 [INFO]     step  20/60: L_vel=0.384766, ||Δe||=10.5625, lr=7.54e-04
+2026-06-03 19:53:07,031 [INFO]     step  30/60: L_vel=0.061279, ||Δe||=12.3750, lr=5.26e-04
+2026-06-03 19:54:23,176 [INFO]     step  40/60: L_vel=0.141602, ||Δe||=13.2500, lr=3.05e-04
+2026-06-03 19:55:39,362 [INFO]     step  50/60: L_vel=0.045654, ||Δe||=13.6875, lr=1.49e-04
+2026-06-03 19:56:48,005 [INFO]     step  59/60: L_vel=0.046387, ||Δe||=13.7500, lr=1.00e-04
+2026-06-03 19:56:48,011 [INFO]   [Velocity] Done: ||Δe||=13.7500, final_loss=0.046387
+2026-06-03 19:56:48,014 [INFO]   iter 1/1: Colorful paper airplanes flying through a vibrant and lush j...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:54<00:00,  3.80s/it]
+2026-06-03 19:58:46,051 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 19:58:47,069 [INFO] [P-Flow] Done in 678.5s → /root/autodl-tmp/outputs/velocity_steps60/sample_21/21.mp4
+  [4/10] 处理 31...
+2026-06-03 19:58:47,071 [INFO] [P-Flow] sample=31, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 19:58:49,312 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 19:58:51,651 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 20:00:25,444 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 20:00:26,244 [INFO]   η_temporal: mean=0.0009, std=0.3047
+2026-06-03 20:00:26,247 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 20:00:28,598 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 20:00:28,630 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 20:00:36,274 [INFO]     step   0/60: L_vel=0.312500, ||Δe||=1.4453, lr=9.99e-04
+2026-06-03 20:01:52,513 [INFO]     step  10/60: L_vel=0.251953, ||Δe||=6.7500, lr=9.27e-04
+2026-06-03 20:03:08,782 [INFO]     step  20/60: L_vel=0.351562, ||Δe||=9.0625, lr=7.54e-04
+2026-06-03 20:04:24,914 [INFO]     step  30/60: L_vel=0.078613, ||Δe||=10.3750, lr=5.26e-04
+2026-06-03 20:05:41,043 [INFO]     step  40/60: L_vel=0.142578, ||Δe||=11.1250, lr=3.05e-04
+2026-06-03 20:06:57,143 [INFO]     step  50/60: L_vel=0.091797, ||Δe||=11.3750, lr=1.49e-04
+2026-06-03 20:08:05,603 [INFO]     step  59/60: L_vel=0.511719, ||Δe||=11.4375, lr=1.00e-04
+2026-06-03 20:08:05,609 [INFO]   [Velocity] Done: ||Δe||=11.4375, final_loss=0.511719
+2026-06-03 20:08:05,613 [INFO]   iter 1/1: Giant whale swimming gracefully through an underwater citysc...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+2026-06-03 20:10:03,487 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 20:10:04,474 [INFO] [P-Flow] Done in 677.4s → /root/autodl-tmp/outputs/velocity_steps60/sample_31/31.mp4
+  [5/10] 处理 32...
+2026-06-03 20:10:04,475 [INFO] [P-Flow] sample=32, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 20:10:06,671 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 20:10:09,005 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 20:11:42,779 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 20:11:43,579 [INFO]   η_temporal: mean=0.0001, std=0.3340
+2026-06-03 20:11:43,584 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 20:11:45,931 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 20:11:46,160 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 20:11:53,775 [INFO]     step   0/60: L_vel=0.412109, ||Δe||=1.4453, lr=9.99e-04
+2026-06-03 20:13:09,789 [INFO]     step  10/60: L_vel=0.535156, ||Δe||=7.5000, lr=9.27e-04
+2026-06-03 20:14:25,865 [INFO]     step  20/60: L_vel=0.082031, ||Δe||=9.8750, lr=7.54e-04
+2026-06-03 20:15:41,926 [INFO]     step  30/60: L_vel=0.063965, ||Δe||=10.9375, lr=5.26e-04
+2026-06-03 20:16:57,970 [INFO]     step  40/60: L_vel=0.062988, ||Δe||=11.3750, lr=3.05e-04
+2026-06-03 20:18:14,016 [INFO]     step  50/60: L_vel=0.128906, ||Δe||=11.5000, lr=1.49e-04
+2026-06-03 20:19:22,443 [INFO]     step  59/60: L_vel=0.083984, ||Δe||=11.5000, lr=1.00e-04
+2026-06-03 20:19:22,451 [INFO]   [Velocity] Done: ||Δe||=11.5000, final_loss=0.083984
+2026-06-03 20:19:22,455 [INFO]   iter 1/1: Two adorable golden retriever puppies waddling through deep ...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+2026-06-03 20:21:20,309 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 20:21:21,322 [INFO] [P-Flow] Done in 676.8s → /root/autodl-tmp/outputs/velocity_steps60/sample_32/32.mp4
+  [6/10] 处理 33...
+2026-06-03 20:21:21,323 [INFO] [P-Flow] sample=33, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 20:21:23,670 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 20:21:26,002 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 20:22:59,645 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 20:23:00,444 [INFO]   η_temporal: mean=0.0170, std=0.4102
+2026-06-03 20:23:00,447 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 20:23:02,792 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 20:23:02,825 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 20:23:10,468 [INFO]     step   0/60: L_vel=0.423828, ||Δe||=1.4453, lr=9.99e-04
+2026-06-03 20:24:26,455 [INFO]     step  10/60: L_vel=0.273438, ||Δe||=6.8125, lr=9.27e-04
+2026-06-03 20:25:42,435 [INFO]     step  20/60: L_vel=0.143555, ||Δe||=9.1250, lr=7.54e-04
+2026-06-03 20:26:58,434 [INFO]     step  30/60: L_vel=0.102051, ||Δe||=10.2500, lr=5.26e-04
+2026-06-03 20:28:14,444 [INFO]     step  40/60: L_vel=0.066406, ||Δe||=10.7500, lr=3.05e-04
+2026-06-03 20:29:30,422 [INFO]     step  50/60: L_vel=0.312500, ||Δe||=10.9375, lr=1.49e-04
+2026-06-03 20:30:38,854 [INFO]     step  59/60: L_vel=0.070801, ||Δe||=11.0625, lr=1.00e-04
+2026-06-03 20:30:38,860 [INFO]   [Velocity] Done: ||Δe||=11.0625, final_loss=0.070801
+2026-06-03 20:30:38,863 [INFO]   iter 1/1: Man wearing a white tank top running in place against a dark...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+2026-06-03 20:32:36,579 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 20:32:37,494 [INFO] [P-Flow] Done in 676.2s → /root/autodl-tmp/outputs/velocity_steps60/sample_33/33.mp4
+  [7/10] 处理 34...
+2026-06-03 20:32:37,495 [INFO] [P-Flow] sample=34, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 20:32:39,736 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 20:32:42,071 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 20:34:15,739 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 20:34:16,537 [INFO]   η_temporal: mean=-0.0000, std=0.2539
+2026-06-03 20:34:16,540 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 20:34:18,891 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 20:34:18,922 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 20:34:26,698 [INFO]     step   0/60: L_vel=0.137695, ||Δe||=1.4375, lr=9.99e-04
+2026-06-03 20:35:42,717 [INFO]     step  10/60: L_vel=0.179688, ||Δe||=6.3438, lr=9.27e-04
+2026-06-03 20:36:58,617 [INFO]     step  20/60: L_vel=0.103516, ||Δe||=9.5000, lr=7.54e-04
+2026-06-03 20:38:14,553 [INFO]     step  30/60: L_vel=0.081543, ||Δe||=11.5000, lr=5.26e-04
+2026-06-03 20:39:30,436 [INFO]     step  40/60: L_vel=0.083496, ||Δe||=12.3125, lr=3.05e-04
+2026-06-03 20:40:46,419 [INFO]     step  50/60: L_vel=0.038574, ||Δe||=12.5625, lr=1.49e-04
+2026-06-03 20:41:54,715 [INFO]     step  59/60: L_vel=0.120117, ||Δe||=12.5625, lr=1.00e-04
+2026-06-03 20:41:54,722 [INFO]   [Velocity] Done: ||Δe||=12.5625, final_loss=0.120117
+2026-06-03 20:41:54,725 [INFO]   iter 1/1: Three playful puppies with light gray fur and expressive eye...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+2026-06-03 20:43:52,362 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 20:43:53,451 [INFO] [P-Flow] Done in 676.0s → /root/autodl-tmp/outputs/velocity_steps60/sample_34/34.mp4
+  [8/10] 处理 43...
+2026-06-03 20:43:53,452 [INFO] [P-Flow] sample=43, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 20:43:55,571 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 20:43:57,906 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 20:45:31,785 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 20:45:32,586 [INFO]   η_temporal: mean=-0.0007, std=0.3340
+2026-06-03 20:45:32,589 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 20:45:34,936 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 20:45:34,970 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 20:45:42,556 [INFO]     step   0/60: L_vel=1.281250, ||Δe||=1.4453, lr=9.99e-04
+2026-06-03 20:46:58,715 [INFO]     step  10/60: L_vel=0.359375, ||Δe||=7.6562, lr=9.27e-04
+2026-06-03 20:48:14,890 [INFO]     step  20/60: L_vel=0.213867, ||Δe||=10.1875, lr=7.54e-04
+2026-06-03 20:49:31,095 [INFO]     step  30/60: L_vel=0.153320, ||Δe||=11.6250, lr=5.26e-04
+2026-06-03 20:50:47,312 [INFO]     step  40/60: L_vel=0.083008, ||Δe||=12.2500, lr=3.05e-04
+2026-06-03 20:52:03,482 [INFO]     step  50/60: L_vel=0.103516, ||Δe||=12.5625, lr=1.49e-04
+2026-06-03 20:53:12,053 [INFO]     step  59/60: L_vel=0.106445, ||Δe||=12.6250, lr=1.00e-04
+2026-06-03 20:53:12,060 [INFO]   [Velocity] Done: ||Δe||=12.6250, final_loss=0.106445
+2026-06-03 20:53:12,064 [INFO]   iter 1/1: Orange and white cat walking gracefully through a serene gar...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+2026-06-03 20:55:09,929 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 20:55:10,935 [INFO] [P-Flow] Done in 677.5s → /root/autodl-tmp/outputs/velocity_steps60/sample_43/43.mp4
+  [9/10] 处理 46...
+2026-06-03 20:55:10,936 [INFO] [P-Flow] sample=46, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 20:55:13,065 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 20:55:15,400 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 20:56:49,261 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 20:56:50,062 [INFO]   η_temporal: mean=0.0001, std=0.3340
+2026-06-03 20:56:50,066 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 20:56:52,413 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 20:56:52,447 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 20:57:00,123 [INFO]     step   0/60: L_vel=0.275391, ||Δe||=1.4453, lr=9.99e-04
+2026-06-03 20:58:16,288 [INFO]     step  10/60: L_vel=0.337891, ||Δe||=7.0938, lr=9.27e-04
+2026-06-03 20:59:32,489 [INFO]     step  20/60: L_vel=0.114746, ||Δe||=10.0625, lr=7.54e-04
+2026-06-03 21:00:47,959 [INFO]     step  30/60: L_vel=0.086426, ||Δe||=11.6875, lr=5.26e-04
+2026-06-03 21:02:04,627 [INFO]     step  40/60: L_vel=0.112793, ||Δe||=12.4375, lr=3.05e-04
+2026-06-03 21:03:20,995 [INFO]     step  50/60: L_vel=1.218750, ||Δe||=12.7500, lr=1.49e-04
+2026-06-03 21:04:29,658 [INFO]     step  59/60: L_vel=0.220703, ||Δe||=12.8750, lr=1.00e-04
+2026-06-03 21:04:29,664 [INFO]   [Velocity] Done: ||Δe||=12.8750, final_loss=0.220703
+2026-06-03 21:04:29,668 [INFO]   iter 1/1: Massive volcanic eruption from a high vantage point, showcas...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+2026-06-03 21:06:27,432 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 21:06:28,369 [INFO] [P-Flow] Done in 677.4s → /root/autodl-tmp/outputs/velocity_steps60/sample_46/46.mp4
+  [10/10] 处理 47...
+2026-06-03 21:06:28,370 [INFO] [P-Flow] sample=47, flags=['inversion', 'svd', 'blend', 'velocity']
+2026-06-03 21:06:30,558 [INFO]   [Inversion] encoding reference → latent...
+2026-06-03 21:06:32,888 [INFO]   [Inversion] euler (1st-order)...
+2026-06-03 21:08:06,691 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9                                                                                
+2026-06-03 21:08:07,489 [INFO]   η_temporal: mean=-0.0003, std=0.3574
+2026-06-03 21:08:07,492 [INFO]   [Velocity] Computing Δe via lightweight velocity matching...
+2026-06-03 21:08:09,837 [INFO]     Model frozen (train + grad ckpt, latent_frames=21)
+2026-06-03 21:08:09,869 [INFO]   [VelocityMatch] Lightweight optimization: steps=60, T_m=1.0, lr=0.001, position_aware=False
+2026-06-03 21:08:17,544 [INFO]     step   0/60: L_vel=0.546875, ||Δe||=1.4453, lr=9.99e-04
+2026-06-03 21:09:33,693 [INFO]     step  10/60: L_vel=0.251953, ||Δe||=6.9688, lr=9.27e-04
+2026-06-03 21:10:49,870 [INFO]     step  20/60: L_vel=0.222656, ||Δe||=9.7500, lr=7.54e-04
+2026-06-03 21:12:06,028 [INFO]     step  30/60: L_vel=0.109863, ||Δe||=11.4375, lr=5.26e-04
+2026-06-03 21:13:22,190 [INFO]     step  40/60: L_vel=0.111816, ||Δe||=12.2500, lr=3.05e-04
+2026-06-03 21:14:38,309 [INFO]     step  50/60: L_vel=0.390625, ||Δe||=12.5625, lr=1.49e-04
+2026-06-03 21:15:46,830 [INFO]     step  59/60: L_vel=0.539062, ||Δe||=12.6875, lr=1.00e-04
+2026-06-03 21:15:46,836 [INFO]   [Velocity] Done: ||Δe||=12.6875, final_loss=0.539062
+2026-06-03 21:15:46,839 [INFO]   iter 1/1: Two dogs, one white and one tan, walking in an urban environ...
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+2026-06-03 21:17:44,769 [INFO]     [Velocity] Hook applied: True, injection strength=0.020000
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-03 21:17:45,809 [INFO] [P-Flow] Done in 677.4s → /root/autodl-tmp/outputs/velocity_steps60/sample_47/47.mp4
+
+批量完成! 输出: /root/autodl-tmp/outputs/velocity_steps60
 
 libgomp: Invalid value for environment variable OMP_NUM_THREADS
 
@@ -303,21 +301,21 @@ Found 10 aligned samples for evaluation
 Loading CLIP model from: /root/autodl-tmp/models/clip-vit-base-patch32
 Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
 Loading X-CLIP model from: /root/autodl-tmp/models/xclip-base-patch32
-[1/10] 7 CLIP(o-t=0.3568, g-t=0.3765, o-g=0.9125) XCLIP(o-t=0.3164, g-t=0.2059, o-g=0.5854)
-[2/10] 17 CLIP(o-t=0.3046, g-t=0.3458, o-g=0.8695) XCLIP(o-t=0.2501, g-t=0.2370, o-g=0.7789)
-[3/10] 21 CLIP(o-t=0.3521, g-t=0.3831, o-g=0.8404) XCLIP(o-t=0.2591, g-t=0.2007, o-g=0.6654)
-[4/10] 31 CLIP(o-t=0.3411, g-t=0.3328, o-g=0.8446) XCLIP(o-t=0.2654, g-t=0.2526, o-g=0.6407)
-[5/10] 32 CLIP(o-t=0.3812, g-t=0.3845, o-g=0.9483) XCLIP(o-t=0.3070, g-t=0.3258, o-g=0.9079)
-[6/10] 33 CLIP(o-t=0.3573, g-t=0.3934, o-g=0.8996) XCLIP(o-t=0.1856, g-t=0.1711, o-g=0.7688)
-[7/10] 34 CLIP(o-t=0.3167, g-t=0.3320, o-g=0.8825) XCLIP(o-t=0.3087, g-t=0.2976, o-g=0.8133)
-[8/10] 43 CLIP(o-t=0.3437, g-t=0.3542, o-g=0.9656) XCLIP(o-t=0.2491, g-t=0.2534, o-g=0.9257)
-[9/10] 46 CLIP(o-t=0.3092, g-t=0.3188, o-g=0.8815) XCLIP(o-t=0.2123, g-t=0.2656, o-g=0.6321)
-[10/10] 47 CLIP(o-t=0.3663, g-t=0.3512, o-g=0.8991) XCLIP(o-t=0.2236, g-t=0.1880, o-g=0.7902)
+[1/10] 7 CLIP(o-t=0.3568, g-t=0.3852, o-g=0.9148) XCLIP(o-t=0.3164, g-t=0.2155, o-g=0.6091)
+[2/10] 17 CLIP(o-t=0.3046, g-t=0.3576, o-g=0.8745) XCLIP(o-t=0.2501, g-t=0.2517, o-g=0.7911)
+[3/10] 21 CLIP(o-t=0.3521, g-t=0.3644, o-g=0.8339) XCLIP(o-t=0.2591, g-t=0.1981, o-g=0.6542)
+[4/10] 31 CLIP(o-t=0.3411, g-t=0.3263, o-g=0.8412) XCLIP(o-t=0.2654, g-t=0.2718, o-g=0.6803)
+[5/10] 32 CLIP(o-t=0.3812, g-t=0.3822, o-g=0.9470) XCLIP(o-t=0.3070, g-t=0.3182, o-g=0.8979)
+[6/10] 33 CLIP(o-t=0.3573, g-t=0.3889, o-g=0.9007) XCLIP(o-t=0.1856, g-t=0.1714, o-g=0.7989)
+[7/10] 34 CLIP(o-t=0.3167, g-t=0.3304, o-g=0.8813) XCLIP(o-t=0.3087, g-t=0.2934, o-g=0.8204)
+[8/10] 43 CLIP(o-t=0.3437, g-t=0.3554, o-g=0.9631) XCLIP(o-t=0.2491, g-t=0.2562, o-g=0.9300)
+[9/10] 46 CLIP(o-t=0.3092, g-t=0.3262, o-g=0.8839) XCLIP(o-t=0.2123, g-t=0.2589, o-g=0.6378)
+[10/10] 47 CLIP(o-t=0.3663, g-t=0.3507, o-g=0.8944) XCLIP(o-t=0.2236, g-t=0.1902, o-g=0.8083)
 
 Evaluation complete!
   Samples: 10
-  orig_gen_clip mean:  0.894363
-  orig_gen_xclip mean: 0.750834
-  CSV: /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt_flat/eval_clip/clip_xclip_results.csv
-  Summary: /root/autodl-tmp/outputs/es_grid/es_0.02_full_opt_flat/eval_clip/eval_summary.md
+  orig_gen_clip mean:  0.893472
+  orig_gen_xclip mean: 0.762807
+  CSV: /root/autodl-tmp/outputs/velocity_steps60_flat/eval_clip/clip_xclip_results.csv
+  Summary: /root/autodl-tmp/outputs/velocity_steps60_flat/eval_clip/eval_summary.md
 root@autodl-container-a4d74c9dd1-c1c138bc:~/autodl-tmp/videofake/P-Flow# 

@@ -74,8 +74,6 @@ class PFlowConfig:
     use_iter: bool = False         # Iterative VLM Optimization
     use_midpoint: bool = False     # Midpoint ODE Solver
     use_composite: bool = False    # Vertical Composite for VLM
-    use_position_aware: bool = False  # Position-Aware Gradient Scaling (for velocity matching)
-
     # ── Noise Prior 参数 ──
     alpha: float = 0.001           # 混合权重 (√α·η_temporal + √(1-α)·η_random)
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
@@ -86,8 +84,9 @@ class PFlowConfig:
     velocity_steps: int = 30      # Δe 优化步数 (轻量版, VMAD用100)
     velocity_lr: float = 1e-3     # Δe 优化学习率
     velocity_T_m: float = 1.0     # 时间步范围 (1.0=复现, 0.3=运动迁移)
+    velocity_K: int = 4           # 每步采样的时间步数 (stratified, 降低梯度方差)
+    velocity_motion_weight: float = 1.0  # 运动区域加权强度 (0=关闭, 1=全开)
     embed_strength: float = 0.005 # Δe 注入强度 (验证最优: 0.005)
-    lambda_pos: float = 0.01      # Position-aware 正则化权重
 
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
@@ -110,8 +109,6 @@ class PFlowConfig:
             flags.append("blend")
         if self.use_velocity:
             flags.append("velocity")
-        if self.use_position_aware:
-            flags.append("position_aware")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -472,10 +469,12 @@ class PFlowPipeline:
         self, ref_video: torch.Tensor, caption: str, eta_inv: torch.Tensor,
     ) -> torch.Tensor:
         """
-        改动点: Velocity Field Matching → Δe
+        改动点: Velocity Field Matching → Δe (v2)
 
-        使用轻量版 velocity matching (30步) 计算 embedding 残差，
-        捕获文本无法表达的运动细节。
+        使用增强版 velocity matching 计算 embedding 残差：
+        - 分层多时间步采样 (K=4) 降低梯度方差
+        - Padding mask 集中优化有语义的 token 位置
+        - 运动区域加权 loss (LTD-inspired)
 
         Args:
             ref_video: 参考视频张量
@@ -495,18 +494,21 @@ class PFlowPipeline:
         # Encode caption to embedding
         e0 = self._encode_prompt(caption)
 
-        # Run velocity matching optimization
+        # Get actual token length (excluding padding) for gradient masking
+        token_length = self._get_token_length(caption)
+
+        # Run velocity matching optimization (v2)
         matcher = VelocityMatcher(
             pipe=self.pipe,
             T_m=cfg.velocity_T_m,
             num_opt_steps=cfg.velocity_steps,
             lr=cfg.velocity_lr,
-            position_aware=cfg.use_position_aware,
-            lambda_pos=cfg.lambda_pos,
+            num_timesteps_per_step=getattr(cfg, 'velocity_K', 4),
+            motion_weight_strength=getattr(cfg, 'velocity_motion_weight', 1.0),
             device=self.device,
         )
 
-        result = matcher.optimize(z0=z0, e0=e0, eta_inv=eta_inv)
+        result = matcher.optimize(z0=z0, e0=e0, eta_inv=eta_inv, token_length=token_length)
         delta_e = result["delta_e"]
 
         logger.info(
@@ -514,6 +516,22 @@ class PFlowPipeline:
             f"final_loss={result['final_loss']:.6f}"
         )
         return delta_e
+
+    def _get_token_length(self, caption: str, max_sequence_length: int = 512) -> int:
+        """
+        获取 caption 经 tokenizer 编码后的有效 token 长度 (不含 padding)。
+
+        用于 velocity matching 的 padding mask，确保 Δe 只在有语义的位置优化。
+        """
+        tokenizer = self.pipe.tokenizer
+        inputs = tokenizer(
+            caption, padding="max_length",
+            max_length=max_sequence_length,
+            truncation=True, return_tensors="pt",
+        )
+        # attention_mask: 1 for real tokens, 0 for padding
+        token_length = inputs.attention_mask.sum().item()
+        return int(token_length)
 
     def _generate_with_embedding_hook(
         self,
