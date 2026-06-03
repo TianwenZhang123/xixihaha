@@ -74,6 +74,8 @@ class PFlowConfig:
     use_iter: bool = False         # Iterative VLM Optimization
     use_midpoint: bool = False     # Midpoint ODE Solver
     use_composite: bool = False    # Vertical Composite for VLM
+    use_position_aware: bool = False  # Position-Aware Gradient Scaling (for velocity matching)
+    use_rfsolver: bool = False     # RF-Solver (2nd-order Taylor inversion)
 
     # ── Noise Prior 参数 ──
     alpha: float = 0.001           # 混合权重 (√α·η_temporal + √(1-α)·η_random)
@@ -86,6 +88,7 @@ class PFlowConfig:
     velocity_lr: float = 1e-3     # Δe 优化学习率
     velocity_T_m: float = 1.0     # 时间步范围 (1.0=复现, 0.3=运动迁移)
     embed_strength: float = 0.005 # Δe 注入强度 (验证最优: 0.005)
+    lambda_pos: float = 0.01      # Position-aware 正则化权重
 
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
@@ -108,10 +111,14 @@ class PFlowConfig:
             flags.append("blend")
         if self.use_velocity:
             flags.append("velocity")
+        if self.use_position_aware:
+            flags.append("position_aware")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
             flags.append("midpoint")
+        if self.use_rfsolver:
+            flags.append("rfsolver")
         if self.use_composite:
             flags.append("composite")
         return flags
@@ -323,7 +330,12 @@ class PFlowPipeline:
             device=self.device,
         )
 
-        if self.config.use_midpoint:
+        if self.config.use_rfsolver:
+            logger.info("  [Inversion] RF-Solver (2nd-order Taylor)...")
+            eta_inv = inverter.invert_rfsolver(
+                ref_latents, prompt_embeds, prompt_embeds
+            )
+        elif self.config.use_midpoint:
             logger.info("  [Inversion] midpoint (2nd-order)...")
             eta_inv = inverter.invert_midpoint(
                 ref_latents, prompt_embeds, prompt_embeds
@@ -497,6 +509,8 @@ class PFlowPipeline:
             T_m=cfg.velocity_T_m,
             num_opt_steps=cfg.velocity_steps,
             lr=cfg.velocity_lr,
+            position_aware=cfg.use_position_aware,
+            lambda_pos=cfg.lambda_pos,
             device=self.device,
         )
 

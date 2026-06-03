@@ -3,7 +3,7 @@ Lightweight Velocity Field Matching for P-Flow.
 
 Simplified from VMAD's Position-Aware Velocity Matcher:
     - Removed content disentanglement (not needed for reproduction mode)
-    - Removed position-aware gradient scaling (simplify for speed)
+    - Position-aware gradient scaling: optional (--position_aware flag, default off)
     - Reduced default optimization steps (30 vs 100)
     - Reuses P-Flow's conditional inversion noise (higher quality than VMAD's unconditional)
 
@@ -39,13 +39,18 @@ class VelocityMatcher:
     Lightweight Velocity Field Matching for P-Flow.
 
     Optimizes Δe to align the model's velocity field with the ground-truth
-    trajectory defined by (z₀, η_inv). No bells and whistles — just the
-    core velocity matching loss with cosine-annealed Adam.
+    trajectory defined by (z₀, η_inv). Supports optional position-aware
+    gradient scaling to concentrate optimization effort at high-influence
+    positions (attention sinks in DiT cross-attention).
 
     Usage:
         matcher = VelocityMatcher(pipe=pipe, device="cuda")
         result = matcher.optimize(z0=z0, e0=e0, eta_inv=eta_inv)
         delta_e = result["delta_e"]  # shape: (1, L, D)
+
+        # With position-aware gradient scaling:
+        matcher = VelocityMatcher(pipe=pipe, position_aware=True, device="cuda")
+        result = matcher.optimize(z0=z0, e0=e0, eta_inv=eta_inv)
     """
 
     def __init__(
@@ -54,6 +59,8 @@ class VelocityMatcher:
         T_m: float = 1.0,
         num_opt_steps: int = 30,
         lr: float = 1e-3,
+        position_aware: bool = False,
+        lambda_pos: float = 0.01,
         device: str = "cuda",
     ):
         """
@@ -64,13 +71,78 @@ class VelocityMatcher:
             num_opt_steps: Number of optimization iterations (default 30,
                           sufficient when starting from good conditional inversion).
             lr: Peak learning rate for Adam optimizer.
+            position_aware: Enable position-aware gradient scaling.
+                If True, amplifies gradients at high-influence positions (position 0
+                and last position in T5 embedding) based on empirically observed
+                U-shape attention weight distribution in DiT cross-attention.
+                Default False to preserve existing behavior.
+            lambda_pos: Weight for position-aware regularization loss.
+                Only used when position_aware=True. Default 0.01.
             device: Compute device.
         """
         self.pipe = pipe
         self.T_m = T_m
         self.num_opt_steps = num_opt_steps
         self.lr = lr
+        self.position_aware = position_aware
+        self.lambda_pos = lambda_pos
         self.device = device
+
+    def _initialize_position_weights(self, seq_len: int) -> torch.Tensor:
+        """
+        Initialize position-aware weight profile based on U-shape attention pattern.
+
+        DiT cross-attention with T5 relative position bias exhibits:
+        - Position 0: highest attention weight (10-15× interior) — "attention sink"
+        - Last position: moderately elevated (U-shape tail)
+        - Interior: relatively uniform, slight U-shape decay toward center
+
+        Returns an INVERSE weighting for regularization:
+        - High-influence positions (pos 0) → low regularization weight → more freedom
+        - Low-influence positions (center) → higher regularization → discourage waste
+
+        Args:
+            seq_len: Text embedding sequence length
+
+        Returns:
+            Position weight tensor of shape (seq_len,)
+        """
+        weights = torch.ones(seq_len, device=self.device)
+
+        # Position 0: attention sink → low regularization = more optimization freedom
+        weights[0] = 0.1
+
+        # Last position: moderate elevation
+        if seq_len > 1:
+            weights[-1] = 0.3
+
+        # Interior: U-shape (higher at edges, lower at center)
+        if seq_len > 2:
+            center = seq_len // 2
+            for i in range(1, seq_len - 1):
+                dist_from_edge = min(i, seq_len - 1 - i)
+                weights[i] = 0.5 + 0.5 * (dist_from_edge / center)
+
+        return weights
+
+    def _compute_position_regularization(
+        self, delta_e: torch.Tensor, position_weights: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute position-aware regularization loss.
+
+        Penalizes Δe magnitude at low-influence positions while allowing
+        high-influence positions more freedom.
+
+        L_pos = Σ_j w_j · ||Δe[:,j,:]||²
+        """
+        # delta_e shape: (B, L, D) or (L, D)
+        if delta_e.dim() == 3:
+            per_position_energy = (delta_e ** 2).mean(dim=(0, 2))  # (L,)
+        else:
+            per_position_energy = (delta_e ** 2).mean(dim=-1)  # (L,)
+        loss_pos = (position_weights * per_position_energy).mean()
+        return loss_pos
 
     def _get_model(self):
         """Get the denoising model (transformer or unet)."""
@@ -160,12 +232,19 @@ class VelocityMatcher:
         # Target velocity (constant throughout optimization)
         v_star = z0 - eta_inv
 
+        # Initialize position weights (only used when position_aware=True)
+        position_weights = None
+        if self.position_aware:
+            seq_len = e0.shape[1]
+            position_weights = self._initialize_position_weights(seq_len)
+
         loss_history = []
         final_loss = 0.0
 
         logger.info(
             f"  [VelocityMatch] Lightweight optimization: "
-            f"steps={self.num_opt_steps}, T_m={self.T_m}, lr={self.lr}"
+            f"steps={self.num_opt_steps}, T_m={self.T_m}, lr={self.lr}, "
+            f"position_aware={self.position_aware}"
         )
 
         for step in range(self.num_opt_steps):
@@ -183,17 +262,43 @@ class VelocityMatcher:
             v_pred = self._model_forward(x_t, t_model, e_current)
 
             # Velocity matching loss: ||v_pred - v*||²
-            loss = ((v_pred - v_star) ** 2).mean()
+            loss_vel = ((v_pred - v_star) ** 2).mean()
 
-            # Backward + update
+            # Position-aware regularization (optional)
+            loss_pos = torch.tensor(0.0, device=self.device)
+            if self.position_aware and position_weights is not None and self.lambda_pos > 0:
+                loss_pos = self._compute_position_regularization(
+                    delta_e.unsqueeze(0) if delta_e.dim() == 2 else delta_e,
+                    position_weights,
+                )
+
+            # Total loss
+            if self.position_aware and self.lambda_pos > 0:
+                loss = loss_vel + self.lambda_pos * loss_pos
+            else:
+                loss = loss_vel
+
+            # Backward
             loss.backward()
+
+            # Position-aware gradient scaling (amplify high-influence positions)
+            if self.position_aware and delta_e.grad is not None and position_weights is not None:
+                grad_scale = 1.0 / (position_weights + 0.1)
+                grad_scale = grad_scale / grad_scale.mean()  # Normalize
+                if delta_e.grad.dim() == 3:
+                    delta_e.grad.data *= grad_scale.unsqueeze(0).unsqueeze(-1)
+                elif delta_e.grad.dim() == 2:
+                    delta_e.grad.data *= grad_scale.unsqueeze(-1)
+
+            # Update
             optimizer.step()
             scheduler.step()
 
-            loss_val = loss.item()
+            loss_val = loss_vel.item()
             loss_history.append({
                 "step": step,
                 "loss": loss_val,
+                "loss_pos": loss_pos.item() if self.position_aware else 0.0,
                 "lr": scheduler.get_last_lr()[0],
             })
             final_loss = loss_val
@@ -202,6 +307,7 @@ class VelocityMatcher:
                 logger.info(
                     f"    step {step:3d}/{self.num_opt_steps}: "
                     f"L_vel={loss_val:.6f}, "
+                    f"{'L_pos=' + f'{loss_pos.item():.6f}, ' if self.position_aware else ''}"
                     f"||Δe||={delta_e.norm().item():.4f}, "
                     f"lr={scheduler.get_last_lr()[0]:.2e}"
                 )
