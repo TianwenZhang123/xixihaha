@@ -128,60 +128,6 @@ class FlowMatchingInverter:
 
         return x_t
 
-    @torch.no_grad()
-    def invert_rfsolver(
-        self,
-        video_latents: torch.Tensor,
-        prompt_embeds: torch.Tensor,
-        negative_prompt_embeds: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """
-        RF-Solver (2nd-order Taylor) inversion for higher accuracy.
-
-        Uses a second-order Taylor expansion to reduce discretization error
-        compared to the standard Euler method. The correction term estimates
-        dv/dt from consecutive velocity predictions.
-
-        Formula:
-            Standard Euler: x_{t+dt} = x_t + dt * v_θ(x_t, t)
-            RF-Solver-2:   x_{t+dt} = x_t + dt * v_θ(x_t, t) + (dt²/2) * dv/dt
-            where dv/dt ≈ (v_current - v_prev) / dt_prev
-
-        Note: First step degrades to Euler (no previous velocity available).
-              Subsequent steps use 2nd-order Taylor correction.
-
-        Reference: "RF-Solver: A Second-Order ODE Solver for Rectified Flow" (2024)
-        """
-        timesteps = torch.linspace(1.0, 0.0, self.num_inversion_steps + 1, device=self.device)
-        dt = -1.0 / self.num_inversion_steps
-
-        x_t = video_latents.clone()
-        v_prev = None  # Store previous velocity for Taylor correction
-
-        for i in tqdm(range(self.num_inversion_steps), desc="Inversion (RF-Solver-2)", leave=False):
-            t = timesteps[i]
-            t_tensor = torch.full(
-                (x_t.shape[0],), t.item(), device=self.device, dtype=x_t.dtype
-            )
-
-            # Predict current velocity v_θ(x_t, t, c)
-            v_current = self._predict_velocity(
-                x_t, t_tensor, prompt_embeds, negative_prompt_embeds
-            )
-
-            if v_prev is None:
-                # First step: degrade to Euler (no previous velocity for correction)
-                x_t = x_t + dt * v_current
-            else:
-                # 2nd-order Taylor correction:
-                # dv/dt ≈ (v_current - v_prev) / dt_prev
-                # x_{t+dt} = x_t + dt * v_current + (dt²/2) * dv/dt
-                dv_dt = (v_current - v_prev) / dt  # dt_prev = dt (uniform steps)
-                x_t = x_t + dt * v_current + (dt ** 2 / 2.0) * dv_dt
-
-            v_prev = v_current
-
-        return x_t
 
     def _predict_velocity(
         self,

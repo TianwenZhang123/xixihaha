@@ -33,7 +33,6 @@ P-Flow Runner - 通过命令行 flag 控制各改动点。
     --blend          启用噪声混合 (η = sqrt(α)*η_temporal + sqrt(1-α)*η_random)
     --velocity       启用 Velocity Field Matching (Δe embedding 注入, 需 --inversion)
     --position_aware 启用 Position-Aware Gradient Scaling (需 --velocity)
-    --rfsolver       使用 RF-Solver 2nd-order Taylor 反演 (替代 Euler/Midpoint)
     --iter N         启用迭代VLM优化 (N轮反馈循环)
     --midpoint       使用二阶中点法ODE求解器 (替代默认Euler)
     --composite      启用三面板垂直拼接 (ref|prev|current 送VLM对比)
@@ -75,7 +74,6 @@ def parse_args():
     p.add_argument("--blend", action="store_true", help="启用噪声混合")
     p.add_argument("--velocity", action="store_true", help="启用 Velocity Field Matching (Δe, 需 --inversion)")
     p.add_argument("--position_aware", action="store_true", help="启用 Position-Aware Gradient Scaling (需 --velocity)")
-    p.add_argument("--rfsolver", action="store_true", help="使用 RF-Solver 2nd-order Taylor 反演 (替代 Euler/Midpoint)")
     p.add_argument("--iter", type=int, default=0, help="迭代轮数 (0=不迭代)")
     p.add_argument("--midpoint", action="store_true", help="使用中点法ODE求解器")
     p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
@@ -148,11 +146,6 @@ def build_config(args) -> PFlowConfig:
         if not args.inversion:
             args.inversion = True
 
-    # rfsolver 依赖 inversion
-    if args.rfsolver and not args.inversion:
-        print("警告: --rfsolver 需要 --inversion，自动启用 --inversion")
-        args.inversion = True
-
     return PFlowConfig(
         t2v_path=args.model_path,
         dtype="bfloat16",
@@ -167,7 +160,6 @@ def build_config(args) -> PFlowConfig:
         use_blend=args.blend,
         use_velocity=args.velocity,
         use_position_aware=args.position_aware,
-        use_rfsolver=args.rfsolver,
         use_iter=args.iter > 0,
         use_midpoint=args.midpoint,
         use_composite=args.composite,
@@ -271,8 +263,6 @@ def main():
         print(f"  velocity: steps={config.velocity_steps}, lr={config.velocity_lr}, embed_strength={config.embed_strength}")
         if config.use_position_aware:
             print(f"  position_aware: lambda_pos={config.lambda_pos}")
-    if config.use_rfsolver:
-        print(f"  inversion: RF-Solver (2nd-order Taylor)")
     if config.use_iter:
         print(f"  iterations={config.i_max}")
     print()

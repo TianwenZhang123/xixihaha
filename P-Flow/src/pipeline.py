@@ -75,7 +75,6 @@ class PFlowConfig:
     use_midpoint: bool = False     # Midpoint ODE Solver
     use_composite: bool = False    # Vertical Composite for VLM
     use_position_aware: bool = False  # Position-Aware Gradient Scaling (for velocity matching)
-    use_rfsolver: bool = False     # RF-Solver (2nd-order Taylor inversion)
 
     # ── Noise Prior 参数 ──
     alpha: float = 0.001           # 混合权重 (√α·η_temporal + √(1-α)·η_random)
@@ -117,8 +116,6 @@ class PFlowConfig:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
             flags.append("midpoint")
-        if self.use_rfsolver:
-            flags.append("rfsolver")
         if self.use_composite:
             flags.append("composite")
         return flags
@@ -330,12 +327,7 @@ class PFlowPipeline:
             device=self.device,
         )
 
-        if self.config.use_rfsolver:
-            logger.info("  [Inversion] RF-Solver (2nd-order Taylor)...")
-            eta_inv = inverter.invert_rfsolver(
-                ref_latents, prompt_embeds, prompt_embeds
-            )
-        elif self.config.use_midpoint:
+        if self.config.use_midpoint:
             logger.info("  [Inversion] midpoint (2nd-order)...")
             eta_inv = inverter.invert_midpoint(
                 ref_latents, prompt_embeds, prompt_embeds
