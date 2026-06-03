@@ -578,8 +578,15 @@ class PFlowPipeline:
         )
         return video
 
-    def _encode_prompt(self, prompt: str) -> torch.Tensor:
-        """编码文本到 embedding。"""
+    def _encode_prompt(self, prompt: str, max_sequence_length: int = 512) -> torch.Tensor:
+        """
+        编码文本到 embedding。
+
+        Args:
+            prompt: 文本 caption
+            max_sequence_length: T5 最大序列长度。必须与生成阶段一致（WanPipeline.__call__
+                默认 512），否则优化时的 Δe 和注入时的 embedding 空间不匹配。
+        """
         import inspect
 
         if hasattr(self.pipe, "encode_prompt"):
@@ -592,12 +599,14 @@ class PFlowPipeline:
                 kwargs["num_videos_per_prompt"] = 1
             if "do_classifier_free_guidance" in params:
                 kwargs["do_classifier_free_guidance"] = False
+            if "max_sequence_length" in params:
+                kwargs["max_sequence_length"] = max_sequence_length
             result = self.pipe.encode_prompt(**kwargs)
             return result[0] if isinstance(result, tuple) else result
         else:
             inputs = self.pipe.tokenizer(
                 prompt, padding="max_length",
-                max_length=self.pipe.tokenizer.model_max_length,
+                max_length=max_sequence_length,
                 truncation=True, return_tensors="pt",
             )
             return self.pipe.text_encoder(inputs.input_ids.to(self.device))[0]
