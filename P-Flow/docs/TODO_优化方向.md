@@ -1,7 +1,7 @@
 # P-Flow 优化方向 TODO
 
 > 创建时间: 2025-06  
-> 最后更新: 2025-06-05  
+> 最后更新: 2025-06-06  
 > 目标: 在不修改 Wan2.1 模型和推理流程的前提下，通过输入侧优化（噪声、embedding）提升视频复现质量
 
 ---
@@ -141,65 +141,104 @@ L = mean(w · (v_pred - v*)²)               # 加权 MSE
 
 ---
 
-## TODO 清单
+## 已完成 TODO
 
-### 1. [待做] 验证 Velocity Matching v2
+### ✅ Velocity Matching v2 验证（2025-06-05）
 
-**目的**: 确认三项改进是否带来指标提升
+- [x] 跑 30步 v2 实验 (K=4, motion_weight=1.0, padding_mask=ON, es=0.02)
+- [x] Quick 验证（4 困难样本）：CLIP +1.5%, XCLIP +4.9%
+- [x] 全量 10 样本验证：CLIP +0.2%, XCLIP +0.4%（提升有限）
+- [x] 消融实验（motion_weight=0 on 3 退化样本）：证明 mw 非退化主因
 
-- [ ] 跑 30步 v2 实验 (K=4, motion_weight=1.0, padding_mask=ON, es=0.02)
-- [ ] 对比 v1 baseline (30步, K=1, 无mask, 无加权, es=0.02): CLIP=0.8981, XCLIP=0.7705
-- [ ] 逐项消融: (a) 只开 K=4 (b) 只开 mask (c) 只开 motion_weight (d) 全开
-- [ ] 观察 ||Δe|| 变化 — mask 后 ||Δe|| 应该更小但 per-token 幅度更大
-
-### 2. [待做] es 联合调参
-
-**目的**: v2 改变了 Δe 的 norm 分布，最优 es 可能需要重新搜索
-
-- [ ] 如果 v2 的 ||Δe|| 显著降低 (因为 mask 集中了能量)，es 可能需要上调
-- [ ] 网格搜索: es ∈ {0.02, 0.03, 0.04} × v2 配置
-
-### 3. [待做] 扩大样本量统计检验
-
-**目的**: 当前 10 样本统计意义有限
-
-- [ ] 扩到 30-50 样本
-- [ ] 计算置信区间，确认改进的显著性（p < 0.05）
-
-### 4. [探索] Adaptive Injection Strength
-
-**背景**: 60步实验暴露的核心问题是 es × ||Δe|| 超出最优区间。
-
-**方案**: 不用固定 es，而是在注入时自适应调整：
-```python
-target_injection_norm = 0.17  # 最优区间
-adaptive_es = target_injection_norm / delta_e.norm().item()
-injection = adaptive_es * delta_e  # ||injection|| ≈ 0.17 (恒定)
-```
-
-**优势**: 无论优化多少步、Δe 多大，最终注入量始终在最优区间。这也是一个很好的 paper 贡献点——"norm-aware adaptive injection"。
-
-### 5. [探索] Δe Temporal Decomposition
-
-**背景**: Reenact Anything 使用 inflated embedding (N tokens × F frames)，证明 per-frame token 对运动捕获至关重要。
-
-**思路**: 当前 Δe 是 (1, L, D)——一个固定的 embedding 对所有时间步注入。可以探索 per-timestep Δe：
-- 早期时间步 (t≈0, noise) 注入全局结构
-- 晚期时间步 (t≈1, clean) 注入细节运动
-
-**约束兼容性**: ✅ 只改 hook 逻辑，不改模型
+**结论**: v2 对高运动样本有显著提升（#31 XCLIP +5.4%），但对低运动样本存在退化风险。整体均值提升边际，投入产出比不高。
 
 ---
 
-## 长期方向（P2 优先级）
+## 当前 TODO 清单（优先级排序）
 
-| 方向 | 思路 | 约束兼容性 | 参考 |
-|------|------|-----------|------|
-| η_inv 频域 mask | FFT low-pass 滤波，去除高频噪声保留运动结构 | ✅ 只改输入 | - |
-| Δe 频率分解注入 | 早期步注入低频、晚期步注入高频 | ✅ 只改 hook 逻辑 | - |
-| FlowEdit 式 inversion-free | 完全去除对 η_inv 精度的依赖 | ✅ 不改模型 | FlowEdit 2024 |
-| Norm-Aware Adaptive Injection | es × ||Δe|| 恒定在最优区间 | ✅ 只改 hook | 本项目 60步实验 |
-| Per-Timestep Δe | 不同 ODE 步用不同 Δe | ✅ 只改 hook | Reenact Anything 2025 |
+### 1. [优先] Per-sample es 自适应注入
+
+**预期收益**: XCLIP +1-2%  
+**成本**: 极低（改一行注入代码）  
+**不需要重新跑 velocity matching 优化**
+
+**背景**: 消融实验发现 L3 对不同样本效果相反。全局统一 es=0.02 对低运动样本注入了过多噪声（||Δe|| 小 = 信号弱，强制注入等于放大噪声）。
+
+**方案**: 根据优化后 ||Δe|| 的大小自适应调整 es：
+```python
+# 方案 A: 阈值截断
+es_adaptive = es_base * min(delta_e.norm().item() / threshold, 1.0)
+
+# 方案 B: Norm-Aware（恒定注入量）
+target_injection_norm = 0.17  # 最优区间
+es_adaptive = target_injection_norm / delta_e.norm().item()
+injection = es_adaptive * delta_e  # ||injection|| ≈ 0.17 (恒定)
+```
+
+**验证方式**: 用现有 v2 的 ||Δe|| 数据，只重新跑生成+评测（不需要重新优化 Δe），在全部 10 样本上验证。
+
+### 2. [优先] L2 SVD 参数网格搜索（ρ_s × ρ_m）
+
+**预期收益**: XCLIP +1-3%  
+**成本**: 低（每组只跑生成，无额外 inversion）
+
+**背景**: α=0.004 是 5 点网格搜索的最优值，但 SVD 的两个核心参数一直用默认值（ρ_s=0.1, ρ_m=0.9），从未搜索过。ρ_s 控制"去掉多少外观信息"，ρ_m 控制"保留多少运动成分"。
+
+**搜索空间**: ρ_s ∈ {0.05, 0.1, 0.2} × ρ_m ∈ {0.7, 0.8, 0.9}（共 9 组）
+
+**验证方式**: 固定 α=0.004，只跑 L1+L2（不加 L3），10 样本评测。找到最优 ρ_s/ρ_m 后再叠加 L3。
+
+### 3. [中等] L1 迭代修复（matches 时跳过）
+
+**预期收益**: CLIP +1-2%  
+**成本**: 中等（需要重新跑生成 + VLM 推理）
+
+**背景**: V4 iter1 是最佳 prompt，iter2/3 退化。原因是 VLM 报 4 维度全部 matches 时，LLM 仍强行修改引入噪声。
+
+**方案**: 实现简单逻辑：
+```python
+if all(dim == "matches" for dim in vlm_feedback):
+    skip_refine = True  # 保持当前 prompt 不变
+```
+
+只对仍有 mismatch 的样本（如 #21、#46）做 iter2 修复，已经 matches 的样本保持 iter1 prompt。
+
+**预期**: 不伤害好的样本，只改善还有空间的样本。
+
+### 4. [中等] 提升反演精度（Midpoint Solver）
+
+**预期收益**: CLIP +0.5-1%  
+**成本**: 低（Midpoint 已实现，2× forward 开销）
+
+**背景**: 当前用 50 步 Euler inversion。RF-Solver 已被废弃（solver mismatch），但 Midpoint（2阶 Runge-Kutta）是安全的——它只是更精确地计算 η_inv，不改变 solver 类型。更精确的 η_inv 意味着 v* = z₀ - η_inv 更准，间接提升 L3 的 velocity matching 质量。
+
+**注意**: Midpoint 使反演开销翻倍（50步 → 100 equivalent forwards），但只影响预处理阶段，不影响最终生成速度。
+
+**验证方式**: 用 `--midpoint` flag 重新跑 inversion，然后正常跑 L3 + 生成 + 评测。
+
+### 5. [必须做] 扩大样本量统计验证
+
+**预期收益**: 不直接提升指标，但提供统计显著性  
+**成本**: 高（30-50 样本 × 全 pipeline）
+
+**背景**: 10 样本上 +0.4% 的提升不具统计意义。对于周会汇报和论文，需要在更大样本集上确认 pipeline 的稳定增益。
+
+**方案**:
+- [ ] 从 200 样本数据集中选取 30-50 个覆盖不同运动强度的样本
+- [ ] 用当前最优配置（v1 更稳定，或 v2 + 自适应 es）跑全量
+- [ ] 计算 95% 置信区间，paired t-test 检验 p < 0.05
+- [ ] 按运动强度分组统计（高/中/低运动），分析 pipeline 的适用范围
+
+---
+
+## 长期探索方向
+
+| 方向 | 思路 | 约束兼容性 | 优先级 | 参考 |
+|------|------|-----------|--------|------|
+| Per-Timestep Δe | 不同 ODE 步用不同 Δe，早期低频/晚期高频 | ✅ 只改 hook | P2 | Reenact Anything 2025 |
+| η_inv 频域 mask | FFT low-pass 滤波，去除高频噪声保留运动结构 | ✅ 只改输入 | P2 | - |
+| FlowEdit 式 inversion-free | 完全去除对 η_inv 精度的依赖 | ✅ 不改模型 | P3 | FlowEdit 2024 |
+| ARPO 式 CLIP 引导迭代 | 多候选 prompt + CLIP 评分选最优 | ✅ 只改 prompt | P2 | ARPO 2025 |
 
 ---
 

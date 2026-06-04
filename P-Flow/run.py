@@ -90,9 +90,16 @@ def parse_args():
     p.add_argument("--velocity_lr", type=float, default=1e-3, help="Velocity matching 学习率")
     p.add_argument("--velocity_K", type=int, default=4, help="每步采样的时间步数量 (stratified)")
     p.add_argument("--velocity_motion_weight", type=float, default=1.0, help="运动区域加权强度 (0=关闭, 1=全开)")
+    p.add_argument("--velocity_early_stop", type=int, default=5, help="Early stop patience (0=禁用)")
+    p.add_argument("--velocity_no_batch", action="store_true", help="禁用 batched forward (省显存但更慢)")
+    p.add_argument("--velocity_no_adaptive_K", action="store_true", help="禁用 adaptive K scheduling (全程使用 K=4)")
+    p.add_argument("--velocity_no_amp", action="store_true", help="禁用 AMP 混合精度 (用于调试)")
+    p.add_argument("--velocity_no_warm_start", action="store_true", help="禁用 warm-start 初始化 (从零开始优化)")
     p.add_argument("--steps", type=int, default=30, help="推理步数")
     p.add_argument("--guidance", type=float, default=5.0, help="CFG scale")
     p.add_argument("--seed", type=int, default=42, help="随机种子")
+    p.add_argument("--inversion_steps", type=int, default=50, help="反演ODE步数 (30=快速, 50=标准)")
+    p.add_argument("--no_fast_svd", action="store_true", help="禁用 randomized SVD (使用精确SVD)")
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--width", type=int, default=832)
     p.add_argument("--num_frames", type=int, default=81)
@@ -162,7 +169,12 @@ def build_config(args) -> PFlowConfig:
         velocity_lr=args.velocity_lr,
         velocity_K=args.velocity_K,
         velocity_motion_weight=args.velocity_motion_weight,
-        inversion_steps=50,
+        velocity_early_stop=args.velocity_early_stop,
+        velocity_batched=not args.velocity_no_batch,
+        velocity_adaptive_K=not args.velocity_no_adaptive_K,
+        velocity_amp=not args.velocity_no_amp,
+        velocity_warm_start=not args.velocity_no_warm_start,
+        inversion_steps=args.inversion_steps,
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,
         vlm_model_path=args.vlm_path,

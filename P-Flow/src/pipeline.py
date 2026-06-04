@@ -79,6 +79,7 @@ class PFlowConfig:
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
     inversion_steps: int = 50     # 反演ODE步数
+    use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
 
     # ── Velocity Matching 参数 ──
     velocity_steps: int = 30      # Δe 优化步数 (轻量版, VMAD用100)
@@ -86,6 +87,12 @@ class PFlowConfig:
     velocity_T_m: float = 1.0     # 时间步范围 (1.0=复现, 0.3=运动迁移)
     velocity_K: int = 4           # 每步采样的时间步数 (stratified, 降低梯度方差)
     velocity_motion_weight: float = 1.0  # 运动区域加权强度 (0=关闭, 1=全开)
+    velocity_early_stop: int = 5  # Early stopping patience (0=禁用)
+    velocity_batched: bool = True # 批量 forward K 个 timestep (快但费显存)
+    velocity_adaptive_K: bool = True   # 前期用 K=1 快速收敛方向，后期切 K=4 精细化
+    velocity_adaptive_K_warmup: int = 8  # adaptive K 的 warmup 步数
+    velocity_amp: bool = True     # 混合精度 autocast (bfloat16, Ampere+ GPU 加速 30-50%)
+    velocity_warm_start: bool = True  # 用 pseudo-gradient 方向初始化 Δe (省 3-5 步)
     embed_strength: float = 0.005 # Δe 注入强度 (验证最优: 0.005)
 
     # ── 迭代优化参数 ──
@@ -230,13 +237,18 @@ class PFlowPipeline:
         # ── Step 3: 计算噪声先验 (如果启用) ──
         eta_temporal = None
         eta_inv_raw = None  # 未经 SVD 的原始反演噪声，供 velocity matching 使用
+        z0_cached = None    # 缓存 VAE 编码结果，避免重复编码
+        prompt_embeds_cached = None  # 缓存 prompt embedding
         if cfg.use_inversion:
-            eta_temporal, eta_inv_raw = self._compute_noise_prior(ref_video, caption)
+            eta_temporal, eta_inv_raw, z0_cached, prompt_embeds_cached = self._compute_noise_prior(ref_video, caption)
 
         # ── Step 3.5: Velocity Field Matching — 计算 Δe (如果启用) ──
         delta_e = None
         if cfg.use_velocity and cfg.use_inversion and eta_inv_raw is not None:
-            delta_e = self._compute_delta_e(ref_video, caption, eta_inv_raw)
+            delta_e = self._compute_delta_e(
+                ref_video, caption, eta_inv_raw,
+                z0=z0_cached, e0=prompt_embeds_cached,
+            )
 
         # ── Step 4: 生成循环 ──
         num_iters = cfg.i_max if cfg.use_iter else 1
@@ -309,7 +321,8 @@ class PFlowPipeline:
         流程: V_ref → VAE encode → Flow Inversion → (SVD filter) → η_temporal
 
         Returns:
-            (eta_temporal, eta_inv_raw): SVD滤波后的噪声 和 原始反演噪声
+            (eta_temporal, eta_inv_raw, z0, prompt_embeds):
+            SVD滤波后的噪声, 原始反演噪声, VAE编码latent(缓存), prompt embedding(缓存)
         """
         logger.info("  [Inversion] encoding reference → latent...")
         ref_norm = normalize_video(ref_video).unsqueeze(0)
@@ -340,18 +353,21 @@ class PFlowPipeline:
 
         # SVD Filtering (如果启用)
         if self.config.use_svd:
-            logger.info(f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}")
+            logger.info(f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}, fast={self.config.use_fast_svd}")
             svd_filter = SVDFilter(
                 rho_s=self.config.rho_s, rho_m=self.config.rho_m
             )
-            eta_temporal = svd_filter.filter(eta_inv)
+            if self.config.use_fast_svd:
+                eta_temporal = svd_filter.filter_efficient(eta_inv)
+            else:
+                eta_temporal = svd_filter.filter(eta_inv)
         else:
             eta_temporal = eta_inv
 
         logger.info(
             f"  η_temporal: mean={eta_temporal.mean():.4f}, std={eta_temporal.std():.4f}"
         )
-        return eta_temporal, eta_inv_raw
+        return eta_temporal, eta_inv_raw, ref_latents, prompt_embeds
 
     def _get_latents(
         self,
@@ -467,6 +483,7 @@ class PFlowPipeline:
 
     def _compute_delta_e(
         self, ref_video: torch.Tensor, caption: str, eta_inv: torch.Tensor,
+        z0: torch.Tensor = None, e0: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         改动点: Velocity Field Matching → Δe (v2)
@@ -480,6 +497,8 @@ class PFlowPipeline:
             ref_video: 参考视频张量
             caption: 当前 caption
             eta_inv: 原始反演噪声 (未经SVD滤波)
+            z0: 缓存的 VAE 编码 latent (避免重复编码)
+            e0: 缓存的 prompt embedding (避免重复编码)
 
         Returns:
             delta_e: embedding 残差 (B, L, D)
@@ -487,17 +506,23 @@ class PFlowPipeline:
         logger.info("  [Velocity] Computing Δe via lightweight velocity matching...")
         cfg = self.config
 
-        # Encode reference video to latent
-        ref_norm = normalize_video(ref_video).unsqueeze(0)
-        z0 = encode_video_to_latents(self.pipe, ref_norm, self.device)
+        # Reuse cached z0 or encode (避免重复 VAE 编码)
+        if z0 is None:
+            ref_norm = normalize_video(ref_video).unsqueeze(0)
+            z0 = encode_video_to_latents(self.pipe, ref_norm, self.device)
+        else:
+            logger.info("    [Velocity] Reusing cached z0 (skip VAE encode)")
 
-        # Encode caption to embedding
-        e0 = self._encode_prompt(caption)
+        # Reuse cached e0 or encode (避免重复 T5 forward)
+        if e0 is None:
+            e0 = self._encode_prompt(caption)
+        else:
+            logger.info("    [Velocity] Reusing cached prompt_embeds (skip T5 encode)")
 
         # Get actual token length (excluding padding) for gradient masking
         token_length = self._get_token_length(caption)
 
-        # Run velocity matching optimization (v2)
+        # Run velocity matching optimization (v2.2 — with perf optimizations)
         matcher = VelocityMatcher(
             pipe=self.pipe,
             T_m=cfg.velocity_T_m,
@@ -505,6 +530,13 @@ class PFlowPipeline:
             lr=cfg.velocity_lr,
             num_timesteps_per_step=getattr(cfg, 'velocity_K', 4),
             motion_weight_strength=getattr(cfg, 'velocity_motion_weight', 1.0),
+            early_stop_patience=getattr(cfg, 'velocity_early_stop', 5),
+            early_stop_threshold=1e-4,
+            use_batched_forward=getattr(cfg, 'velocity_batched', True),
+            use_adaptive_K=getattr(cfg, 'velocity_adaptive_K', True),
+            adaptive_K_warmup=getattr(cfg, 'velocity_adaptive_K_warmup', 8),
+            use_amp=getattr(cfg, 'velocity_amp', True),
+            use_warm_start=getattr(cfg, 'velocity_warm_start', True),
             device=self.device,
         )
 
