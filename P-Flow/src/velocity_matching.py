@@ -377,6 +377,7 @@ class VelocityMatcher:
 
         # Early stopping state
         best_loss = float("inf")
+        best_delta_e = None  # Will store the best Δe for restore
         patience_counter = 0
         steps_taken = 0
 
@@ -440,16 +441,25 @@ class VelocityMatcher:
             # ═══ Early Stopping Check ═══
             if loss_val < best_loss * (1 - self.early_stop_threshold):
                 best_loss = loss_val
+                best_delta_e = delta_e.data.clone()  # Save best checkpoint
                 patience_counter = 0
             else:
                 patience_counter += 1
 
             if patience_counter >= self.early_stop_patience and step >= 10:
                 # Don't early-stop in the first 10 steps (warmup)
-                logger.info(
-                    f"    Early stop at step {step}: loss={loss_val:.6f}, "
-                    f"best={best_loss:.6f}, patience exhausted"
-                )
+                # Restore best Δe before breaking
+                if best_delta_e is not None:
+                    delta_e.data.copy_(best_delta_e)
+                    logger.info(
+                        f"    Early stop at step {step}: loss={loss_val:.6f}, "
+                        f"best={best_loss:.6f}, restored best Δe (||Δe||={best_delta_e.norm().item():.4f})"
+                    )
+                else:
+                    logger.info(
+                        f"    Early stop at step {step}: loss={loss_val:.6f}, "
+                        f"best={best_loss:.6f}, patience exhausted"
+                    )
                 break
 
             # Logging
