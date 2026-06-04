@@ -89,10 +89,6 @@ class PFlowConfig:
     velocity_motion_weight: float = 1.0  # 运动区域加权强度 (0=关闭, 1=全开)
     velocity_early_stop: int = 5  # Early stopping patience (0=禁用)
     velocity_batched: bool = True # 批量 forward K 个 timestep (快但费显存)
-    velocity_adaptive_K: bool = True   # 前期用 K=1 快速收敛方向，后期切 K=4 精细化
-    velocity_adaptive_K_warmup: int = 8  # adaptive K 的 warmup 步数
-    velocity_amp: bool = True     # 混合精度 autocast (bfloat16, Ampere+ GPU 加速 30-50%)
-    velocity_warm_start: bool = True  # 用 pseudo-gradient 方向初始化 Δe (省 3-5 步)
     embed_strength: float = 0.005 # Δe 注入强度 (验证最优: 0.005)
 
     # ── 迭代优化参数 ──
@@ -522,21 +518,17 @@ class PFlowPipeline:
         # Get actual token length (excluding padding) for gradient masking
         token_length = self._get_token_length(caption)
 
-        # Run velocity matching optimization (v2.2 — with perf optimizations)
+        # Run velocity matching optimization (v2.3 — clean + early stop)
         matcher = VelocityMatcher(
             pipe=self.pipe,
             T_m=cfg.velocity_T_m,
             num_opt_steps=cfg.velocity_steps,
             lr=cfg.velocity_lr,
-            num_timesteps_per_step=getattr(cfg, 'velocity_K', 4),
-            motion_weight_strength=getattr(cfg, 'velocity_motion_weight', 1.0),
-            early_stop_patience=getattr(cfg, 'velocity_early_stop', 5),
+            num_timesteps_per_step=cfg.velocity_K,
+            motion_weight_strength=cfg.velocity_motion_weight,
+            early_stop_patience=cfg.velocity_early_stop,
             early_stop_threshold=1e-4,
-            use_batched_forward=getattr(cfg, 'velocity_batched', True),
-            use_adaptive_K=getattr(cfg, 'velocity_adaptive_K', True),
-            adaptive_K_warmup=getattr(cfg, 'velocity_adaptive_K_warmup', 8),
-            use_amp=getattr(cfg, 'velocity_amp', True),
-            use_warm_start=getattr(cfg, 'velocity_warm_start', True),
+            use_batched_forward=cfg.velocity_batched,
             device=self.device,
         )
 
