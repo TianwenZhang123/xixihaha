@@ -1,7 +1,7 @@
 """
-Lightweight Velocity Field Matching for P-Flow (v2.3 — Clean + Early Stop).
+Lightweight Velocity Field Matching for P-Flow (v2).
 
-Key features (unchanged from v2):
+Three core improvements over v1:
     1. Stratified Multi-Timestep Sampling: Sample K timesteps per step via stratified
        uniform partition → reduce gradient variance by √K without extra memory.
        (Inspired by: Adaptive Non-Uniform Timestep Sampling, CVPR 2025)
@@ -16,26 +16,15 @@ Key features (unchanged from v2):
        high-motion regions (large |Δv* across frames|) get higher penalty.
        (Reference: Latent Temporal Discrepancy as Motion Prior, 2025)
 
-Performance optimizations (v2.3 — validated):
-    - Batched K-timestep forward: All K x_t packed into a single batch forward,
-      reducing kernel launch overhead and enabling better GPU utilization.
-      (Zero quality loss — mathematically identical to sequential)
-    - Early stopping with restore-best: If loss doesn't improve for N steps,
-      restore the best Δe and terminate. Saves compute without quality loss.
-
-Removed (v2.2 features that degraded quality in experiments):
-    - Adaptive K scheduling (caused optimization discontinuity)
-    - AMP mixed precision (bfloat16 gradient precision too low for fine optimization)
-    - Warm-start initialization (produced ||Δe||≈0.0005, effectively useless)
-
-Core Principle (unchanged):
+Core Principle:
     Given reference video latent z₀ and inverted noise η_inv, find Δe such that:
         v_θ(x_t, t, e₀ + Δe) ≈ v* = z₀ - η_inv  for all t ∈ [0, T_m]
 
 Computational Cost:
-    With early stopping + batched forward, typically 10-20 steps × 1 batched forward
-    ≈ ~40-80 equivalent passes (down from ~120 in v2 without optimization).
-    Speedup: ~1.5-2.5x over v2 (which always runs full 30 steps).
+    30 steps × K=4 sequential forwards = 120 equivalent transformer passes.
+
+Results (10-sample mean):
+    CLIP 0.8998 (+3.4% vs baseline), XCLIP 0.7736 (+8.0% vs baseline)
 
 Reference:
     - Reenact Anything (SIGGRAPH 2025): Motion-textual inversion, inflated embedding
@@ -56,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 class VelocityMatcher:
     """
-    Lightweight Velocity Field Matching for P-Flow (v2.3 — clean + early stop).
+    Lightweight Velocity Field Matching for P-Flow (v2).
 
     Optimizes Δe to align the model's velocity field with the ground-truth
     trajectory defined by (z₀, η_inv).
@@ -75,9 +64,6 @@ class VelocityMatcher:
         lr: float = 1e-3,
         num_timesteps_per_step: int = 4,
         motion_weight_strength: float = 1.0,
-        early_stop_patience: int = 5,
-        early_stop_threshold: float = 1e-4,
-        use_batched_forward: bool = True,
         device: str = "cuda",
     ):
         """
@@ -85,18 +71,13 @@ class VelocityMatcher:
             pipe: Diffusers pipeline (with transformer or unet attribute).
             T_m: Time range upper bound for optimization.
                  1.0 = full reproduction, 0.3 = motion-only (for transfer).
-            num_opt_steps: Maximum optimization iterations (default 30).
+            num_opt_steps: Optimization iterations (default 30).
             lr: Peak learning rate for Adam optimizer.
             num_timesteps_per_step: Number of stratified timesteps per optimization
                 step (K). Higher K → lower gradient variance, slight memory increase.
                 K=4 gives ~2x variance reduction vs K=1.
             motion_weight_strength: Controls how much to emphasize motion regions.
                 0.0 = uniform (no motion weighting), 1.0 = full LTD weighting.
-            early_stop_patience: Stop if loss doesn't improve for this many steps.
-                0 = disable early stopping (run all num_opt_steps).
-            early_stop_threshold: Minimum relative improvement to count as progress.
-            use_batched_forward: If True, batch all K timesteps into one forward pass
-                (faster but uses K× memory for intermediate activations).
             device: Compute device.
         """
         self.pipe = pipe
@@ -105,9 +86,6 @@ class VelocityMatcher:
         self.lr = lr
         self.num_timesteps_per_step = num_timesteps_per_step
         self.motion_weight_strength = motion_weight_strength
-        self.early_stop_patience = early_stop_patience
-        self.early_stop_threshold = early_stop_threshold
-        self.use_batched_forward = use_batched_forward
         self.device = device
 
     def _get_model(self):
@@ -135,45 +113,6 @@ class VelocityMatcher:
             hidden_states=latents,
             timestep=timestep.expand(latents.shape[0]),
             encoder_hidden_states=encoder_hidden_states,
-            return_dict=False,
-        )
-
-        if isinstance(model_output, tuple):
-            return model_output[0]
-        return model_output
-
-    def _model_forward_batched(
-        self,
-        latents_batch: torch.Tensor,
-        timesteps_batch: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Batched forward pass for K timesteps simultaneously.
-
-        Args:
-            latents_batch: (K, C, F, H, W) — K different x_t stacked
-            timesteps_batch: (K,) — K different timesteps
-            encoder_hidden_states: (1, L, D) — same embedding for all K
-                Will be expanded to (K, L, D).
-
-        Returns:
-            v_pred_batch: (K, C, F, H, W)
-        """
-        model = self._get_model()
-        K = latents_batch.shape[0]
-
-        timesteps_batch = timesteps_batch.to(
-            device=latents_batch.device, dtype=latents_batch.dtype
-        )
-
-        # Expand embedding to batch size K
-        e_expanded = encoder_hidden_states.expand(K, -1, -1)
-
-        model_output = model(
-            hidden_states=latents_batch,
-            timestep=timesteps_batch,
-            encoder_hidden_states=e_expanded,
             return_dict=False,
         )
 
@@ -242,11 +181,10 @@ class VelocityMatcher:
         token_length: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Execute velocity field matching optimization (v2.3).
+        Execute velocity field matching optimization (v2).
 
-        Same optimization trajectory as v2, with two safe performance additions:
-        - Batched forward: K timesteps processed in single model call (no quality change)
-        - Early stopping + restore best: exit early if converged, always use best Δe
+        Runs full num_opt_steps iterations with K sequential forwards per step.
+        This is the validated configuration that produces CLIP 0.8998 / XCLIP 0.7736.
 
         Args:
             z0: Target video latent (B, C, F, H, W).
@@ -259,8 +197,8 @@ class VelocityMatcher:
             Dictionary containing:
                 - delta_e: Optimized embedding residual (B, L, D)
                 - loss_history: Per-step loss values
-                - final_loss: Loss at the best checkpoint (not the last step)
-                - steps_taken: Actual number of steps (may be < num_opt_steps)
+                - final_loss: Loss at the last step
+                - steps_taken: Always equals num_opt_steps
         """
         model = self._get_model()
 
@@ -304,7 +242,7 @@ class VelocityMatcher:
         # Target velocity (constant throughout optimization)
         v_star = z0 - eta_inv
 
-        # Initialize Δe from zeros (simple, proven to work in v2)
+        # Initialize Δe from zeros
         delta_e = torch.zeros_like(e0, requires_grad=True)
 
         # Create optimizer
@@ -323,33 +261,13 @@ class VelocityMatcher:
 
         loss_history = []
         final_loss = 0.0
-
         K = self.num_timesteps_per_step
-
-        # Determine if batched forward is feasible
-        # For large video latents, batching K copies may OOM → fall back to sequential
-        can_batch = self.use_batched_forward
-        if can_batch and z0.dim() == 5:
-            # Estimate: K copies of latent + activations
-            latent_bytes = z0.numel() * z0.element_size()
-            if K * latent_bytes > 4 * 1024**3:  # > 4GB for latents alone
-                can_batch = False
-                logger.info(f"    [Batched] Disabled: K={K} × latent too large, using sequential")
-
-        # Early stopping state
-        best_loss = float("inf")
-        best_delta_e = None
-        patience_counter = 0
-        steps_taken = 0
-        early_stop_enabled = self.early_stop_patience > 0
 
         logger.info(
             f"  [VelocityMatch] Optimizing: "
             f"steps={self.num_opt_steps}, T_m={self.T_m}, lr={self.lr}, "
             f"K={K}, motion_weight={self.motion_weight_strength:.1f}, "
-            f"padding_mask={'ON' if padding_mask is not None else 'OFF'}, "
-            f"batched={'ON' if can_batch else 'OFF'}, "
-            f"early_stop={'patience=' + str(self.early_stop_patience) if early_stop_enabled else 'OFF'}"
+            f"padding_mask={'ON' if padding_mask is not None else 'OFF'}"
         )
 
         for step in range(self.num_opt_steps):
@@ -358,17 +276,31 @@ class VelocityMatcher:
             # ═══ Stratified Multi-Timestep Sampling ═══
             t_norms = self._sample_stratified_timesteps(K, dtype=z0.dtype)
 
-            # Compute loss — batched or sequential
+            # ═══ K sequential forwards + loss accumulation ═══
             e_current = e0 + delta_e
+            total_loss = torch.tensor(0.0, device=self.device, dtype=z0.dtype)
 
-            if can_batch and K > 1:
-                loss = self._compute_loss_batched(
-                    z0, eta_inv, v_star, e_current, t_norms, motion_weight
-                )
-            else:
-                loss = self._compute_loss_sequential(
-                    z0, eta_inv, v_star, e_current, t_norms, motion_weight
-                )
+            for k in range(K):
+                t_norm = t_norms[k]
+                t_model = t_norm * 1000.0
+
+                # Construct x_t = (1-t)·η_inv + t·z₀
+                x_t = (1 - t_norm) * eta_inv + t_norm * z0
+
+                # Forward pass with current Δe
+                v_pred = self._model_forward(x_t, t_model, e_current)
+
+                # Motion-Aware Loss Weighting
+                residual_sq = (v_pred - v_star) ** 2
+                if isinstance(motion_weight, torch.Tensor):
+                    weighted_loss = (residual_sq * motion_weight).mean()
+                else:
+                    weighted_loss = residual_sq.mean()
+
+                total_loss = total_loss + weighted_loss
+
+            # Average over K timesteps
+            loss = total_loss / K
 
             # Backward
             loss.backward()
@@ -388,29 +320,6 @@ class VelocityMatcher:
                 "lr": scheduler.get_last_lr()[0],
             })
             final_loss = loss_val
-            steps_taken = step + 1
-
-            # ═══ Early Stopping Check (with restore best) ═══
-            if early_stop_enabled:
-                if loss_val < best_loss * (1 - self.early_stop_threshold):
-                    best_loss = loss_val
-                    best_delta_e = delta_e.data.clone()
-                    patience_counter = 0
-                else:
-                    patience_counter += 1
-
-                if patience_counter >= self.early_stop_patience and step >= 10:
-                    # Don't early-stop in the first 10 steps (warmup phase)
-                    # Restore best Δe before breaking
-                    if best_delta_e is not None:
-                        delta_e.data.copy_(best_delta_e)
-                        final_loss = best_loss
-                    logger.info(
-                        f"    Early stop at step {step}: current_loss={loss_val:.6f}, "
-                        f"best_loss={best_loss:.6f}, restored best Δe "
-                        f"(||Δe||={delta_e.norm().item():.4f})"
-                    )
-                    break
 
             # Logging
             if step % 10 == 0 or step == self.num_opt_steps - 1:
@@ -431,11 +340,6 @@ class VelocityMatcher:
                         f"lr={scheduler.get_last_lr()[0]:.2e}"
                     )
 
-        # If we ran all steps without early stop, check if we have a best checkpoint
-        if early_stop_enabled and best_delta_e is not None and patience_counter < self.early_stop_patience:
-            # Ran to completion — use last step (which is likely best or close to best)
-            pass
-
         # Restore model state
         if latent_frames >= 13:
             if hasattr(model, "disable_gradient_checkpointing"):
@@ -445,7 +349,7 @@ class VelocityMatcher:
         model.eval()
 
         logger.info(
-            f"  [VelocityMatch] Complete: {steps_taken}/{self.num_opt_steps} steps, "
+            f"  [VelocityMatch] Complete: {self.num_opt_steps}/{self.num_opt_steps} steps, "
             f"final_loss={final_loss:.6f}"
         )
 
@@ -453,94 +357,5 @@ class VelocityMatcher:
             "delta_e": delta_e.detach(),
             "loss_history": loss_history,
             "final_loss": final_loss,
-            "steps_taken": steps_taken,
+            "steps_taken": self.num_opt_steps,
         }
-
-    def _compute_loss_batched(
-        self,
-        z0: torch.Tensor,
-        eta_inv: torch.Tensor,
-        v_star: torch.Tensor,
-        e_current: torch.Tensor,
-        t_norms: torch.Tensor,
-        motion_weight,
-    ) -> torch.Tensor:
-        """
-        Compute velocity matching loss with all K timesteps in a single batched forward.
-
-        This is significantly faster than sequential when GPU memory allows, because:
-        - Single kernel launch for the transformer
-        - Better GPU utilization (larger batch = better parallelism)
-        - Reduced Python overhead
-
-        The backward pass is also batched (single backward over K outputs).
-        """
-        K = t_norms.shape[0]
-
-        # Construct K different x_t: x_t_k = (1 - t_k) * eta_inv + t_k * z0
-        # Shapes: t_norms is (K,), z0 is (1, C, F, H, W)
-        t_expanded = t_norms.view(K, 1, 1, 1, 1)  # (K, 1, 1, 1, 1)
-        x_t_batch = (1 - t_expanded) * eta_inv + t_expanded * z0  # (K, C, F, H, W)
-
-        # Timesteps for model (scaled to [0, 1000])
-        t_model_batch = t_norms * 1000.0  # (K,)
-
-        # Batched forward
-        v_pred_batch = self._model_forward_batched(x_t_batch, t_model_batch, e_current)
-        # v_pred_batch shape: (K, C, F, H, W)
-
-        # Expand v_star to match batch: (1, C, F, H, W) → (K, C, F, H, W)
-        v_star_expanded = v_star.expand(K, -1, -1, -1, -1)
-
-        # Compute residual
-        residual_sq = (v_pred_batch - v_star_expanded) ** 2
-
-        # Apply motion weight
-        if isinstance(motion_weight, torch.Tensor):
-            # motion_weight is (1, C, F, H, W), expand to (K, C, F, H, W)
-            mw_expanded = motion_weight.expand(K, -1, -1, -1, -1)
-            loss = (residual_sq * mw_expanded).mean()
-        else:
-            loss = residual_sq.mean()
-
-        return loss
-
-    def _compute_loss_sequential(
-        self,
-        z0: torch.Tensor,
-        eta_inv: torch.Tensor,
-        v_star: torch.Tensor,
-        e_current: torch.Tensor,
-        t_norms: torch.Tensor,
-        motion_weight,
-    ) -> torch.Tensor:
-        """
-        Compute velocity matching loss with K timesteps sequentially.
-
-        Fallback for when batched forward would OOM (large video latents).
-        Still accumulates loss in a single computation graph for one backward pass.
-        """
-        K = t_norms.shape[0]
-        total_loss = torch.tensor(0.0, device=self.device, dtype=z0.dtype)
-
-        for k in range(K):
-            t_norm = t_norms[k]
-            t_model = t_norm * 1000.0
-
-            # Construct x_t = (1-t)·η_inv + t·z₀
-            x_t = (1 - t_norm) * eta_inv + t_norm * z0
-
-            # Forward pass with current Δe
-            v_pred = self._model_forward(x_t, t_model, e_current)
-
-            # Motion-Aware Loss Weighting
-            residual_sq = (v_pred - v_star) ** 2
-            if isinstance(motion_weight, torch.Tensor):
-                weighted_loss = (residual_sq * motion_weight).mean()
-            else:
-                weighted_loss = residual_sq.mean()
-
-            total_loss = total_loss + weighted_loss
-
-        # Average over K timesteps
-        return total_loss / K

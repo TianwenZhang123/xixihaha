@@ -90,8 +90,6 @@ def parse_args():
     p.add_argument("--velocity_lr", type=float, default=1e-3, help="Velocity matching 学习率")
     p.add_argument("--velocity_K", type=int, default=4, help="每步采样的时间步数量 (stratified)")
     p.add_argument("--velocity_motion_weight", type=float, default=1.0, help="运动区域加权强度 (0=关闭, 1=全开)")
-    p.add_argument("--velocity_early_stop", type=int, default=5, help="Early stop patience (0=禁用)")
-    p.add_argument("--velocity_no_batch", action="store_true", help="禁用 batched forward (省显存但更慢)")
     p.add_argument("--steps", type=int, default=30, help="推理步数")
     p.add_argument("--guidance", type=float, default=5.0, help="CFG scale")
     p.add_argument("--seed", type=int, default=42, help="随机种子")
@@ -166,8 +164,6 @@ def build_config(args) -> PFlowConfig:
         velocity_lr=args.velocity_lr,
         velocity_K=args.velocity_K,
         velocity_motion_weight=args.velocity_motion_weight,
-        velocity_early_stop=args.velocity_early_stop,
-        velocity_batched=not args.velocity_no_batch,
         inversion_steps=args.inversion_steps,
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,

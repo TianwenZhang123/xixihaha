@@ -87,8 +87,6 @@ class PFlowConfig:
     velocity_T_m: float = 1.0     # 时间步范围 (1.0=复现, 0.3=运动迁移)
     velocity_K: int = 4           # 每步采样的时间步数 (stratified, 降低梯度方差)
     velocity_motion_weight: float = 1.0  # 运动区域加权强度 (0=关闭, 1=全开)
-    velocity_early_stop: int = 5  # Early stopping patience (0=禁用)
-    velocity_batched: bool = True # 批量 forward K 个 timestep (快但费显存)
     embed_strength: float = 0.005 # Δe 注入强度 (验证最优: 0.005)
 
     # ── 迭代优化参数 ──
@@ -518,7 +516,7 @@ class PFlowPipeline:
         # Get actual token length (excluding padding) for gradient masking
         token_length = self._get_token_length(caption)
 
-        # Run velocity matching optimization (v2.3 — clean + early stop)
+        # Run velocity matching optimization (v2)
         matcher = VelocityMatcher(
             pipe=self.pipe,
             T_m=cfg.velocity_T_m,
@@ -526,9 +524,6 @@ class PFlowPipeline:
             lr=cfg.velocity_lr,
             num_timesteps_per_step=cfg.velocity_K,
             motion_weight_strength=cfg.velocity_motion_weight,
-            early_stop_patience=cfg.velocity_early_stop,
-            early_stop_threshold=1e-4,
-            use_batched_forward=cfg.velocity_batched,
             device=self.device,
         )
 
