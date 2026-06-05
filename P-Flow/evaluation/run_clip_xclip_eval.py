@@ -108,15 +108,31 @@ def extract_numeric_id(path: Path) -> str | None:
 
 def list_eval_items(orig_dir: Path, gen_dir: Path, caption_dir: Path,
                     limit: int = 0) -> list[dict]:
-    """Find aligned triplets: original video + generated video + caption."""
+    """Find aligned triplets: original video + generated video + caption.
+
+    Supports two gen_dir layouts:
+      1. Flat: gen_dir/{id}.mp4
+      2. Nested: gen_dir/sample_{id}/{id}.mp4 (run.py default output)
+    """
     orig_map = {p.stem: p for p in orig_dir.glob("*.mp4")}
     caption_map = {p.stem: p for p in caption_dir.glob("*.txt")}
 
+    # Collect generated videos from both flat and nested layouts
+    gen_map: dict[str, Path] = {}
+    # Flat: gen_dir/*.mp4
+    for p in gen_dir.glob("*.mp4"):
+        sid = extract_numeric_id(p)
+        if sid and sid not in gen_map:
+            gen_map[sid] = p
+    # Nested: gen_dir/sample_*/*.mp4
+    for p in gen_dir.glob("sample_*/*.mp4"):
+        sid = extract_numeric_id(p)
+        if sid:
+            gen_map[sid] = p  # nested takes priority (actual output)
+
     items = []
-    for gen_path in sorted(gen_dir.glob("*.mp4"), key=lambda p: int(p.stem) if p.stem.isdigit() else 0):
-        sample_id = extract_numeric_id(gen_path)
-        if not sample_id:
-            continue
+    for sample_id in sorted(gen_map.keys(), key=lambda x: int(x)):
+        gen_path = gen_map[sample_id]
         orig_path = orig_map.get(sample_id)
         caption_path = caption_map.get(sample_id)
         if orig_path and caption_path:

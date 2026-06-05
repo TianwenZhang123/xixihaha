@@ -22,7 +22,9 @@
 P-Flow/
 ├── models/                            # ← 需要准备 (见下方说明)
 │   ├── Wan2.1-T2V-1.3B-Diffusers/    #    T2V 生成模型
-│   └── Qwen2.5-VL-7B-Instruct/      #    VLM 模型
+│   ├── Qwen2.5-VL-7B-Instruct/      #    VLM 模型
+│   ├── clip-vit-base-patch32/        #    CLIP 评测模型
+│   └── xclip-base-patch32/           #    X-CLIP 评测模型
 ├── data/
 │   ├── videos/                        # ← 需要准备: 参考视频 ({id}.mp4)
 │   ├── captions_qwen/                #    VLM 原始 caption ({id}.txt)
@@ -67,8 +69,12 @@ pip install -r requirements.txt
 mkdir -p models
 
 # 软链接到实际模型位置 (根据你的环境修改路径)
-ln -s /root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers models/Wan2.1-T2V-1.3B-Diffusers
-ln -s /root/autodl-tmp/models/Qwen2.5-VL-7B-Instruct models/Qwen2.5-VL-7B-Instruct
+ln -sf /root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers models/Wan2.1-T2V-1.3B-Diffusers
+ln -sf /root/autodl-tmp/models/Qwen2.5-VL-7B-Instruct models/Qwen2.5-VL-7B-Instruct
+
+# 评测模型 (CLIP / X-CLIP)
+ln -sf /root/autodl-tmp/models/clip-vit-base-patch32 models/clip-vit-base-patch32
+ln -sf /root/autodl-tmp/models/xclip-base-patch32 models/xclip-base-patch32
 ```
 
 ### 3. 准备数据
@@ -173,8 +179,19 @@ python run.py \
 
 ### 评估每一步
 
+评测脚本自动识别 `outputs/` 下的子目录结构（`sample_{id}/{id}.mp4`），无需手动平铺文件。
+
 ```bash
+# 评测单个 step
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/step2_L1L2 \
+    --caption-dir data/captions_hybrid \
+    --output-dir outputs/step2_L1L2/eval_clip
+
+# 批量评测所有 step
 for step_dir in step0_baseline step1_L1 step2_L1L2 step3_L1L2L3; do
+    [ -d "outputs/$step_dir" ] || continue
     echo "====== $step_dir ======"
     python evaluation/run_clip_xclip_eval.py \
         --orig-dir data/videos \
@@ -188,12 +205,14 @@ done
 
 ### 预期指标汇总
 
-| Step | 配置 | CLIP | XCLIP | 相对 Baseline |
-|------|------|------|-------|--------------|
+| Step | 配置 | CLIP (orig_gen) | XCLIP (orig_gen) | 相对 Baseline |
+|------|------|----------------|-----------------|--------------|
 | 0 | Baseline | 0.8703 | 0.7164 | — |
 | 1 | +L1 | 0.8842 | 0.7430 | +1.6%, +3.7% |
-| 2 | +L1+L2 | 0.8953 | 0.7667 | +2.9%, +7.0% |
+| 2 | +L1+L2 | **0.8952** | **0.7747** | +2.9%, +8.1% |
 | 3 | +L1+L2+L3 | 0.8998 | 0.7736 | +3.4%, +8.0% |
+
+> Step 2 实测值 (2026-06-05, A800, seed=42, alpha=0.004, 10 samples)。
 
 ---
 
