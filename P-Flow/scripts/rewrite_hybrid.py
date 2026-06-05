@@ -181,18 +181,42 @@ def rewrite_caption(original: str, backend: str, model: str,
     return result
 
 
+def _is_chinese_text(text: str) -> bool:
+    """判断文本是否主要为中文（CJK 字符占比 > 30%）"""
+    if not text:
+        return False
+    cjk_count = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff')
+    return cjk_count / len(text) > 0.3
+
+
+def _estimate_word_count(text: str) -> int:
+    """估算等效英文词数：中文按 ~2字/词 换算，英文直接空格分词"""
+    if _is_chinese_text(text):
+        # 中文字符数 / 2 ≈ 等效英文词数
+        cjk_chars = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff')
+        non_cjk_words = len(''.join(ch for ch in text if not ('\u4e00' <= ch <= '\u9fff')).split())
+        return cjk_chars // 2 + non_cjk_words
+    else:
+        return len(text.split())
+
+
 def validate_rewrite(original: str, rewritten: str) -> dict:
     """验证改写质量（词数比例、非空等）"""
-    orig_words = len(original.split())
-    new_words = len(rewritten.split())
+    orig_words = _estimate_word_count(original)
+    new_words = len(rewritten.split())  # 输出是英文，直接空格分词
     ratio = new_words / orig_words if orig_words > 0 else 0
+
+    # 跨语言改写（中→英）放宽阈值：0.3 ~ 3.0
+    is_cross_lingual = _is_chinese_text(original)
+    ratio_low = 0.3 if is_cross_lingual else 0.5
+    ratio_high = 3.0 if is_cross_lingual else 2.0
 
     issues = []
     if not rewritten.strip():
         issues.append("empty output")
-    if ratio < 0.5:
+    if ratio < ratio_low:
         issues.append(f"too short ({new_words} vs {orig_words} words, ratio={ratio:.2f})")
-    if ratio > 2.0:
+    if ratio > ratio_high:
         issues.append(f"too long ({new_words} vs {orig_words} words, ratio={ratio:.2f})")
     if rewritten.lower().startswith(("the video", "this video", "in this video", "the scene")):
         issues.append("still starts with preamble (Principle 1 violated)")
