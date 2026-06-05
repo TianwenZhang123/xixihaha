@@ -19,6 +19,7 @@ P-Flow: Video Reproduction via Iterative Prompt Optimization + Noise Prior + Vel
     │  velocity_matching.py — VelocityMatcher (轻量版Δe优化, 30步)        │
     │  vlm_client.py       — Local/DashScope/Mock VLM 客户端              │
     │  video_utils.py      — 视频 I/O 和处理工具                          │
+    │  shot_detect.py      — 镜头边界检测 (TransNetV2 / PySceneDetect)   │
     │  distributed.py      — 单 GPU 推理工具                              │
     └─────────────────────────────────────────────────────────────────────┘
 
@@ -41,10 +42,14 @@ P-Flow: Video Reproduction via Iterative Prompt Optimization + Noise Prior + Vel
     python run.py --video ref.mp4 --caption "..." --inversion --svd --blend --velocity
 """
 
-__version__ = "6.0.0"
+__version__ = "6.1.0"
 __task__ = "video_reproduction"
 
 from .pipeline import PFlowConfig, PFlowPipeline
 from .velocity_matching import VelocityMatcher
+from .shot_detect import ShotDetector, detect_shots, split_video_to_shots
 
-__all__ = ["PFlowConfig", "PFlowPipeline", "VelocityMatcher"]
+__all__ = [
+    "PFlowConfig", "PFlowPipeline", "VelocityMatcher",
+    "ShotDetector", "detect_shots", "split_video_to_shots",
+]

@@ -40,5 +40,9 @@ tqdm>=4.66.0
 pyyaml>=6.0
 einops>=0.7.0
 
+# Shot Boundary Detection
+transnetv2-pytorch>=0.1.0       # TransNetV2 (recommended SBD backend)
+scenedetect[opencv]>=0.6.0      # PySceneDetect (lightweight fallback)
+
 # Data management
 huggingface-hub>=0.20.0         # Model/dataset downloading
