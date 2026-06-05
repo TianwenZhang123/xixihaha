@@ -37,6 +37,11 @@ start_time = time.time()
 
 video_frames, single_frame_preds, all_frame_preds = model.predict_video(VIDEO_PATH)
 
+# 确保是 numpy array（某些版本返回 Tensor）
+if hasattr(single_frame_preds, 'numpy'):
+    single_frame_preds = single_frame_preds.numpy()
+single_frame_preds = np.asarray(single_frame_preds).flatten()
+
 elapsed = time.time() - start_time
 print(f"    视频帧数: {len(video_frames)}")
 print(f"    预测耗时: {elapsed:.2f}s")
