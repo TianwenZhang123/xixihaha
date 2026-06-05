@@ -151,7 +151,7 @@ class LocalVLMClient:
 
     def __init__(
         self,
-        model_path: str = "/root/autodl-tmp/models/Qwen2.5-VL-7B-Instruct",
+        model_path: str = "models/Qwen2.5-VL-7B-Instruct",
         temperature: float = 0.7,
         max_tokens: int = 2048,
         max_retries: int = 3,
@@ -1094,7 +1094,7 @@ def create_vlm_client(config: Dict[str, Any]) -> Any:
         # Local Qwen2.5-VL inference
         try:
             return LocalVLMClient(
-                model_path=config.get("model_path", "/root/autodl-tmp/models/Qwen2.5-VL-7B-Instruct"),
+                model_path=config.get("model_path", "models/Qwen2.5-VL-7B-Instruct"),
                 temperature=config.get("temperature", 0.7),
                 max_tokens=config.get("max_tokens", 2048),
                 max_retries=config.get("max_retries", 3),

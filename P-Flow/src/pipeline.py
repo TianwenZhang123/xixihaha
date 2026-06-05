@@ -55,7 +55,7 @@ class PFlowConfig:
     """所有可配置参数，一个 dataclass 搞定。"""
 
     # ── 模型 ──
-    t2v_path: str = "/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers"
+    t2v_path: str = "models/Wan2.1-T2V-1.3B-Diffusers"
     dtype: str = "bfloat16"
 
     # ── 视频生成 ──
@@ -94,7 +94,7 @@ class PFlowConfig:
 
     # ── VLM ──
     vlm_provider: str = "local"
-    vlm_model_path: str = "/root/models/Qwen2.5-VL-7B-Instruct"
+    vlm_model_path: str = "models/Qwen2.5-VL-7B-Instruct"
 
     # ── 其他 ──
     seed: int = 42

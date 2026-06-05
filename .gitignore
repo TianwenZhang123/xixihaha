@@ -10,6 +10,12 @@ __pycache__/
 outputs/
 test_run_*/
 
+# Models (too large, use symlinks)
+P-Flow/models/
+
+# Generated videos in data
+P-Flow/data/videos/
+
 # IDE
 .vscode/
 .idea/

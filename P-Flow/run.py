@@ -101,8 +101,10 @@ def parse_args():
     p.add_argument("--fps", type=int, default=15)
 
     # ── 模型路径 ──
-    p.add_argument("--model_path", type=str, default="/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers")
-    p.add_argument("--vlm_path", type=str, default="/root/models/Qwen2.5-VL-7B-Instruct")
+    p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
+                   help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
+    p.add_argument("--vlm_path", type=str, default="models/Qwen2.5-VL-7B-Instruct",
+                   help="VLM 模型路径 (默认: 项目内 models/ 目录)")
     p.add_argument("--vlm_provider", type=str, default="local", choices=["local", "dashscope", "mock"])
 
     # ── 执行控制 ──

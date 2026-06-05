@@ -47,12 +47,12 @@ from transformers import AutoProcessor, CLIPModel, CLIPProcessor, XCLIPModel
 # ============================================================
 # Default paths (AutoDL server)
 # ============================================================
-DEFAULT_ORIG_DIR = Path("/root/autodl-tmp/data/video-200/water_mark_out")
-DEFAULT_GEN_DIR = Path("/root/autodl-tmp/outputs/baseline_batch")
-DEFAULT_CAPTION_DIR = Path("/root/autodl-tmp/data/video-200/captions_qwen")
-DEFAULT_OUTPUT_DIR = Path("/root/autodl-tmp/outputs/eval_results/clip_xclip")
-DEFAULT_CLIP_MODEL = "/root/autodl-tmp/models/clip-vit-base-patch32"
-DEFAULT_XCLIP_MODEL = "/root/autodl-tmp/models/xclip-base-patch32"
+DEFAULT_ORIG_DIR = Path("data/videos")
+DEFAULT_GEN_DIR = Path("outputs/baseline_batch")
+DEFAULT_CAPTION_DIR = Path("data/captions_hybrid")
+DEFAULT_OUTPUT_DIR = Path("outputs/eval_results/clip_xclip")
+DEFAULT_CLIP_MODEL = "models/clip-vit-base-patch32"
+DEFAULT_XCLIP_MODEL = "models/xclip-base-patch32"
 
 
 def parse_args() -> argparse.Namespace:
