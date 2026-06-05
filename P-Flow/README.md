@@ -6,11 +6,11 @@
 
 ## 核心思想
 
-| 层 | 技术 | 信息维度 | Flag |
-|----|------|---------|------|
-| Layer 1 | V4 Hybrid Prompt Rewrite | 语义："什么在动" | 外部预处理 |
-| Layer 2 | SVD Noise Prior | 结构："从哪里开始动" | `--noise_prior` |
-| Layer 3 | Velocity Field Matching | 轨迹："怎么动" | `--velocity_full` |
+| 层 | 技术 | 信息维度 | 实际执行的事 |
+|----|------|---------|-------------|
+| Layer 1 | V4 Hybrid Prompt Rewrite | 语义："什么在动" | LLM 将 VLM 描述改写为指导性 prompt（一次 API 调用，非迭代） |
+| Layer 2 | SVD Noise Prior | 结构："从哪里开始动" | 参考视频 → VAE 编码 → Flow Inversion 反演噪声 → SVD 去内容保运动 → 与随机噪声按 α=0.004 混合 |
+| Layer 3 | Velocity Field Matching | 轨迹："怎么动" | 30 步 Adam 优化 Δe，使模型速度场对齐参考视频理想轨迹，生成时注入 e₀+0.02·Δe |
 
 三层叠加效果（10 样本验证）：CLIP +3.4%，XCLIP +8.0%（相对 baseline）。
 
@@ -77,7 +77,6 @@ ln -s /root/autodl-tmp/models/Qwen2.5-VL-7B-Instruct models/Qwen2.5-VL-7B-Instru
 mkdir -p data/videos
 
 # 将参考视频放入，命名为 {id}.mp4
-# 例如: 从已有数据集软链接
 ln -sf /root/autodl-tmp/data/video-200/water_mark_out/* data/videos/
 ```
 
@@ -89,36 +88,144 @@ ln -sf /root/autodl-tmp/data/video-200/water_mark_out/* data/videos/
 export DASHSCOPE_API_KEY="your-key"   # Layer 1 改写需要
 ```
 
-### 5. 运行
+---
+
+## 逐层验证（从 Layer 1 到 Layer 3）
+
+以下命令逐层叠加，让你看到每一层的独立贡献。
+
+### Step 0：Baseline（VLM 原始 caption 直出）
 
 ```bash
-# 最简单: 单视频 baseline
-python run.py --video data/videos/31.mp4 --caption "a cat jumping"
-
-# 最强配置: Layer 1 + 2 + 3
+# 用 VLM 原始 caption + 纯随机噪声生成
 python run.py \
-    --video data/videos/31.mp4 \
-    --caption "$(cat data/captions_hybrid/31.txt)" \
-    --velocity_full --alpha 0.004 --embed_strength 0.02
+    --data_dir data/videos \
+    --caption_dir data/captions_qwen \
+    --output_dir outputs/step0_baseline \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --seed 42 --resume
+```
 
-# 批量 10 样本 + 全部层
+**执行内容**: 加载视频 → 读取 caption → 纯随机噪声 → Wan2.1 生成（30步）→ 输出
+**预期**: CLIP ≈ 0.8703, XCLIP ≈ 0.7164
+
+---
+
+### Step 1：+Layer 1（Hybrid Prompt Rewrite）
+
+```bash
+# 1a. LLM 改写 caption（一次性预处理，10 个样本约 10 秒）
+python scripts/rewrite_hybrid.py \
+    --input-dir data/captions_qwen \
+    --output-dir data/captions_hybrid \
+    --backend dashscope --model qwen-plus \
+    --sample-ids 7 17 21 31 32 33 34 43 46 47 \
+    --skip-existing
+
+# 1b. 用改写后的 caption 生成视频
 python run.py \
     --data_dir data/videos \
     --caption_dir data/captions_hybrid \
-    --output_dir outputs/full_run \
+    --output_dir outputs/step1_L1 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --seed 42 --resume
+```
+
+**执行内容**: 读取 hybrid caption → 纯随机噪声 → Wan2.1 生成 → 输出（和 baseline 唯一区别是换了更好的 prompt）
+**预期**: CLIP ≈ 0.8842, XCLIP ≈ 0.7430 (CLIP +1.6%, XCLIP +3.7%)
+
+---
+
+### Step 2：+Layer 1 + Layer 2（Noise Prior）
+
+```bash
+python run.py \
+    --data_dir data/videos \
+    --caption_dir data/captions_hybrid \
+    --output_dir outputs/step2_L1L2 \
+    --noise_prior --alpha 0.004 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --seed 42 --resume
+```
+
+**执行内容**: 读取 hybrid caption → VAE 编码参考视频为 z₀ → Flow Inversion (50步逆向ODE) 得到 η_inv → SVD 两阶段滤波 (去内容保运动) 得到 η_temporal → η = √0.004·η_temporal + √0.996·η_random → 用混合噪声生成 → 输出
+**预期**: CLIP ≈ 0.8953, XCLIP ≈ 0.7667 (CLIP +2.9%, XCLIP +7.0%)
+
+---
+
+### Step 3：+Layer 1 + Layer 2 + Layer 3（Velocity Matching）
+
+```bash
+python run.py \
+    --data_dir data/videos \
+    --caption_dir data/captions_hybrid \
+    --output_dir outputs/step3_L1L2L3 \
     --velocity_full --alpha 0.004 --embed_strength 0.02 \
     --velocity_K 4 --velocity_motion_weight 1.0 \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
     --seed 42 --resume
 ```
 
-### 6. 一键逐层复现
+**执行内容**: 读取 hybrid caption → VAE 编码 z₀ → Flow Inversion 得 η_inv → SVD 得 η_temporal → **额外: 30步 Adam 优化 Δe（每步 K=4 分层时间点采样，运动加权 Loss），使 v_θ(x_t, t, e₀+Δe) ≈ v*（= z₀ - η_inv）** → 噪声混合 → **生成时通过 hook 注入 e_final = e₀ + 0.02·Δe** → 输出
+**预期**: CLIP ≈ 0.8998, XCLIP ≈ 0.7736 (CLIP +3.4%, XCLIP +8.0%)
+
+---
+
+### 评估每一步
+
+```bash
+for step_dir in step0_baseline step1_L1 step2_L1L2 step3_L1L2L3; do
+    echo "====== $step_dir ======"
+    python evaluation/run_clip_xclip_eval.py \
+        --orig-dir data/videos \
+        --gen-dir outputs/$step_dir \
+        --caption-dir data/captions_hybrid \
+        --output-dir outputs/$step_dir/eval_clip
+done
+```
+
+---
+
+### 预期指标汇总
+
+| Step | 配置 | CLIP | XCLIP | 相对 Baseline |
+|------|------|------|-------|--------------|
+| 0 | Baseline | 0.8703 | 0.7164 | — |
+| 1 | +L1 | 0.8842 | 0.7430 | +1.6%, +3.7% |
+| 2 | +L1+L2 | 0.8953 | 0.7667 | +2.9%, +7.0% |
+| 3 | +L1+L2+L3 | 0.8998 | 0.7736 | +3.4%, +8.0% |
+
+---
+
+## 一键全跑（L1+L2+L3 最强配置）
+
+如果不需要逐层验证，直接一步到位：
+
+```bash
+# 先生成 hybrid caption（如果没有的话）
+python scripts/rewrite_hybrid.py \
+    --input-dir data/captions_qwen \
+    --output-dir data/captions_hybrid \
+    --backend dashscope --model qwen-plus \
+    --sample-ids 7 17 21 31 32 33 34 43 46 47 \
+    --skip-existing
+
+# 跑全量 pipeline
+python run.py \
+    --data_dir data/videos \
+    --caption_dir data/captions_hybrid \
+    --output_dir outputs/full_L1L2L3 \
+    --velocity_full --alpha 0.004 --embed_strength 0.02 \
+    --velocity_K 4 --velocity_motion_weight 1.0 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --seed 42 --resume
+```
+
+或者用一键脚本（含逐层验证 + 自动评估）：
 
 ```bash
 bash scripts/reproduce.sh
 ```
-
-此脚本会依次运行 Baseline → L1 → L1+L2 → L1+L2+L3v1 → L1+L2+L3v2，并自动评估每步指标。详见 `docs/复现指南_逐层验证.md`。
 
 ---
 
@@ -142,18 +249,6 @@ bash scripts/reproduce.sh
 | `--embed_strength` | 0.005 | **0.02** | Δe 注入强度 |
 | `--velocity_K` | 4 | 4 | 分层采样数 |
 | `--velocity_motion_weight` | 1.0 | 1.0 | 运动加权 |
-
----
-
-## 评估
-
-```bash
-python evaluation/run_clip_xclip_eval.py \
-    --orig-dir data/videos \
-    --gen-dir outputs/<experiment> \
-    --caption-dir data/captions_hybrid \
-    --output-dir outputs/<experiment>/eval_clip
-```
 
 ---
 
