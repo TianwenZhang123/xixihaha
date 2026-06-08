@@ -279,13 +279,13 @@ def llm_rewrite(caption: str, model: str = "qwen-plus",
         temp = 0.7 if attempt == 0 else max(0.5, 0.7 - attempt * 0.1)
         result = call_llm(user_msg, REWRITE_SYSTEM, model, temperature=temp)
 
-        # ── 验证 1: 长度检查（≥100% 原文，≤200%）——丰富但不过度膨胀 ──
+        # ── 验证 1: 长度检查（≥原文词数，≤250词固定上限）──
         result_words = len(result.split())
-        if result_words < int(word_count * 1.0):
+        if result_words < word_count:
             logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words} 词 (最低 {word_count})")
             continue
-        if result_words > int(word_count * 2.0):
-            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} 词 (最高 {int(word_count * 2.0)})")
+        if result_words > 250:
+            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} 词 (最高 250)")
             continue
 
         # ── 验证 2: 不能以 preamble 开头 ──
@@ -555,7 +555,7 @@ def main():
     # Step 2: LLM 约束式改写
     # ══════════════════════════════════════════════════════════════════════════
     logger.info("\n" + "=" * 60)
-    logger.info("Step 2: LLM 约束式改写（3 处手术修改）")
+    logger.info("Step 2: LLM 丰富型改写（受控扩写 + VLM 兜底）")
     logger.info("=" * 60)
 
     rewrite_dir = out_dir / "captions_rewritten"
@@ -677,7 +677,7 @@ def main():
 
     d_clip = clip_score - baseline_clip if baseline_metrics else 0
     d_xclip = xclip_score - baseline_xclip if baseline_metrics else 0
-    method_name = "Hybrid-v5" if not args.skip_vlm else "Hybrid-noVLM"
+    method_name = "Hybrid-v6" if not args.skip_vlm else "Hybrid-noVLM"
     if baseline_metrics:
         print(f"{method_name:<15} {clip_score:>10.4f} {d_clip:>+10.4f} {xclip_score:>10.4f} {d_xclip:>+10.4f}")
     else:
@@ -688,7 +688,7 @@ def main():
     summary = {
         "hybrid_v5": {"orig_gen_clip": clip_score, "orig_gen_xclip": xclip_score},
         "config": {
-            "strategy": "v5_constrained_single_pass",
+            "strategy": "v6_enrichment_single_pass",
             "vlm_verify": not args.skip_vlm,
             "llm_model": args.llm_model,
             "vlm_provider": args.vlm_provider if not args.skip_vlm else "skipped",
