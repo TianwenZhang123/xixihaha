@@ -429,10 +429,8 @@ def generate_videos(data_dir: str, caption_dir: str, output_dir: str,
     ]
 
     logger.info(f"  运行: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent),
-                           capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent.resolve()))
     if result.returncode != 0:
-        logger.error(f"  run.py 失败:\n{result.stderr[-500:]}")
         raise RuntimeError("run.py failed")
 
 
@@ -451,10 +449,9 @@ def run_eval(orig_dir: str, gen_dir: str, caption_dir: str,
         "--output-dir", output_dir,
     ]
     logger.info(f"  评测: {' '.join(cmd[-6:])}")
-    result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent),
-                           capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent.resolve()))
     if result.returncode != 0:
-        logger.error(f"  评测失败:\n{result.stderr[-500:]}")
+        logger.error(f"  评测失败")
         return {}
 
     # 读取结果
