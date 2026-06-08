@@ -323,6 +323,9 @@ class LocalVLMClient:
 
     def _generate(self, messages: List[Dict]) -> str:
         """Run inference on the local model."""
+        # Ensure model is loaded (handles lazy_load case)
+        self._load_model()
+
         from qwen_vl_utils import process_vision_info
 
         # Process the messages to get image inputs
