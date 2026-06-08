@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-Hybrid Iterative Pipeline — 一体化脚本
+Hybrid Pipeline — 单轮改写+校验流程（无多轮迭代）
 
 流程：
   1. 读取 baseline 的 VLM caption
-  2. LLM 融合策略改写 → iter0 prompt
-  3. 循环 N 轮：
-     a. 用当前 prompt 调 run.py 生成视频
-     b. 调评测脚本算 CLIP/XCLIP
-     c. VLM 对比（原始 vs 生成）→ 差异分析
-     d. LLM 根据反馈修复 prompt
-  4. 汇总所有轮次指标 + baseline 对比
+  2. LLM 约束式改写 → rewritten prompt
+  3. VLM 校验：用原始视频 + 改写后文字对比，输出不一致之处
+  4. LLM 修复：根据 VLM 反馈做定向修正 → final prompt
+  5. 用 final prompt 生成视频
+  6. 评测 CLIP/XCLIP + 与 baseline 对比
+
+设计理念：
+  - 去掉多轮迭代（太耗时），改为"先校验文字再生成"
+  - VLM 的作用：看原始视频 + 读 LLM 改写后的 prompt，判断文字是否准确描述了视频
+  - 这样不需要先生成视频就能发现 prompt 偏差（省去一次完整的 T2V 推理）
 
 用法:
     cd /root/autodl-tmp/videofake/P-Flow
@@ -20,9 +23,8 @@ Hybrid Iterative Pipeline — 一体化脚本
     python scripts/run_hybrid_iter.py \
         --data_dir /root/autodl-tmp/data/video-200/water_mark_out \
         --baseline_dir /root/autodl-tmp/outputs/baseline \
-        --output_dir /root/autodl-tmp/outputs/hybrid_iter \
-        --sample_ids 7 17 21 31 32 33 34 43 46 47 \
-        --iter 3
+        --output_dir /root/autodl-tmp/outputs/hybrid_v5 \
+        --sample_ids 7 17 21 31 32 33 34 43 46 47
 """
 
 import sys
@@ -45,73 +47,71 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LLM 改写
+# LLM 系统提示词
 # ─────────────────────────────────────────────────────────────────────────────
 
-REWRITE_SYSTEM = """You restructure VLM video captions into better T2V generation prompts. Your output must be nearly identical to the input — you only make 3 surgical changes.
+REWRITE_SYSTEM = """You are a text-to-video prompt optimizer for the Wan2.1 model (UMT5 text encoder). Your job is to make SURGICAL edits to VLM video captions — copying the original text and making exactly 3 targeted modifications.
 
-## CRITICAL: How to identify the ACTION SUBJECT
-The action subject is THE THING THAT MOVES OR ACTS in the video. Ask: "What is performing the main motion?"
-- If a whale swims through a cityscape → subject = "Giant whale", NOT "Underwater cityscape"
-- If paper airplanes fly through a jungle → subject = "Colorful paper airplanes", NOT "Vibrant jungle environment"
-- If a SUV drives on a road → subject = "White SUV", NOT "Scenic mountainous landscape"
-- If puppies waddle through snow → subject = "Two adorable golden retriever puppies", NOT "Serene snowy landscape"
-- If a cat walks through a garden → subject = "Orange and white cat", NOT "Serene garden"
-- If a volcano erupts → subject = "Massive volcanic eruption", NOT "High vantage point"
-The subject is NEVER the background/environment/setting. It is always the moving entity.
+## Key findings from our experiments (you MUST follow these):
 
-## The 3 changes you make (NOTHING ELSE):
+1. CONSTRAINT > ENRICHMENT: Our experiments proved that conservative editing (XCLIP +1.7%) far outperforms aggressive expansion (CLIP -3.2%). Semantic drift and hallucination are the main failure modes. Do NOT add information not in the original.
 
-1. OPENING — Move the action subject to the very first words. Delete "The video shows/captures/depicts/showcases..." and start with the subject noun phrase.
+2. U-SHAPED ATTENTION: The UMT5 encoder produces hidden states where DiT cross-attention follows a U-shaped distribution — the FIRST token and the LAST token receive ~15x more weight than middle tokens (which are nearly uniform). This means:
+   - The FIRST word of your output is critically important (subject noun)
+   - The LAST few words are equally important (vivid visual anchor)
+   - Middle content ordering barely matters — preserve it as-is
 
-2. ACTION — Find the 1-2 sentences where the subject's motion is described. Convert static verbs to a temporal chain using "initially/then/gradually". Add motion direction if implied but not stated. Do NOT touch any other sentences.
+3. TEMPORAL CHAIN IS EFFECTIVE: Adding temporal markers ("initially... then... finally...") to motion descriptions improves temporal coherence (XCLIP +1.7%) without causing semantic drift.
 
-3. ENDING — Make the final phrase end with a vivid motion or visual keyword (e.g., "gentle circular motion", "dust trail billowing behind", "dappled jungle light").
+## Your 3 surgical modifications (COPY everything else verbatim):
 
-## What you must NOT do:
+### Modification 1: SUBJECT-FIRST OPENING
+- Delete any "The video shows/captures/depicts/features..." preamble
+- Move the main moving subject to be the FIRST words
+- Keep the subject's original description unchanged
+- Example: "The video depicts a large whale swimming..." → "Large whale swimming..."
 
-- Do NOT compress or summarize. If the input is 150 words, output ~150 words.
-- Do NOT rephrase visual descriptions. Copy them VERBATIM: "dark brown hulls" stays "dark brown hulls", "glass facades and steel structures" stays "glass facades and steel structures".
-- Do NOT merge paragraphs. If input has 3 paragraphs, output has ~3 paragraphs.
-- Do NOT add information the original doesn't mention or imply.
-- Do NOT add temporal markers to background/lighting/atmosphere sentences.
+### Modification 2: TEMPORAL MARKERS ON MOTION (1-2 sentences only)
+- Find the primary motion/action description
+- Add temporal connectors: "initially... then..." or "gradually... before..."
+- You may add motion DIRECTION if it's obvious from context (left-to-right, toward camera)
+- Do NOT add motion details that aren't implied by the original text
+- Do NOT touch non-motion sentences
 
-## Process:
-1. Read the input. Identify the action subject (what moves?).
-2. Copy the ENTIRE input text.
-3. Move the subject to position 0 (delete framework phrase if needed).
-4. Find the 1-2 motion sentences → insert temporal chain.
-5. Adjust the last phrase to end on a strong visual/motion word.
-6. Leave everything else UNTOUCHED.
+### Modification 3: STRONG VISUAL ENDING
+- Ensure the last phrase is a concrete, vivid visual detail (light, motion, or texture)
+- If the original already ends strongly, leave it unchanged
+- If it ends with a generic statement, replace only the final clause with a specific visual from the description
+- The ending should use words already present in the text or directly implied by it
+
+## STRICT PROHIBITIONS:
+
+1. Do NOT add objects, elements, or details not mentioned in the original
+2. Do NOT change descriptive adjectives (colors, materials, sizes) — copy them exactly
+3. Do NOT compress or shorten — output must be ≥90% of input word count
+4. Do NOT use the same template phrases across different prompts
+5. Do NOT add "text overlays", "watermarks", or meta-commentary
+6. Do NOT rewrite sentences that describe background/scene/lighting unless they are the ending
+7. Do NOT merge paragraphs or restructure the overall flow
 
 ## Examples:
 
-### Example 1 (whale in underwater city):
+### Example 1:
 INPUT: "The video depicts an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. A large whale swims gracefully through the center of the scene. Fish can be seen swimming around the whale, adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood."
-OUTPUT: "Giant whale swimming gracefully through an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. The whale initially enters from the left side of the frame, then glides steadily rightward through the center of the scene, its tail and fins moving in slow rhythmic undulation. Fish can be seen swimming around the whale, scattering as it passes and adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood, with the whale's massive form creating gentle currents in the dark blue water."
-WHY: Subject="whale" (it swims), not "cityscape" (static background). Sentences about buildings/water/lighting copied verbatim. Only the whale's motion sentence was expanded into a temporal chain.
 
-### Example 2 (paper airplanes in jungle — multi-paragraph):
-INPUT: "The video showcases a vibrant and lush jungle environment, with dense green foliage covering the ground and towering trees stretching towards the sky. The trees have a mix of thin and thick trunks, some with bark that appears weathered and rugged. The canopy overhead is thick with leaves, allowing only patches of sunlight to filter through and cast dappled shadows on the forest floor below.\n\nA variety of colorful paper airplanes, including shades of white, pink, purple, yellow, and green, are seen flying through the air. The planes vary in size and design, some appearing more complex than others. They gracefully glide and spin as they move across the frame, contrasting beautifully against the natural backdrop of the forest.\n\nThe scene is peaceful and serene, with the gentle rustling of leaves and the occasional chirping sounds of birds providing a soothing soundtrack to the visual display. The overall atmosphere is one of tranquility and harmony between nature and human creativity in a beautiful jungle setting."
-OUTPUT: "Colorful paper airplanes flying through a vibrant and lush jungle environment, with dense green foliage covering the ground and towering trees stretching towards the sky. The trees have a mix of thin and thick trunks, some with bark that appears weathered and rugged. The canopy overhead is thick with leaves, allowing only patches of sunlight to filter through and cast dappled shadows on the forest floor below.\n\nA variety of paper airplanes, including shades of white, pink, purple, yellow, and green, initially drift gently into the frame, then gradually accelerate as they glide and spin across the scene. The planes vary in size and design, some appearing more complex than others. They gracefully swoop and spiral as they move, some darting forward quickly while others flutter slowly downward, contrasting beautifully against the natural backdrop of the forest.\n\nThe scene is peaceful and serene, with the overall atmosphere one of tranquility and harmony between nature and human creativity, the camera panning left to right following the paper airplanes through the dappled jungle light."
-WHY: Subject="paper airplanes" (they fly), not "jungle environment" (static setting). The entire first paragraph about trees/canopy is copied word-for-word. Only the airplanes' motion in paragraph 2 gets temporal markers. Paragraph 3's meta-text trimmed, ended with "dappled jungle light".
+OUTPUT: "Large whale swimming gracefully through the center of an underwater cityscape, initially gliding from the left side of the frame then arcing slowly toward the right. Tall buildings with a modern architectural style emerge from the water, their glass facades and steel structures visible in the depths. The water is dark blue and rippled, creating a sense of depth and movement. Fish can be seen swimming around the whale, adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood, with faint light filtering down through the dark blue ripples."
 
-### Example 3 (sailboats on coffee — multi-paragraph):
-INPUT: "The video captures a unique scene of two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed.\n\nThe coffee in the cup is dark, providing a stark contrast to the light-colored boats. The camera remains steady throughout the video, providing a clear and unobstructed view of the boats and the coffee. There are no other objects or distractions in the frame, keeping the focus solely on the boats and the coffee.\n\nOverall, the video is a creative and visually appealing representation of two sailboats on a cup of coffee, with the dark coffee serving as the 'sea' for the boats to sail on."
-OUTPUT: "Two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed.\n\nAs the scene progresses, the two boats initially remain still, then begin to drift slowly around the cup of coffee. The larger boat moves clockwise while the smaller one moves counterclockwise, creating a sense of dynamic movement within the still setting. The contrast between the dark coffee and the light wooden boats creates a striking visual effect. The camera remains steady throughout, allowing viewers to fully absorb the intricate details of the boats as they navigate through the dark coffee surface in gentle circular motion."
-WHY: Subject="Two small sailboats" (they float/drift). Deleted "The video captures a unique scene of" and "Overall..." meta-text. Added temporal chain for the boats' motion. Ended with "gentle circular motion". Visual details (dark brown hulls, white sail, black symbol) all preserved verbatim.
+### Example 2:
+INPUT: "The video shows a white SUV driving on a dirt road that winds through mountains. The landscape is bathed in sunlight with rugged terrain and trees lining the path. The camera pans across the landscape capturing the vastness of the mountains. The dense vegetation adds depth with trees and bushes on both sides. The SUV moves at a steady pace creating a sense of progression within the stillness of nature."
 
-### Example 4 (SUV on mountain road — multi-paragraph):
-INPUT: "The video depicts a scenic mountainous landscape bathed in sunlight, highlighting the rugged terrain and the trees that line the path. A white SUV is seen driving on a dirt road that winds through the mountains. The camera pans across the landscape, capturing the vastness of the mountains and the winding road that snakes through them. The dense vegetation adds depth to the image, with trees and bushes lining both sides of the road.\n\nThe SUV's tire tracks are visible on the road, and its headlights illuminate the path ahead. The vehicle moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature.\n\nThe combination of the rugged landscape, the winding dirt road, and the white SUV on the move creates a dynamic visual experience."
-OUTPUT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight, highlighting the rugged terrain and the trees that line the path. The camera pans across the landscape, capturing the vastness of the mountains and the winding road that snakes through them. The dense vegetation adds depth to the image, with trees and bushes lining both sides of the road.\n\nThe SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves. The vehicle's tire tracks are visible on the road, and its headlights illuminate the path ahead. The SUV moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature.\n\nThe combination of the rugged landscape, the winding dirt road, and the white SUV on the move creates a dynamic visual experience with the dust trail billowing behind the vehicle."
-WHY: Subject="White SUV" (it drives), not "scenic mountainous landscape" (static). Landscape/vegetation sentences copied verbatim. SUV motion expanded with temporal chain. Ended with "dust trail billowing behind the vehicle".
+OUTPUT: "White SUV driving steadily along a dirt road that winds through mountains, initially appearing in the distance then growing larger as it progresses forward. The landscape is bathed in sunlight with rugged terrain and trees lining the path. The camera pans across the landscape capturing the vastness of the mountains. The dense vegetation adds depth with trees and bushes on both sides, with warm sunlight casting long shadows across the packed dirt surface."
 
-Output ONLY the restructured prompt. No explanations."""
+## Output ONLY the modified prompt. No explanations, no "WHY" section."""
 
 REFINE_SYSTEM = """You fix video generation prompts based on VLM feedback. You make SURGICAL fixes — change only what the VLM says is wrong, leave everything else VERBATIM.
 
 ## Your constraints:
-- You will receive: (1) the current prompt, (2) a VLM comparison between reference video and generated video.
+- You will receive: (1) the current prompt, (2) a VLM analysis of how the prompt differs from the actual video content.
 - Fix ONLY the top 1-2 differences the VLM identified. Do NOT touch anything else.
 - The current prompt already follows Subject-First Opening + Temporal Action Chain structure. PRESERVE this structure.
 
@@ -140,14 +140,44 @@ REFINE_SYSTEM = """You fix video generation prompts based on VLM feedback. You m
 
 CURRENT PROMPT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight. The SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves."
 
-VLM FEEDBACK: "In the reference video, the SUV moves from right to left, but in the generated video it moves left to right. Also the dust trail is barely visible in the reference."
+VLM FEEDBACK: "MOTION: The SUV actually moves from right to left in the video, not left to right. SUBJECT: The dust trail is barely visible, much less prominent than described."
 
 FIXED PROMPT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight. The SUV initially appears from the right side of the frame, then moves steadily leftward along the dirt road, with a faint trail of dust barely visible behind it."
 
-WHY: Changed "left→right" to "right→left" (direction fix), changed "growing trail of dust" to "faint trail of dust barely visible" (intensity fix). Everything else copied verbatim.
-
 ## Output ONLY the fixed prompt. No explanations. English only."""
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VLM 校验提示词（视频 vs 文字对比）
+# ─────────────────────────────────────────────────────────────────────────────
+
+VLM_VERIFY_PROMPT = """You are watching a video (shown as key frames) and reading a text prompt that is INTENDED to describe this video for regeneration.
+
+Your task: Compare the VIDEO CONTENT with the TEXT PROMPT and identify any INACCURACIES in the text.
+
+Analyze these 4 dimensions. For each, state whether the text accurately describes the video or not:
+
+1. SUBJECT: Does the text correctly identify the main subject? (species, color, size, count, appearance)
+2. MOTION: Does the text correctly describe motion direction, speed, and trajectory? (e.g., left-to-right vs right-to-left, fast vs slow)
+3. BACKGROUND: Does the text accurately describe the background elements, colors, and lighting?
+4. TIMING: Does the text correctly capture the sequence of events? (what happens first/then/finally)
+
+Format your response as:
+SUBJECT: [what's wrong, or "accurate"]
+MOTION: [what's wrong, or "accurate"]
+BACKGROUND: [what's wrong, or "accurate"]
+TIMING: [what's wrong, or "accurate"]
+
+IMPORTANT:
+- Only flag things that are clearly WRONG in the text vs what you see in the video.
+- If the text adds temporal words like "initially... then..." that are reasonable inferences, that's fine — don't flag those.
+- If a dimension is accurate or close enough, just write "accurate".
+- Focus on the 1-2 biggest factual errors that would cause a video model to generate something visually different from the original."""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 工具函数
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _compute_edit_ratio(text_a: str, text_b: str) -> float:
     """计算两段文本的 token-level 编辑距离比率 (0~1)。
@@ -187,37 +217,48 @@ def call_llm(prompt: str, system: str, model: str = "qwen-plus",
     return result
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 2: LLM 约束式改写
+# ─────────────────────────────────────────────────────────────────────────────
+
 def llm_rewrite(caption: str, model: str = "qwen-plus",
                 max_retries: int = 2) -> str:
-    """LLM 融合策略初始改写（带 length 验证 + diff check）"""
+    """LLM 约束式微调改写（带 length/diff 验证）"""
     word_count = len(caption.split())
     user_msg = (
-        f"Restructure this VLM caption ({word_count} words). "
-        f"First, identify what MOVES in this caption — that is your action subject. "
-        f"Then make ONLY 3 changes: "
-        f"(1) move the action subject to the first word (delete 'The video captures/shows...' if present), "
-        f"(2) find the 1-2 sentences about the subject's motion and add a temporal chain (initially/then/gradually), "
-        f"(3) end the last sentence with a key motion/visual word. "
-        f"Copy ALL other sentences VERBATIM — do not rephrase, compress, or merge paragraphs. "
-        f"Delete only meta-text like 'In summary/Overall/This perspective allows...'. "
-        f"Output must be ~{word_count} words (±15%). Do NOT compress.\n\n"
+        f"Optimize this VLM caption ({word_count} words) for Wan2.1 T2V generation. "
+        f"Make exactly 3 surgical modifications:\n\n"
+        f"1. SUBJECT-FIRST: Move the main subject to be the first words "
+        f"(delete 'The video shows...' preamble)\n"
+        f"2. TEMPORAL CHAIN: Add 'initially... then...' to the primary motion description "
+        f"(1-2 sentences only)\n"
+        f"3. STRONG ENDING: Ensure the final phrase is a vivid visual detail "
+        f"(reuse words from the text)\n\n"
+        f"COPY all other sentences VERBATIM. Do NOT add new objects or details. "
+        f"Output ≥90% of input length.\n\n"
         f"INPUT:\n{caption}\n\n"
         f"OUTPUT:"
     )
 
     for attempt in range(max_retries + 1):
-        # 首次用 0.5，重试时逐步降低 temperature 增加保守性
         temp = 0.5 if attempt == 0 else max(0.3, 0.5 - attempt * 0.1)
         result = call_llm(user_msg, REWRITE_SYSTEM, model, temperature=temp)
 
-        # ── 验证 1: 长度检查（不能压缩超过 30%）──
+        # ── 验证 1: 长度检查（≥70% 原文，≤150%）──
         result_words = len(result.split())
-        ratio = result_words / max(word_count, 1)
-        if ratio < 0.70:
-            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words}/{word_count} = {ratio:.0%}")
+        if result_words < int(word_count * 0.70):
+            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words} 词 (最低 {int(word_count * 0.70)})")
+            continue
+        if result_words > int(word_count * 1.50):
+            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} 词 (最高 {int(word_count * 1.50)})")
             continue
 
-        # ── 验证 2: diff check（编辑距离不能超过 50%）──
+        # ── 验证 2: 不能以 preamble 开头 ──
+        if result.lower().startswith(("the video", "this video", "in this video")):
+            logger.warning(f"  [重试 {attempt+1}] 仍以 preamble 开头")
+            continue
+
+        # ── 验证 3: diff check（≤50%）──
         edit_ratio = _compute_edit_ratio(caption, result)
         if edit_ratio > 0.50:
             logger.warning(f"  [重试 {attempt+1}] 改动过大: edit_ratio={edit_ratio:.0%}")
@@ -230,11 +271,78 @@ def llm_rewrite(caption: str, model: str = "qwen-plus",
     return result
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 3: VLM 校验（原始视频 vs 改写后文字）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def vlm_verify_prompt(video_path: str, rewritten_prompt: str, vlm_client) -> str:
+    """VLM 看原始视频，对比改写后的 prompt 文字，输出不一致之处。
+    
+    这是核心创新：不需要生成视频就能发现 prompt 偏差。
+    VLM 读视频内容 + 读文字 prompt，判断文字是否准确描述了视频。
+    """
+    try:
+        num_frames = 16 if getattr(vlm_client, 'use_video_mode', True) else 8
+        frames_pil = vlm_client._extract_frames_pil(video_path, num_frames=num_frames)
+        if not frames_pil:
+            return "accurate"  # 无法提取帧，跳过校验
+
+        # 构建 message：视频帧 + 文字 prompt + 验证指令
+        content_list = []
+        for img in frames_pil:
+            content_list.append({"type": "image", "image": img})
+
+        verify_instruction = (
+            f"{VLM_VERIFY_PROMPT}\n\n"
+            f"## The text prompt to verify:\n"
+            f'"{rewritten_prompt}"'
+        )
+        content_list.append({"type": "text", "text": verify_instruction})
+
+        messages = [
+            {"role": "user", "content": content_list},
+        ]
+
+        response_text = vlm_client._generate(messages)
+        if response_text and len(response_text.strip()) > 10:
+            return response_text.strip()
+
+    except Exception as e:
+        logger.warning(f"  VLM 校验失败: {e}")
+
+    return "accurate"
+
+
+def has_real_issues(vlm_feedback: str) -> bool:
+    """判断 VLM 反馈是否包含实质性问题（非全部 accurate）"""
+    if not vlm_feedback or vlm_feedback == "accurate":
+        return False
+    lines = vlm_feedback.lower().split("\n")
+    for line in lines:
+        # 跳过空行和只有标签的行
+        line = line.strip()
+        if not line:
+            continue
+        # 如果某一行不包含 "accurate" 且包含冒号（说明是有实质内容的维度）
+        if ":" in line and "accurate" not in line.split(":", 1)[1]:
+            return True
+    return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Step 4: LLM 修复
+# ─────────────────────────────────────────────────────────────────────────────
+
 def llm_refine(current_prompt: str, vlm_feedback: str, model: str = "qwen-plus",
                max_retries: int = 2) -> str:
     """LLM 根据 VLM 反馈修复（带 length 验证 + diff check）"""
     word_count = len(current_prompt.split())
-    user_msg = f"## Current Prompt:\n{current_prompt}\n\n## VLM Feedback:\n{vlm_feedback}\n\nFix the prompt. Output ONLY the fixed prompt:"
+    user_msg = (
+        f"## Current Prompt:\n{current_prompt}\n\n"
+        f"## VLM Feedback (what's wrong with the prompt vs actual video):\n"
+        f"{vlm_feedback}\n\n"
+        f"Fix the prompt based on the VLM feedback. Output ONLY the fixed prompt:"
+    )
 
     for attempt in range(max_retries + 1):
         temp = 0.4 if attempt == 0 else max(0.2, 0.4 - attempt * 0.1)
@@ -260,7 +368,7 @@ def llm_refine(current_prompt: str, vlm_feedback: str, model: str = "qwen-plus",
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 调用 run.py 生成视频
+# Step 5: 调用 run.py 生成视频
 # ─────────────────────────────────────────────────────────────────────────────
 
 def generate_videos(data_dir: str, caption_dir: str, output_dir: str,
@@ -289,7 +397,7 @@ def generate_videos(data_dir: str, caption_dir: str, output_dir: str,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 调用评测脚本
+# Step 6: 调用评测脚本
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_eval(orig_dir: str, gen_dir: str, caption_dir: str,
@@ -317,88 +425,7 @@ def run_eval(orig_dir: str, gen_dir: str, caption_dir: str,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# VLM 对比（结构化对比 prompt）
-# ─────────────────────────────────────────────────────────────────────────────
-
-VLM_COMPARE_PROMPT = """You are comparing two videos shown as key frames. The TOP half is the REFERENCE (ground truth), the BOTTOM half is the GENERATED video.
-
-Analyze the differences in these 4 dimensions ONLY. Be specific and concise:
-
-1. SUBJECT: What is the main moving entity? Is it the same in both? (species, color, size, count)
-2. MOTION: Is the motion direction, speed, and trajectory the same? (left→right vs right→left, fast vs slow, straight vs curved)
-3. BACKGROUND: Are the background elements, colors, and lighting consistent?
-4. TIMING: Does the action sequence match? (what happens first/then/finally)
-
-Format your response as:
-SUBJECT: [differences or "matches"]
-MOTION: [differences or "matches"]
-BACKGROUND: [differences or "matches"]
-TIMING: [differences or "matches"]
-
-If a dimension matches perfectly, just write "matches". Focus on the 1-2 biggest differences that would matter most for prompt correction."""
-
-
-def vlm_compare(ref_video: str, gen_video: str, vlm_client) -> str:
-    """VLM 对比两个视频，返回结构化差异分析"""
-    from src.video_utils import load_video, save_video_tensor, create_vertical_composite
-
-    # 加载并拼接（CPU 上操作）
-    ref = load_video(ref_video, num_frames=81, height=480, width=832, device="cpu")
-    gen = load_video(gen_video, num_frames=81, height=480, width=832, device="cpu")
-    composite = create_vertical_composite([ref, gen])
-    composite_path = "/tmp/hybrid_iter_composite.mp4"
-    save_video_tensor(composite, composite_path, fps=15)
-    del ref, gen, composite
-
-    try:
-        # 直接用 VLM 的底层接口，传自定义结构化 prompt
-        num_frames = 16 if getattr(vlm_client, 'use_video_mode', True) else 8
-        frames_pil = vlm_client._extract_frames_pil(composite_path, num_frames=num_frames)
-        if not frames_pil:
-            return "Unable to extract frames for comparison."
-
-        content_list = []
-        for img in frames_pil:
-            content_list.append({"type": "image", "image": img})
-        content_list.append({"type": "text", "text": VLM_COMPARE_PROMPT})
-
-        messages = [
-            {"role": "user", "content": content_list},
-        ]
-
-        response_text = vlm_client._generate(messages)
-        if response_text and len(response_text.strip()) > 10:
-            return response_text.strip()
-
-    except Exception as e:
-        logger.warning(f"  VLM structured compare failed: {e}, falling back to analyze_and_refine")
-        # Fallback: 用原来的通用接口
-        try:
-            result = vlm_client.analyze_and_refine(
-                composite_video_path=composite_path,
-                current_prompt="[Comparing reference vs generated]",
-                iteration=1,
-                i_max=1,
-            )
-            analysis = result.get("analysis", {})
-            comparison = analysis.get("comparison", "")
-            if comparison:
-                return comparison
-            parts = []
-            if analysis.get("reference_description"):
-                parts.append(f"Reference: {analysis['reference_description']}")
-            if analysis.get("new_generated_description"):
-                parts.append(f"Generated: {analysis['new_generated_description']}")
-            if parts:
-                return "\n".join(parts)
-        except Exception as e2:
-            logger.warning(f"  VLM fallback also failed: {e2}")
-
-    return "Unable to analyze differences."
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 主流程
+# 辅助
 # ─────────────────────────────────────────────────────────────────────────────
 
 def make_flat_dir(output_dir: str, sample_ids: list) -> str:
@@ -415,8 +442,12 @@ def make_flat_dir(output_dir: str, sample_ids: list) -> str:
     return str(flat_dir)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 主流程
+# ─────────────────────────────────────────────────────────────────────────────
+
 def main():
-    p = argparse.ArgumentParser(description="Hybrid Iterative Pipeline 一体化脚本")
+    p = argparse.ArgumentParser(description="Hybrid Pipeline — 单轮改写+校验流程")
 
     # I/O
     p.add_argument("--data_dir", type=str, required=True,
@@ -428,9 +459,6 @@ def main():
     p.add_argument("--sample_ids", type=int, nargs="+", required=True,
                    help="样本 ID 列表")
 
-    # 迭代
-    p.add_argument("--iter", type=int, default=3, help="迭代轮数")
-
     # 生成参数（与 baseline 保持一致）
     p.add_argument("--steps", type=int, default=30)
     p.add_argument("--guidance", type=float, default=5.0)
@@ -439,14 +467,14 @@ def main():
     # LLM
     p.add_argument("--llm_model", type=str, default="qwen-plus")
 
-    # VLM（用于迭代对比）
+    # VLM（用于 prompt 校验）
     p.add_argument("--vlm_provider", type=str, default="local")
     p.add_argument("--vlm_path", type=str, default="/root/models/Qwen2.5-VL-7B-Instruct")
 
     # 控制
     p.add_argument("--resume", action="store_true")
     p.add_argument("--skip_vlm", action="store_true",
-                   help="跳过 VLM 对比（仅用 LLM 自主迭代改写，用于快速测试）")
+                   help="跳过 VLM 校验（仅 LLM 改写后直接生成，用于快速测试）")
 
     args = p.parse_args()
 
@@ -465,156 +493,166 @@ def main():
         logger.info(f"Baseline 指标: CLIP={baseline_metrics.get('orig_gen_clip_mean', 'N/A'):.4f}, "
                     f"XCLIP={baseline_metrics.get('orig_gen_xclip_mean', 'N/A'):.4f}")
 
-    # ── Step 1: 读取 baseline VLM caption + LLM 初始改写 ──
+    # ══════════════════════════════════════════════════════════════════════════
+    # Step 1: 读取 baseline VLM caption
+    # ══════════════════════════════════════════════════════════════════════════
     logger.info("=" * 60)
-    logger.info("Step 1: 读取 baseline caption → LLM 融合策略改写")
+    logger.info("Step 1: 读取 baseline VLM caption")
     logger.info("=" * 60)
 
-    caption_dir_iter0 = out_dir / "captions_iter0"
-    caption_dir_iter0.mkdir(exist_ok=True)
-
+    captions = {}  # sid -> vlm_caption
     for sid in args.sample_ids:
-        out_file = caption_dir_iter0 / f"{sid}.txt"
-        if args.resume and out_file.exists():
-            continue
-
-        # 读 baseline 的 VLM caption
         cap_file = Path(args.baseline_dir) / f"sample_{sid}" / "vlm_caption.txt"
         if not cap_file.exists():
             logger.error(f"  找不到 baseline caption: {cap_file}")
             continue
-        vlm_caption = cap_file.read_text(encoding="utf-8").strip()
+        captions[sid] = cap_file.read_text(encoding="utf-8").strip()
+        logger.info(f"  [{sid}] 读取 caption: {captions[sid][:50]}...")
 
-        # LLM 改写
-        hybrid_prompt = llm_rewrite(vlm_caption, args.llm_model)
-        out_file.write_text(hybrid_prompt, encoding="utf-8")
-        logger.info(f"  [{sid}] {vlm_caption[:40]}... → {hybrid_prompt[:40]}...")
+    if not captions:
+        logger.error("没有找到任何 baseline caption，退出")
+        sys.exit(1)
 
-    # ── Step 2-N: 迭代循环 ──
-    all_iter_metrics = []
+    # ══════════════════════════════════════════════════════════════════════════
+    # Step 2: LLM 约束式改写
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("\n" + "=" * 60)
+    logger.info("Step 2: LLM 约束式改写（3 处手术修改）")
+    logger.info("=" * 60)
 
-    for iteration in range(1, args.iter + 1):
-        logger.info(f"\n{'=' * 60}")
-        logger.info(f"Iteration {iteration}/{args.iter}")
-        logger.info(f"{'=' * 60}")
+    rewrite_dir = out_dir / "captions_rewritten"
+    rewrite_dir.mkdir(exist_ok=True)
 
-        # 当前轮的 caption 目录
-        if iteration == 1:
-            current_caption_dir = str(caption_dir_iter0)
-        else:
-            current_caption_dir = str(out_dir / f"captions_iter{iteration - 1}")
+    rewritten = {}  # sid -> rewritten_prompt
+    for sid, caption in captions.items():
+        out_file = rewrite_dir / f"{sid}.txt"
+        if args.resume and out_file.exists():
+            rewritten[sid] = out_file.read_text(encoding="utf-8").strip()
+            logger.info(f"  [{sid}] (resume) {rewritten[sid][:50]}...")
+            continue
 
-        # 当前轮的输出目录
-        iter_output_dir = str(out_dir / f"gen_iter{iteration}")
+        result = llm_rewrite(caption, args.llm_model)
+        rewritten[sid] = result
+        out_file.write_text(result, encoding="utf-8")
+        logger.info(f"  [{sid}] 改写完成: {result[:50]}...")
 
-        # ── 生成视频 ──
-        logger.info(f"  [生成] 使用 caption: {current_caption_dir}")
-        generate_videos(
-            data_dir=args.data_dir,
-            caption_dir=current_caption_dir,
-            output_dir=iter_output_dir,
-            sample_ids=args.sample_ids,
-            args=args,
-        )
+    # ══════════════════════════════════════════════════════════════════════════
+    # Step 3: VLM 校验（原始视频 vs 改写文字）
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("\n" + "=" * 60)
+    logger.info("Step 3: VLM 校验（原始视频 vs 改写后文字）")
+    logger.info("=" * 60)
 
-        # ── 创建 flat 目录 ──
-        flat_dir = make_flat_dir(iter_output_dir, args.sample_ids)
+    final_dir = out_dir / "captions_final"
+    final_dir.mkdir(exist_ok=True)
 
-        # ── 评测 ──
-        eval_output = str(out_dir / f"eval_iter{iteration}")
-        metrics = run_eval(
-            orig_dir=args.data_dir,
-            gen_dir=flat_dir,
-            caption_dir=current_caption_dir,
-            output_dir=eval_output,
-        )
-
-        clip_score = metrics.get("orig_gen_clip_mean", 0)
-        xclip_score = metrics.get("orig_gen_xclip_mean", 0)
-        logger.info(f"  [评测] Iter {iteration}: CLIP={clip_score:.4f}, XCLIP={xclip_score:.4f}")
-
-        all_iter_metrics.append({
-            "iteration": iteration,
-            "orig_gen_clip": clip_score,
-            "orig_gen_xclip": xclip_score,
-            "caption_dir": current_caption_dir,
-            "gen_dir": iter_output_dir,
+    if args.skip_vlm:
+        logger.info("  --skip_vlm: 跳过 VLM 校验，直接使用改写结果")
+        for sid, prompt in rewritten.items():
+            (final_dir / f"{sid}.txt").write_text(prompt, encoding="utf-8")
+    else:
+        from src.vlm_client import create_vlm_client
+        vlm_client = create_vlm_client({
+            "provider": args.vlm_provider,
+            "model_path": args.vlm_path,
+            "temperature": 0.7,
+            "max_tokens": 2048,
+            "max_retries": 3,
+            "use_video_mode": True,
+            "lazy_load": True,
         })
 
-        # ── VLM 对比 + LLM 修复（非最后一轮）──
-        if iteration < args.iter:
-            next_caption_dir = out_dir / f"captions_iter{iteration}"
-            next_caption_dir.mkdir(exist_ok=True)
+        vlm_feedback_dir = out_dir / "vlm_feedback"
+        vlm_feedback_dir.mkdir(exist_ok=True)
 
-            if args.skip_vlm:
-                # 跳过 VLM，直接用 LLM 自主改写（基于上一轮 prompt 微调）
-                logger.info(f"  [LLM] 自主迭代改写（无 VLM 反馈）...")
-                for sid in args.sample_ids:
-                    cur_prompt = Path(current_caption_dir, f"{sid}.txt").read_text(encoding="utf-8").strip()
-                    refined = llm_refine(cur_prompt, "Try to improve motion description and subject clarity.", args.llm_model)
-                    (next_caption_dir / f"{sid}.txt").write_text(refined, encoding="utf-8")
+        for sid, prompt in rewritten.items():
+            video_path = str(Path(args.data_dir) / f"{sid}.mp4")
+            if not Path(video_path).exists():
+                logger.warning(f"  [{sid}] 原始视频不存在: {video_path}，跳过校验")
+                (final_dir / f"{sid}.txt").write_text(prompt, encoding="utf-8")
+                continue
+
+            # VLM 校验：看原始视频 + 读改写后文字
+            logger.info(f"  [{sid}] VLM 校验中...")
+            feedback = vlm_verify_prompt(video_path, prompt, vlm_client)
+            (vlm_feedback_dir / f"{sid}.txt").write_text(feedback, encoding="utf-8")
+            logger.info(f"  [{sid}] VLM 反馈: {feedback[:80]}...")
+
+            # ── Step 4: 如果有实质问题，LLM 修复 ──
+            if has_real_issues(feedback):
+                logger.info(f"  [{sid}] 发现偏差，LLM 修复中...")
+                refined = llm_refine(prompt, feedback, args.llm_model)
+                (final_dir / f"{sid}.txt").write_text(refined, encoding="utf-8")
+                logger.info(f"  [{sid}] 修复后: {refined[:50]}...")
             else:
-                # VLM 对比 + LLM 修复
-                logger.info(f"  [VLM+LLM] 对比分析 + 修复改写...")
-                from src.vlm_client import create_vlm_client
-                vlm_client = create_vlm_client({
-                    "provider": args.vlm_provider,
-                    "model_path": args.vlm_path,
-                    "temperature": 0.7,
-                    "max_tokens": 2048,
-                    "max_retries": 3,
-                    "use_video_mode": True,
-                    "lazy_load": True,
-                })
+                logger.info(f"  [{sid}] VLM 校验通过，无需修复")
+                (final_dir / f"{sid}.txt").write_text(prompt, encoding="utf-8")
 
-                for sid in args.sample_ids:
-                    ref_video = str(Path(args.data_dir) / f"{sid}.mp4")
-                    gen_video = str(Path(iter_output_dir) / f"sample_{sid}" / f"{sid}.mp4")
-                    cur_prompt = Path(current_caption_dir, f"{sid}.txt").read_text(encoding="utf-8").strip()
+    # ══════════════════════════════════════════════════════════════════════════
+    # Step 5: 生成视频
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("\n" + "=" * 60)
+    logger.info("Step 5: 用 final prompt 生成视频")
+    logger.info("=" * 60)
 
-                    if not Path(gen_video).exists():
-                        logger.warning(f"  [{sid}] 生成视频不存在，跳过")
-                        (next_caption_dir / f"{sid}.txt").write_text(cur_prompt, encoding="utf-8")
-                        continue
+    gen_output_dir = str(out_dir / "generated")
+    generate_videos(
+        data_dir=args.data_dir,
+        caption_dir=str(final_dir),
+        output_dir=gen_output_dir,
+        sample_ids=list(rewritten.keys()),
+        args=args,
+    )
 
-                    # VLM 对比
-                    feedback = vlm_compare(ref_video, gen_video, vlm_client)
-                    logger.info(f"  [{sid}] VLM: {feedback[:60]}...")
+    # ══════════════════════════════════════════════════════════════════════════
+    # Step 6: 评测
+    # ══════════════════════════════════════════════════════════════════════════
+    logger.info("\n" + "=" * 60)
+    logger.info("Step 6: 评测 CLIP/XCLIP")
+    logger.info("=" * 60)
 
-                    # LLM 修复
-                    refined = llm_refine(cur_prompt, feedback, args.llm_model)
-                    (next_caption_dir / f"{sid}.txt").write_text(refined, encoding="utf-8")
-                    logger.info(f"  [{sid}] 修复: {refined[:50]}...")
+    flat_dir = make_flat_dir(gen_output_dir, list(rewritten.keys()))
+    eval_output = str(out_dir / "eval_results")
+    metrics = run_eval(
+        orig_dir=args.data_dir,
+        gen_dir=flat_dir,
+        caption_dir=str(final_dir),
+        output_dir=eval_output,
+    )
+
+    clip_score = metrics.get("orig_gen_clip_mean", 0)
+    xclip_score = metrics.get("orig_gen_xclip_mean", 0)
 
     # ── 汇总输出 ──
-    logger.info(f"\n{'=' * 60}")
-    logger.info("汇总: 各轮次指标 vs Baseline")
-    logger.info(f"{'=' * 60}")
+    logger.info("\n" + "=" * 60)
+    logger.info("汇总: Hybrid v5 vs Baseline")
+    logger.info("=" * 60)
 
     baseline_clip = baseline_metrics.get("orig_gen_clip_mean", 0)
     baseline_xclip = baseline_metrics.get("orig_gen_xclip_mean", 0)
 
-    print(f"\n{'─' * 70}")
-    print(f"{'Iter':<6} {'CLIP':>10} {'Δ CLIP':>10} {'XCLIP':>10} {'Δ XCLIP':>10}")
-    print(f"{'─' * 70}")
-    print(f"{'base':<6} {baseline_clip:>10.4f} {'—':>10} {baseline_xclip:>10.4f} {'—':>10}")
+    print(f"\n{'─' * 60}")
+    print(f"{'Method':<15} {'CLIP':>10} {'Δ CLIP':>10} {'XCLIP':>10} {'Δ XCLIP':>10}")
+    print(f"{'─' * 60}")
+    print(f"{'Baseline':<15} {baseline_clip:>10.4f} {'—':>10} {baseline_xclip:>10.4f} {'—':>10}")
 
-    for m in all_iter_metrics:
-        d_clip = m["orig_gen_clip"] - baseline_clip
-        d_xclip = m["orig_gen_xclip"] - baseline_xclip
-        print(f"{'iter' + str(m['iteration']):<6} {m['orig_gen_clip']:>10.4f} {d_clip:>+10.4f} "
-              f"{m['orig_gen_xclip']:>10.4f} {d_xclip:>+10.4f}")
-    print(f"{'─' * 70}\n")
+    d_clip = clip_score - baseline_clip
+    d_xclip = xclip_score - baseline_xclip
+    method_name = "Hybrid-v5" if not args.skip_vlm else "Hybrid-noVLM"
+    print(f"{method_name:<15} {clip_score:>10.4f} {d_clip:>+10.4f} {xclip_score:>10.4f} {d_xclip:>+10.4f}")
+    print(f"{'─' * 60}\n")
 
     # 保存汇总 JSON
     summary = {
         "baseline": {"orig_gen_clip": baseline_clip, "orig_gen_xclip": baseline_xclip},
-        "iterations": all_iter_metrics,
+        "hybrid_v5": {"orig_gen_clip": clip_score, "orig_gen_xclip": xclip_score},
+        "delta": {"clip": d_clip, "xclip": d_xclip},
         "config": {
-            "iter": args.iter,
+            "strategy": "v5_constrained_single_pass",
+            "vlm_verify": not args.skip_vlm,
             "llm_model": args.llm_model,
             "vlm_provider": args.vlm_provider if not args.skip_vlm else "skipped",
-            "sample_ids": args.sample_ids,
+            "sample_ids": list(rewritten.keys()),
             "steps": args.steps,
             "guidance": args.guidance,
             "seed": args.seed,
