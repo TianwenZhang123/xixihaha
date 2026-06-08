@@ -60,40 +60,72 @@ logger = logging.getLogger(__name__)
 # 融合策略 System Prompt
 # ─────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a video prompt optimization expert. Your task is to rewrite a text-to-video prompt following the "Hybrid Strategy" — a minimal-edit approach that combines positional optimization with temporal structuring.
+SYSTEM_PROMPT = """You restructure VLM video captions into better T2V generation prompts. Your output must be nearly identical to the input — you only make 3 surgical changes.
 
-## Three Principles (MUST follow all three):
+## CRITICAL: How to identify the ACTION SUBJECT
+The action subject is THE THING THAT MOVES OR ACTS in the video. Ask: "What is performing the main motion?"
+- If a whale swims through a cityscape → subject = "Giant whale", NOT "Underwater cityscape"
+- If paper airplanes fly through a jungle → subject = "Colorful paper airplanes", NOT "Vibrant jungle environment"
+- If a SUV drives on a road → subject = "White SUV", NOT "Scenic mountainous landscape"
+- If puppies waddle through snow → subject = "Two adorable golden retriever puppies", NOT "Serene snowy landscape"
+- If a cat walks through a garden → subject = "Orange and white cat", NOT "Serene garden"
+- If a volcano erupts → subject = "Massive volcanic eruption", NOT "High vantage point"
+The subject is NEVER the background/environment/setting. It is always the moving entity.
 
-### Principle 1: Subject-First Opening
-- The FIRST word(s) of the rewritten prompt MUST be the concrete main subject noun(s).
-- Remove any preamble like "The video shows...", "This is a scene of...", "In this video..."
-- Example: "The video captures a white SUV driving..." → "White SUV driving on a dirt road..."
+## The 3 changes you make (NOTHING ELSE):
 
-### Principle 2: Inject Temporal Action Chain
-- Add temporal progression markers: "initially...", "then...", "as the scene progresses...", "gradually..."
-- Convert static descriptions into dynamic sequences that describe HOW motion unfolds over time.
-- This helps the video model understand the temporal structure of the scene.
-- Example: "A dog is running on the beach" → "Golden retriever initially trots along the shoreline, then accelerates into a full sprint, kicking up wet sand with each stride"
+1. OPENING — Move the action subject to the very first words. Delete "The video shows/captures/depicts/showcases..." and start with the subject noun phrase.
 
-### Principle 3: Preserve Original Visual Vocabulary
-- DO NOT replace specific visual descriptors from the original (colors, materials, textures, lighting terms, spatial relationships).
-- Keep the original's precise nouns and adjectives for visual elements.
-- Only restructure sentence order and add temporal connectors.
-- If the original says "dark brown hulls" or "dappled sunlight", keep those exact phrases.
+2. ACTION — Find the 1-2 sentences where the subject's motion is described. Convert static verbs to a temporal chain using "initially/then/gradually". Add motion direction if implied but not stated. Do NOT touch any other sentences.
 
-## Constraints:
-- Output ONLY the rewritten prompt, no explanations or metadata.
-- Keep word count within ±20% of the original (do not drastically shorten or lengthen).
-- Modification ratio should be under 50% — this is a REFINEMENT, not a rewrite from scratch.
-- Write in English.
-- Do NOT add information that isn't implied by the original description.
-- Maintain the same level of detail as the original."""
+3. ENDING — Make the final phrase end with a vivid motion or visual keyword (e.g., "gentle circular motion", "dust trail billowing behind", "dappled jungle light").
 
-USER_TEMPLATE = """Original prompt ({word_count} words):
+## What you must NOT do:
 
+- Do NOT compress or summarize. If the input is 150 words, output ~150 words.
+- Do NOT rephrase visual descriptions. Copy them VERBATIM: "dark brown hulls" stays "dark brown hulls", "glass facades and steel structures" stays "glass facades and steel structures".
+- Do NOT merge paragraphs. If input has 3 paragraphs, output has ~3 paragraphs.
+- Do NOT add information the original doesn't mention or imply.
+- Do NOT add temporal markers to background/lighting/atmosphere sentences.
+
+## Process:
+1. Read the input. Identify the action subject (what moves?).
+2. Copy the ENTIRE input text.
+3. Move the subject to position 0 (delete framework phrase if needed).
+4. Find the 1-2 motion sentences → insert temporal chain.
+5. Adjust the last phrase to end on a strong visual/motion word.
+6. Leave everything else UNTOUCHED.
+
+## Examples:
+
+### Example 1 (whale in underwater city):
+INPUT: "The video depicts an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. A large whale swims gracefully through the center of the scene. Fish can be seen swimming around the whale, adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood."
+OUTPUT: "Giant whale swimming gracefully through an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. The whale initially enters from the left side of the frame, then glides steadily rightward through the center of the scene, its tail and fins moving in slow rhythmic undulation. Fish can be seen swimming around the whale, scattering as it passes and adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood, with the whale's massive form creating gentle currents in the dark blue water."
+WHY: Subject="whale" (it swims), not "cityscape" (static background). Sentences about buildings/water/lighting copied verbatim. Only the whale's motion sentence was expanded into a temporal chain.
+
+### Example 2 (paper airplanes in jungle — multi-paragraph):
+INPUT: "The video showcases a vibrant and lush jungle environment, with dense green foliage covering the ground and towering trees stretching towards the sky. The trees have a mix of thin and thick trunks, some with bark that appears weathered and rugged. The canopy overhead is thick with leaves, allowing only patches of sunlight to filter through and cast dappled shadows on the forest floor below.\\n\\nA variety of colorful paper airplanes, including shades of white, pink, purple, yellow, and green, are seen flying through the air. The planes vary in size and design, some appearing more complex than others. They gracefully glide and spin as they move across the frame, contrasting beautifully against the natural backdrop of the forest.\\n\\nThe scene is peaceful and serene, with the gentle rustling of leaves and the occasional chirping sounds of birds providing a soothing soundtrack to the visual display. The overall atmosphere is one of tranquility and harmony between nature and human creativity in a beautiful jungle setting."
+OUTPUT: "Colorful paper airplanes flying through a vibrant and lush jungle environment, with dense green foliage covering the ground and towering trees stretching towards the sky. The trees have a mix of thin and thick trunks, some with bark that appears weathered and rugged. The canopy overhead is thick with leaves, allowing only patches of sunlight to filter through and cast dappled shadows on the forest floor below.\\n\\nA variety of paper airplanes, including shades of white, pink, purple, yellow, and green, initially drift gently into the frame, then gradually accelerate as they glide and spin across the scene. The planes vary in size and design, some appearing more complex than others. They gracefully swoop and spiral as they move, some darting forward quickly while others flutter slowly downward, contrasting beautifully against the natural backdrop of the forest.\\n\\nThe scene is peaceful and serene, with the overall atmosphere one of tranquility and harmony between nature and human creativity, the camera panning left to right following the paper airplanes through the dappled jungle light."
+WHY: Subject="paper airplanes" (they fly), not "jungle environment" (static setting). The entire first paragraph about trees/canopy is copied word-for-word. Only the airplanes' motion in paragraph 2 gets temporal markers. Paragraph 3's meta-text trimmed, ended with "dappled jungle light".
+
+### Example 3 (sailboats on coffee — multi-paragraph):
+INPUT: "The video captures a unique scene of two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed.\\n\\nThe coffee in the cup is dark, providing a stark contrast to the light-colored boats. The camera remains steady throughout the video, providing a clear and unobstructed view of the boats and the coffee. There are no other objects or distractions in the frame, keeping the focus solely on the boats and the coffee.\\n\\nOverall, the video is a creative and visually appealing representation of two sailboats on a cup of coffee, with the dark coffee serving as the 'sea' for the boats to sail on."
+OUTPUT: "Two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed.\\n\\nAs the scene progresses, the two boats initially remain still, then begin to drift slowly around the cup of coffee. The larger boat moves clockwise while the smaller one moves counterclockwise, creating a sense of dynamic movement within the still setting. The contrast between the dark coffee and the light wooden boats creates a striking visual effect. The camera remains steady throughout, allowing viewers to fully absorb the intricate details of the boats as they navigate through the dark coffee surface in gentle circular motion."
+WHY: Subject="Two small sailboats" (they float/drift). Deleted "The video captures a unique scene of" and "Overall..." meta-text. Added temporal chain for the boats' motion. Ended with "gentle circular motion". Visual details (dark brown hulls, white sail, black symbol) all preserved verbatim.
+
+### Example 4 (SUV on mountain road — multi-paragraph):
+INPUT: "The video depicts a scenic mountainous landscape bathed in sunlight, highlighting the rugged terrain and the trees that line the path. A white SUV is seen driving on a dirt road that winds through the mountains. The camera pans across the landscape, capturing the vastness of the mountains and the winding road that snakes through them. The dense vegetation adds depth to the image, with trees and bushes lining both sides of the road.\\n\\nThe SUV's tire tracks are visible on the road, and its headlights illuminate the path ahead. The vehicle moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature.\\n\\nThe combination of the rugged landscape, the winding dirt road, and the white SUV on the move creates a dynamic visual experience."
+OUTPUT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight, highlighting the rugged terrain and the trees that line the path. The camera pans across the landscape, capturing the vastness of the mountains and the winding road that snakes through them. The dense vegetation adds depth to the image, with trees and bushes lining both sides of the road.\\n\\nThe SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves. The vehicle's tire tracks are visible on the road, and its headlights illuminate the path ahead. The SUV moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature.\\n\\nThe combination of the rugged landscape, the winding dirt road, and the white SUV on the move creates a dynamic visual experience with the dust trail billowing behind the vehicle."
+WHY: Subject="White SUV" (it drives), not "scenic mountainous landscape" (static). Landscape/vegetation sentences copied verbatim. SUV motion expanded with temporal chain. Ended with "dust trail billowing behind the vehicle".
+
+Output ONLY the restructured prompt. No explanations."""
+
+USER_TEMPLATE = """Restructure this VLM caption ({word_count} words). First, identify what MOVES in this caption — that is your action subject. Then make ONLY 3 changes: (1) move the action subject to the first word (delete 'The video captures/shows/depicts/features...' if present), (2) find the 1-2 sentences about the subject's motion and add a temporal chain (initially/then/gradually), (3) end the last sentence with a key motion/visual word. Copy ALL other sentences VERBATIM — do not rephrase, compress, or merge paragraphs. Delete only meta-text like 'In summary/Overall/This perspective allows...'. Output must be ~{word_count} words (±15%). Do NOT compress.
+
+INPUT:
 {original_caption}
 
-Rewrite this prompt following the Hybrid Strategy (subject-first, temporal action chain, preserve visual words). Output ONLY the rewritten prompt:"""
+OUTPUT:"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 负面 Prompt 生成 System Prompt
@@ -181,29 +213,63 @@ def call_openai_compatible(prompt: str, system: str, model: str,
 # 主逻辑
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _compute_edit_ratio(text_a: str, text_b: str) -> float:
+    """计算两段文本的 token-level 编辑距离比率 (0~1)。
+    使用 SequenceMatcher 的 ratio 取反：1 - similarity = edit_ratio。
+    """
+    from difflib import SequenceMatcher
+    tokens_a = text_a.split()
+    tokens_b = text_b.split()
+    similarity = SequenceMatcher(None, tokens_a, tokens_b).ratio()
+    return 1.0 - similarity
+
+
 def rewrite_caption(original: str, backend: str, model: str,
                     api_base: str = "", api_key: str = "",
-                    temperature: float = 0.7) -> str:
-    """对单个 caption 执行融合策略改写"""
+                    temperature: float = 0.5, max_retries: int = 2) -> str:
+    """对单个 caption 执行融合策略改写（带 length 验证 + diff check）"""
     word_count = len(original.split())
     user_msg = USER_TEMPLATE.format(
         word_count=word_count,
         original_caption=original,
     )
 
-    if backend == "dashscope":
-        result = call_dashscope(user_msg, SYSTEM_PROMPT, model, api_key, temperature)
-    elif backend == "openai":
-        result = call_openai_compatible(user_msg, SYSTEM_PROMPT, model, api_base, api_key, temperature)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
+    result = None
+    for attempt in range(max_retries + 1):
+        # 首次用指定温度，重试时逐步降低增加保守性
+        temp = temperature if attempt == 0 else max(0.3, temperature - attempt * 0.1)
 
-    # 清理可能的引号包裹
-    if result.startswith('"') and result.endswith('"'):
-        result = result[1:-1]
-    if result.startswith("'") and result.endswith("'"):
-        result = result[1:-1]
+        if backend == "dashscope":
+            result = call_dashscope(user_msg, SYSTEM_PROMPT, model, api_key, temp)
+        elif backend == "openai":
+            result = call_openai_compatible(user_msg, SYSTEM_PROMPT, model, api_base, api_key, temp)
+        else:
+            raise ValueError(f"Unknown backend: {backend}")
 
+        # 清理可能的引号包裹
+        if result.startswith('"') and result.endswith('"'):
+            result = result[1:-1]
+        if result.startswith("'") and result.endswith("'"):
+            result = result[1:-1]
+
+        # ── 验证 1: 长度检查（不能压缩超过 30%）──
+        result_words = len(result.split())
+        ratio = result_words / max(word_count, 1)
+        if ratio < 0.70:
+            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words}/{word_count} = {ratio:.0%}")
+            continue
+
+        # ── 验证 2: diff check（编辑距离不能超过 50%）──
+        edit_ratio = _compute_edit_ratio(original, result)
+        if edit_ratio > 0.50:
+            logger.warning(f"  [重试 {attempt+1}] 改动过大: edit_ratio={edit_ratio:.0%}")
+            continue
+
+        # 通过所有验证
+        return result
+
+    # 所有重试都失败，返回最后一次结果
+    logger.warning(f"  所有重试均未通过验证，使用最后一次结果")
     return result
 
 
@@ -311,8 +377,8 @@ def main():
                         help="负面 prompt 输出目录 (默认: output-dir 同级的 _negative 后缀目录)")
 
     # 生成参数
-    parser.add_argument("--temperature", type=float, default=0.7,
-                        help="生成温度 (默认: 0.7)")
+    parser.add_argument("--temperature", type=float, default=0.5,
+                        help="生成温度 (默认: 0.5, V4 验证最佳值)")
     parser.add_argument("--max-retries", type=int, default=3,
                         help="单个样本最大重试次数 (默认: 3)")
     parser.add_argument("--delay", type=float, default=1.0,
