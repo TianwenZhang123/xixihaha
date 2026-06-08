@@ -429,12 +429,11 @@ def run_eval(orig_dir: str, gen_dir: str, caption_dir: str,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def make_flat_dir(output_dir: str, sample_ids: list) -> str:
-    """创建 flat 目录（软链接），供评测使用"""
-    flat_dir = Path(output_dir) / "flat"
+    """创建 flat 目录（软链接用绝对路径），供评测使用"""
+    flat_dir = Path(output_dir).resolve() / "flat"
     flat_dir.mkdir(parents=True, exist_ok=True)
     for sid in sample_ids:
-        sample_dir = Path(output_dir) / f"sample_{sid}"
-        src = sample_dir / f"{sid}.mp4"
+        src = (Path(output_dir).resolve() / f"sample_{sid}" / f"{sid}.mp4")
         dst = flat_dir / f"{sid}.mp4"
         if src.exists():
             dst.unlink(missing_ok=True)
@@ -597,10 +596,10 @@ def main():
     logger.info("Step 5: 用 final prompt 生成视频")
     logger.info("=" * 60)
 
-    gen_output_dir = str(out_dir / "generated")
+    gen_output_dir = str((out_dir / "generated").resolve())
     generate_videos(
-        data_dir=args.data_dir,
-        caption_dir=str(final_dir),
+        data_dir=str(Path(args.data_dir).resolve()),
+        caption_dir=str(final_dir.resolve()),
         output_dir=gen_output_dir,
         sample_ids=list(rewritten.keys()),
         args=args,
@@ -614,11 +613,11 @@ def main():
     logger.info("=" * 60)
 
     flat_dir = make_flat_dir(gen_output_dir, list(rewritten.keys()))
-    eval_output = str(out_dir / "eval_results")
+    eval_output = str((out_dir / "eval_results").resolve())
     metrics = run_eval(
-        orig_dir=args.data_dir,
+        orig_dir=str(Path(args.data_dir).resolve()),
         gen_dir=flat_dir,
-        caption_dir=str(final_dir),
+        caption_dir=str(final_dir.resolve()),
         output_dir=eval_output,
     )
 
