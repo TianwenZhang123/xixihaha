@@ -288,7 +288,7 @@ class PFlowPipeline:
                     negative_prompt=neg_prompt,
                 )
             elif delta_e is not None:
-                gen_video = self._generate_with_embedding_hook(
+                gen_video = self._generate_with_optimized_embeds(
                     current_prompt, latents, generator, delta_e, cfg.embed_strength,
                     negative_prompt=neg_prompt,
                 )
@@ -617,7 +617,7 @@ class PFlowPipeline:
         token_length = inputs.attention_mask.sum().item()
         return int(token_length)
 
-    def _generate_with_embedding_hook(
+    def _generate_with_optimized_embeds(
         self,
         prompt: str,
         latents: Optional[torch.Tensor],
@@ -627,66 +627,78 @@ class PFlowPipeline:
         negative_prompt: str = "",
     ) -> torch.Tensor:
         """
-        改动点: 通过 text encoder hook 注入 Δe 生成视频。
+        改动点: 预计算优化后的 prompt_embeds，直接传入 pipeline 生成视频。
 
-        保留 pipeline 的正常 prompt 处理路径 (CFG, negative prompt, attention masks)，
-        仅在 text encoder 输出上叠加一个微小的 Δe 扰动。
+        纯输入侧优化 — 不使用 hook，不修改推理逻辑。
+        在调用 pipe() 之前将 Δe 合并到 prompt embedding 中，
+        然后通过 prompt_embeds= 参数传给 WanPipeline.__call__()。
 
-        公式: e_final = e_original + strength * delta_e
-        strength ≈ 0.005 时 ||injection|| ≈ 0.18 vs ||e0|| ≈ 1448 (约0.01%扰动)
+        公式: prompt_embeds_optimized = e₀ + strength * Δe
+        strength ≈ 0.005 时 ||injection|| ≈ 0.18 vs ||e₀|| ≈ 1448 (约0.01%扰动)
         """
-        # Install hook on text encoder
-        text_encoder = self.pipe.text_encoder
-        hook_handle = None
-        hook_applied = [False]
+        cfg = self.config
 
-        def text_encoder_hook(module, input, output):
-            """Add delta_e to text encoder output (positive prompt only)."""
-            if hook_applied[0]:
-                return output  # Only apply once (positive prompt, not negative)
+        # ── Step 1: 编码原始 prompt → e₀ ──
+        e0 = self._encode_prompt(prompt)
 
-            if isinstance(output, tuple):
-                hidden_states = output[0]
-            elif hasattr(output, "last_hidden_state"):
-                hidden_states = output.last_hidden_state
-            else:
-                hidden_states = output
+        # ── Step 2: 预计算优化后的 embedding ──
+        de = delta_e.to(device=e0.device, dtype=e0.dtype)
+        # 对齐序列长度 (delta_e 可能与 e0 序列长度不同)
+        if de.shape[1] != e0.shape[1]:
+            min_len = min(de.shape[1], e0.shape[1])
+            de_aligned = torch.zeros_like(e0)
+            de_aligned[:, :min_len, :] = de[:, :min_len, :]
+            de = de_aligned
 
-            # Align delta_e shape with hidden_states
-            de = delta_e.to(device=hidden_states.device, dtype=hidden_states.dtype)
-            if de.shape[1] != hidden_states.shape[1]:
-                min_len = min(de.shape[1], hidden_states.shape[1])
-                de_aligned = torch.zeros_like(hidden_states)
-                de_aligned[:, :min_len, :] = de[:, :min_len, :]
-                de = de_aligned
+        prompt_embeds_optimized = e0 + strength * de
 
-            # Inject: hidden_states += strength * delta_e
-            hidden_states = hidden_states + strength * de
-            hook_applied[0] = True
-
-            if isinstance(output, tuple):
-                return (hidden_states,) + output[1:]
-            elif hasattr(output, "last_hidden_state"):
-                output.last_hidden_state = hidden_states
-                return output
-            else:
-                return hidden_states
-
-        # Register hook
-        hook_handle = text_encoder.register_forward_hook(text_encoder_hook)
-
-        try:
-            video = self._generate(prompt, latents, generator,
-                                   negative_prompt=negative_prompt)
-        finally:
-            if hook_handle is not None:
-                hook_handle.remove()
-
+        injection_norm = (strength * de).norm().item()
+        e0_norm = e0.norm().item()
         logger.info(
-            f"    [Velocity] Hook applied: {hook_applied[0]}, "
-            f"injection strength={strength:.6f}"
+            f"    [Velocity] Precomputed optimized embeds: "
+            f"||injection||={injection_norm:.4f}, ||e₀||={e0_norm:.1f}, "
+            f"ratio={injection_norm/max(e0_norm,1e-8)*100:.4f}%"
         )
-        return video
+
+        # ── Step 3: 编码 negative prompt ──
+        neg_text = negative_prompt or NEGATIVE_PROMPT
+        negative_prompt_embeds = self._encode_prompt(neg_text)
+
+        # ── Step 4: 调用 pipeline（纯输入侧，无 hook） ──
+        kwargs = {
+            "prompt_embeds": prompt_embeds_optimized,
+            "negative_prompt_embeds": negative_prompt_embeds,
+            "height": cfg.height,
+            "width": cfg.width,
+            "num_frames": cfg.num_frames,
+            "guidance_scale": cfg.guidance_scale,
+            "num_inference_steps": cfg.num_inference_steps,
+            "generator": generator,
+            "output_type": "pt",
+        }
+        if latents is not None:
+            kwargs["latents"] = latents
+
+        output = self.pipe(**kwargs)
+
+        # 处理输出格式 (与 _generate 一致)
+        if hasattr(output, "frames"):
+            video = output.frames
+            if isinstance(video, list):
+                import torchvision.transforms as T
+                frames = [T.ToTensor()(f) for f in video[0]]
+                video = torch.stack(frames, dim=1)
+            elif isinstance(video, torch.Tensor):
+                if video.dim() == 5:
+                    video = video[0]
+                    if video.shape[0] == cfg.num_frames:
+                        video = video.permute(1, 0, 2, 3)
+        else:
+            video = output[0]
+
+        if video.min() < 0:
+            video = denormalize_video(video)
+        return video.clamp(0, 1)
 
     def _setup_attn_injection(
         self, ref_video: torch.Tensor, caption: str,
@@ -850,16 +862,24 @@ class PFlowPipeline:
         injector = self._attn_injector
         num_steps = cfg.num_inference_steps
 
-        # If we also have delta_e, install the text encoder hook
-        text_encoder_hook_handle = None
-        if delta_e is not None:
-            text_encoder_hook_handle = self._install_embedding_hook(delta_e, embed_strength)
-
         # We need to manually run the denoising loop to insert injection hooks at each step.
         # Use the pipe's scheduler and transformer directly.
 
-        # --- Encode prompt ---
+        # --- Encode prompt (with optional Δe precomputed) ---
         prompt_embeds = self._encode_prompt(prompt)
+        if delta_e is not None:
+            # 纯输入侧: 预计算优化后的 prompt_embeds，无需 hook
+            de = delta_e.to(device=prompt_embeds.device, dtype=prompt_embeds.dtype)
+            if de.shape[1] != prompt_embeds.shape[1]:
+                min_len = min(de.shape[1], prompt_embeds.shape[1])
+                de_aligned = torch.zeros_like(prompt_embeds)
+                de_aligned[:, :min_len, :] = de[:, :min_len, :]
+                de = de_aligned
+            prompt_embeds = prompt_embeds + embed_strength * de
+            logger.info(
+                f"    [Velocity+AttnInject] Precomputed optimized embeds, "
+                f"strength={embed_strength:.6f}"
+            )
         neg_text = negative_prompt or NEGATIVE_PROMPT
         negative_prompt_embeds = self._encode_prompt(neg_text)
 
@@ -927,10 +947,6 @@ class PFlowPipeline:
             # Scheduler step
             latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-        # --- Remove embedding hook if installed ---
-        if text_encoder_hook_handle is not None:
-            text_encoder_hook_handle.remove()
-
         # --- Decode latents ---
         from .flow_matching import decode_latents_to_video
         video = decode_latents_to_video(self.pipe, latents.unsqueeze(0) if latents.dim() == 4 else latents, self.device)
@@ -942,43 +958,6 @@ class PFlowPipeline:
             video = denormalize_video(video)
         return video.clamp(0, 1)
 
-    def _install_embedding_hook(
-        self, delta_e: torch.Tensor, strength: float
-    ):
-        """Install text encoder hook for Δe injection (reusable helper)."""
-        text_encoder = self.pipe.text_encoder
-        hook_applied = [False]
-
-        def text_encoder_hook(module, input, output):
-            if hook_applied[0]:
-                return output
-            if isinstance(output, tuple):
-                hidden_states = output[0]
-            elif hasattr(output, "last_hidden_state"):
-                hidden_states = output.last_hidden_state
-            else:
-                hidden_states = output
-
-            de = delta_e.to(device=hidden_states.device, dtype=hidden_states.dtype)
-            if de.shape[1] != hidden_states.shape[1]:
-                min_len = min(de.shape[1], hidden_states.shape[1])
-                de_aligned = torch.zeros_like(hidden_states)
-                de_aligned[:, :min_len, :] = de[:, :min_len, :]
-                de = de_aligned
-
-            hidden_states = hidden_states + strength * de
-            hook_applied[0] = True
-
-            if isinstance(output, tuple):
-                return (hidden_states,) + output[1:]
-            elif hasattr(output, "last_hidden_state"):
-                output.last_hidden_state = hidden_states
-                return output
-            else:
-                return hidden_states
-
-        handle = text_encoder.register_forward_hook(text_encoder_hook)
-        return handle
 
     def _encode_prompt(self, prompt: str, max_sequence_length: int = 512) -> torch.Tensor:
         """
