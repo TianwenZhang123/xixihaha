@@ -355,9 +355,14 @@ def has_real_issues(vlm_feedback: str) -> bool:
         line = line.strip()
         if not line:
             continue
-        # 如果某一行不包含 "accurate" 且包含冒号（说明是有实质内容的维度）
-        if ":" in line and "accurate" not in line.split(":", 1)[1]:
-            return True
+        # 如果某一行包含冒号，检查冒号后面的内容
+        if ":" in line:
+            value = line.split(":", 1)[1].strip()
+            # "inaccurate" 包含 "accurate" 子串，需要精确判断
+            # 如果值不是纯 "accurate" / "[accurate]"，就认为有问题
+            clean_value = value.strip("[] ")
+            if clean_value and clean_value != "accurate":
+                return True
     return False
 
 
