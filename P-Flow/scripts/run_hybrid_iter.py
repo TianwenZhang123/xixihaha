@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
 """
-Hybrid Pipeline — 单轮改写+校验流程（无多轮迭代）
+Hybrid Pipeline — 单轮改写+校验流程
 
 流程：
-  1. 读取 baseline 的 VLM caption
+  1. 读取 VLM caption（已有的 captions_qwen 等）
   2. LLM 约束式改写 → rewritten prompt
   3. VLM 校验：用原始视频 + 改写后文字对比，输出不一致之处
   4. LLM 修复：根据 VLM 反馈做定向修正 → final prompt
   5. 用 final prompt 生成视频
-  6. 评测 CLIP/XCLIP + 与 baseline 对比
-
-设计理念：
-  - 去掉多轮迭代（太耗时），改为"先校验文字再生成"
-  - VLM 的作用：看原始视频 + 读 LLM 改写后的 prompt，判断文字是否准确描述了视频
-  - 这样不需要先生成视频就能发现 prompt 偏差（省去一次完整的 T2V 推理）
+  6. 评测 CLIP/XCLIP
 
 用法:
-    cd /root/autodl-tmp/videofake/P-Flow
+    cd /root/xixihaha/P-Flow
 
     export DASHSCOPE_API_KEY="sk-xxxxx"
 
+    # 快速测试（仅 LLM 改写，不加载 VLM）
     python scripts/run_hybrid_iter.py \
-        --data_dir /root/autodl-tmp/data/video-200/water_mark_out \
-        --baseline_dir /root/autodl-tmp/outputs/baseline \
-        --output_dir /root/autodl-tmp/outputs/hybrid_v5 \
+        --data_dir data/videos \
+        --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+        --output_dir outputs/hybrid_v5 \
+        --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+        --skip_vlm
+
+    # 完整流程（含 VLM 校验）
+    python scripts/run_hybrid_iter.py \
+        --data_dir data/videos \
+        --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+        --output_dir outputs/hybrid_v5 \
         --sample_ids 7 17 21 31 32 33 34 43 46 47
 """
 
@@ -31,7 +35,6 @@ import sys
 import os
 import json
 import subprocess
-import time
 import logging
 import argparse
 from pathlib import Path
@@ -373,7 +376,7 @@ def llm_refine(current_prompt: str, vlm_feedback: str, model: str = "qwen-plus",
 
 def generate_videos(data_dir: str, caption_dir: str, output_dir: str,
                     sample_ids: list, args) -> None:
-    """调用 run.py 生成视频"""
+    """调用 run.py 生成视频（纯 caption→T2V，不启用迭代/VLM）"""
     cmd = [
         sys.executable, "run.py",
         "--data_dir", data_dir,
@@ -383,10 +386,7 @@ def generate_videos(data_dir: str, caption_dir: str, output_dir: str,
         "--steps", str(args.steps),
         "--guidance", str(args.guidance),
         "--seed", str(args.seed),
-        "--vlm_provider", "mock",  # 不需要 VLM（我们自己管 prompt）
     ]
-    if args.resume:
-        cmd.append("--resume")
 
     logger.info(f"  运行: {' '.join(cmd)}")
     result = subprocess.run(cmd, cwd=str(Path(__file__).parent.parent),
@@ -451,13 +451,15 @@ def main():
 
     # I/O
     p.add_argument("--data_dir", type=str, required=True,
-                   help="原始视频目录")
-    p.add_argument("--baseline_dir", type=str, required=True,
-                   help="baseline 输出目录（读取 VLM caption + 评测对比）")
+                   help="原始视频目录 (如 data/videos)")
+    p.add_argument("--caption_dir", type=str, required=True,
+                   help="VLM caption 目录 (如 data/captions_qwen)，每个文件命名为 {id}.txt")
     p.add_argument("--output_dir", type=str, required=True,
                    help="本次实验输出目录")
     p.add_argument("--sample_ids", type=int, nargs="+", required=True,
                    help="样本 ID 列表")
+    p.add_argument("--baseline_eval", type=str, default=None,
+                   help="(可选) baseline 评测结果 JSON 路径，用于最终对比")
 
     # 生成参数（与 baseline 保持一致）
     p.add_argument("--steps", type=int, default=30)
@@ -485,32 +487,32 @@ def main():
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── 读取 baseline 评测结果（用于最终对比）──
-    baseline_eval_path = Path(args.baseline_dir) / "eval_clip" / "eval_results.json"
+    # ── 读取 baseline 评测结果（可选，用于最终对比）──
     baseline_metrics = {}
-    if baseline_eval_path.exists():
-        baseline_metrics = json.loads(baseline_eval_path.read_text())
+    if args.baseline_eval and Path(args.baseline_eval).exists():
+        baseline_metrics = json.loads(Path(args.baseline_eval).read_text())
         logger.info(f"Baseline 指标: CLIP={baseline_metrics.get('orig_gen_clip_mean', 'N/A'):.4f}, "
                     f"XCLIP={baseline_metrics.get('orig_gen_xclip_mean', 'N/A'):.4f}")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # Step 1: 读取 baseline VLM caption
+    # Step 1: 读取 VLM caption
     # ══════════════════════════════════════════════════════════════════════════
     logger.info("=" * 60)
-    logger.info("Step 1: 读取 baseline VLM caption")
+    logger.info("Step 1: 读取 VLM caption")
     logger.info("=" * 60)
 
+    caption_input_dir = Path(args.caption_dir)
     captions = {}  # sid -> vlm_caption
     for sid in args.sample_ids:
-        cap_file = Path(args.baseline_dir) / f"sample_{sid}" / "vlm_caption.txt"
+        cap_file = caption_input_dir / f"{sid}.txt"
         if not cap_file.exists():
-            logger.error(f"  找不到 baseline caption: {cap_file}")
+            logger.error(f"  找不到 caption: {cap_file}")
             continue
         captions[sid] = cap_file.read_text(encoding="utf-8").strip()
-        logger.info(f"  [{sid}] 读取 caption: {captions[sid][:50]}...")
+        logger.info(f"  [{sid}] 读取 caption ({len(captions[sid].split())} 词): {captions[sid][:50]}...")
 
     if not captions:
-        logger.error("没有找到任何 baseline caption，退出")
+        logger.error("没有找到任何 caption，退出")
         sys.exit(1)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -625,7 +627,7 @@ def main():
 
     # ── 汇总输出 ──
     logger.info("\n" + "=" * 60)
-    logger.info("汇总: Hybrid v5 vs Baseline")
+    logger.info("汇总")
     logger.info("=" * 60)
 
     baseline_clip = baseline_metrics.get("orig_gen_clip_mean", 0)
@@ -634,30 +636,36 @@ def main():
     print(f"\n{'─' * 60}")
     print(f"{'Method':<15} {'CLIP':>10} {'Δ CLIP':>10} {'XCLIP':>10} {'Δ XCLIP':>10}")
     print(f"{'─' * 60}")
-    print(f"{'Baseline':<15} {baseline_clip:>10.4f} {'—':>10} {baseline_xclip:>10.4f} {'—':>10}")
+    if baseline_metrics:
+        print(f"{'Baseline':<15} {baseline_clip:>10.4f} {'—':>10} {baseline_xclip:>10.4f} {'—':>10}")
 
-    d_clip = clip_score - baseline_clip
-    d_xclip = xclip_score - baseline_xclip
+    d_clip = clip_score - baseline_clip if baseline_metrics else 0
+    d_xclip = xclip_score - baseline_xclip if baseline_metrics else 0
     method_name = "Hybrid-v5" if not args.skip_vlm else "Hybrid-noVLM"
-    print(f"{method_name:<15} {clip_score:>10.4f} {d_clip:>+10.4f} {xclip_score:>10.4f} {d_xclip:>+10.4f}")
+    if baseline_metrics:
+        print(f"{method_name:<15} {clip_score:>10.4f} {d_clip:>+10.4f} {xclip_score:>10.4f} {d_xclip:>+10.4f}")
+    else:
+        print(f"{method_name:<15} {clip_score:>10.4f} {'—':>10} {xclip_score:>10.4f} {'—':>10}")
     print(f"{'─' * 60}\n")
 
     # 保存汇总 JSON
     summary = {
-        "baseline": {"orig_gen_clip": baseline_clip, "orig_gen_xclip": baseline_xclip},
         "hybrid_v5": {"orig_gen_clip": clip_score, "orig_gen_xclip": xclip_score},
-        "delta": {"clip": d_clip, "xclip": d_xclip},
         "config": {
             "strategy": "v5_constrained_single_pass",
             "vlm_verify": not args.skip_vlm,
             "llm_model": args.llm_model,
             "vlm_provider": args.vlm_provider if not args.skip_vlm else "skipped",
+            "caption_dir": args.caption_dir,
             "sample_ids": list(rewritten.keys()),
             "steps": args.steps,
             "guidance": args.guidance,
             "seed": args.seed,
         },
     }
+    if baseline_metrics:
+        summary["baseline"] = {"orig_gen_clip": baseline_clip, "orig_gen_xclip": baseline_xclip}
+        summary["delta"] = {"clip": d_clip, "xclip": d_xclip}
     summary_path = out_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     logger.info(f"汇总已保存: {summary_path}")
