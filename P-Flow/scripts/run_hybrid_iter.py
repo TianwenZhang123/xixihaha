@@ -53,63 +53,93 @@ logger = logging.getLogger(__name__)
 # LLM 系统提示词
 # ─────────────────────────────────────────────────────────────────────────────
 
-REWRITE_SYSTEM = """You are a text-to-video prompt optimizer for the Wan2.1 model (UMT5 text encoder). Your job is to make SURGICAL edits to VLM video captions — copying the original text and making exactly 3 targeted modifications.
+REWRITE_SYSTEM = """You are a text-to-video prompt enrichment specialist for the Wan2.1 model (UMT5 text encoder). Your job is to transform short VLM captions into RICH, DETAILED video generation prompts — similar in depth and style to professional video descriptions.
 
 ## Key findings from our experiments (you MUST follow these):
 
-1. CONSTRAINT > ENRICHMENT: Our experiments proved that conservative editing (XCLIP +1.7%) far outperforms aggressive expansion (CLIP -3.2%). Semantic drift and hallucination are the main failure modes. Do NOT add information not in the original.
+1. U-SHAPED ATTENTION: The UMT5 encoder's DiT cross-attention follows a U-shaped distribution — the FIRST and LAST tokens receive ~15x more weight than middle tokens. This means:
+   - The FIRST word must be the main subject noun (no preamble)
+   - The LAST phrase must be a vivid, concrete visual detail (light, texture, motion)
+   - Middle content should be rich and detailed but ordering matters less
 
-2. U-SHAPED ATTENTION: The UMT5 encoder produces hidden states where DiT cross-attention follows a U-shaped distribution — the FIRST token and the LAST token receive ~15x more weight than middle tokens (which are nearly uniform). This means:
-   - The FIRST word of your output is critically important (subject noun)
-   - The LAST few words are equally important (vivid visual anchor)
-   - Middle content ordering barely matters — preserve it as-is
+2. DETAIL DENSITY WINS CLIP: Our best-scoring prompts (CLIP 0.896) contain SPECIFIC appearance descriptors — exact colors, materials, textures, spatial positions, and camera descriptions. Generic descriptions score poorly.
 
-3. TEMPORAL CHAIN IS EFFECTIVE: Adding temporal markers ("initially... then... finally...") to motion descriptions improves temporal coherence (XCLIP +1.7%) without causing semantic drift.
+3. TEMPORAL CHAIN FOR MOTION: Adding structured temporal markers ("initially... then... as the scene progresses...") with specific motion details (direction, speed, trajectory) improves XCLIP significantly.
 
-## Your 3 surgical modifications (COPY everything else verbatim):
+4. MULTI-PARAGRAPH STRUCTURE: The highest-scoring prompts use 2-4 paragraphs organized as:
+   - Para 1: Subject identification + appearance details + scene overview
+   - Para 2: Motion description with temporal progression and spatial direction
+   - Para 3 (optional): Additional background/atmosphere details
+   - Para 4 (optional): Camera behavior and overall mood summary
 
-### Modification 1: SUBJECT-FIRST OPENING
-- Delete any "The video shows/captures/depicts/features..." preamble
-- Move the main moving subject to be the FIRST words
-- Keep the subject's original description unchanged
-- Example: "The video depicts a large whale swimming..." → "Large whale swimming..."
+## Your enrichment strategy:
 
-### Modification 2: TEMPORAL MARKERS ON MOTION (1-2 sentences only)
-- Find the primary motion/action description
-- Add temporal connectors: "initially... then..." or "gradually... before..."
-- You may add motion DIRECTION if it's obvious from context (left-to-right, toward camera)
-- Do NOT add motion details that aren't implied by the original text
-- Do NOT touch non-motion sentences
+### 1. SUBJECT-FIRST OPENING with full appearance
+- Start with the main subject noun (no "The video shows/depicts...")
+- Immediately add SPECIFIC appearance details: exact colors, materials, textures, sizes, count
+- Include spatial position in frame ("positioned towards the left", "in the center of the frame")
+- Example: "Two small sailboats" → "Two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail. The second boat, slightly smaller and to the right, also features a white sail. Both boats have dark brown hulls and appear to be intricately designed."
 
-### Modification 3: STRONG VISUAL ENDING
-- Ensure the last phrase is a concrete, vivid visual detail (light, motion, or texture)
-- If the original already ends strongly, leave it unchanged
-- If it ends with a generic statement, replace only the final clause with a specific visual from the description
-- The ending should use words already present in the text or directly implied by it
+### 2. DETAILED MOTION with direction and progression
+- Describe motion with SPECIFIC direction (left-to-right, clockwise, toward camera)
+- Use temporal chain: "initially... then... as the scene progresses..."
+- Include speed and intensity changes ("at a steady pace", "gradually accelerating")
+- Add physical consequences of motion ("kicking up dust", "creating ripples", "tail wagging")
+- Describe HOW different subjects move relative to each other
 
-## STRICT PROHIBITIONS:
+### 3. BACKGROUND & LIGHTING specifics
+- Name specific materials and architectural features ("glass facades and steel structures")
+- Describe lighting direction and quality ("sunlight filtering through", "dim lighting casting shadows")
+- Include depth cues ("foreground/background", "distant mountains", "nearby vegetation")
+- Note color palette with specifics ("dark blue water", "bright green foliage", "warm golden light")
 
-1. Do NOT add objects, elements, or details not mentioned in the original
-2. Do NOT change descriptive adjectives (colors, materials, sizes) — copy them exactly
-3. Do NOT compress or shorten — output must be ≥90% of input word count
-4. Do NOT use the same template phrases across different prompts
-5. Do NOT add "text overlays", "watermarks", or meta-commentary
-6. Do NOT rewrite sentences that describe background/scene/lighting unless they are the ending
-7. Do NOT merge paragraphs or restructure the overall flow
+### 4. CAMERA DESCRIPTION
+- State camera behavior ("camera remains stationary", "wide tracking shot", "camera pans left to right")
+- Note shot type if apparent ("medium shot", "wide angle", "close-up")
+- Describe focus behavior if relevant ("gradually coming into sharp focus", "background softly blurred")
+
+### 5. STRONG VISUAL ENDING
+- End with a vivid, concrete sensory detail
+- Use words that evoke texture or light ("shimmering reflections", "dust trail billowing", "neon light reflecting sharply")
+
+## IMPORTANT GUIDELINES:
+
+1. OUTPUT LENGTH: Aim for 150-250 words, 2-4 paragraphs. Longer is better than shorter.
+2. You MAY add reasonable visual details that are LIKELY true given the scene description (materials, lighting direction, spatial relations). This is fine — a downstream VLM will verify and correct any errors.
+3. PRESERVE all original information — every detail from the input must appear in your output.
+4. Use SPECIFIC descriptors over generic ones: "dark brown hulls" not "wooden hulls", "glass facades and steel structures" not "buildings"
+5. DO NOT add objects/subjects not implied by the original (no hallucinating new elements)
+6. DO NOT add "text overlays", "watermarks", or meta-commentary
+7. VARY your language — do not use identical template phrases across prompts
 
 ## Examples:
 
 ### Example 1:
-INPUT: "The video depicts an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. A large whale swims gracefully through the center of the scene. Fish can be seen swimming around the whale, adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood."
+INPUT: "The video depicts an underwater cityscape with tall buildings. A large whale swims gracefully through the scene. The water is blue. Fish swim around the whale. The lighting is dim and the mood is serene."
 
-OUTPUT: "Large whale swimming gracefully through the center of an underwater cityscape, initially gliding from the left side of the frame then arcing slowly toward the right. Tall buildings with a modern architectural style emerge from the water, their glass facades and steel structures visible in the depths. The water is dark blue and rippled, creating a sense of depth and movement. Fish can be seen swimming around the whale, adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood, with faint light filtering down through the dark blue ripples."
+OUTPUT: "Giant whale swimming gracefully through an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. The whale initially enters from the left side of the frame, then glides steadily rightward through the center of the scene, its tail and fins moving in slow rhythmic undulation. Fish can be seen swimming around the whale, scattering as it passes and adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood, with the whale's massive form creating gentle currents in the dark blue water."
 
 ### Example 2:
-INPUT: "The video shows a white SUV driving on a dirt road that winds through mountains. The landscape is bathed in sunlight with rugged terrain and trees lining the path. The camera pans across the landscape capturing the vastness of the mountains. The dense vegetation adds depth with trees and bushes on both sides. The SUV moves at a steady pace creating a sense of progression within the stillness of nature."
+INPUT: "A white SUV drives on a dirt road through mountains. There are trees on both sides. The SUV kicks up dust. It's sunny."
 
-OUTPUT: "White SUV driving steadily along a dirt road that winds through mountains, initially appearing in the distance then growing larger as it progresses forward. The landscape is bathed in sunlight with rugged terrain and trees lining the path. The camera pans across the landscape capturing the vastness of the mountains. The dense vegetation adds depth with trees and bushes on both sides, with warm sunlight casting long shadows across the packed dirt surface."
+OUTPUT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight, highlighting the rugged terrain and the trees that line the path. The camera pans across the landscape, capturing the vastness of the mountains and the winding road that snakes through them. The dense vegetation adds depth to the image, with trees and bushes lining both sides of the road.
 
-## Output ONLY the modified prompt. No explanations, no "WHY" section."""
+The SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves. The vehicle's tire tracks are visible on the road, and its headlights illuminate the path ahead. The SUV moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature.
+
+The combination of the rugged landscape, the winding dirt road, and the white SUV on the move creates a dynamic visual experience with the dust trail billowing behind the vehicle."
+
+### Example 3:
+INPUT: "An orange and white cat walks along a garden path with flowers. The cat moves toward the camera. The garden has colorful flowers."
+
+OUTPUT: "Orange and white cat walking gracefully through a serene garden on a stone path, with lush greenery and vibrant flowers surrounding it.
+
+Initially, the cat appears slightly blurred in the background at the center of the frame, then steps steadily forward toward the camera, gradually coming into sharp focus. Its fur contrasts beautifully against the green leaves and colorful blooms. The cat's tail is raised high, swaying gently with each step, adding a sense of movement and energy to the scene as it moves with confident forward stride.
+
+As the cat continues its journey, the background reveals more details of the garden. The path is lined with various plants and flowers, including red and yellow blooms, creating a picturesque backdrop for the cat's gentle stroll. The vibrant colors of the flowers add depth and visual interest to the scene.
+
+The camera maintains a medium shot throughout the video, keeping both the cat and the garden in focus. The camera remains stationary, providing a stable and clear view of the cat's movements and the surrounding garden, capturing the cat's graceful forward motion through the lush garden path."
+
+## Output ONLY the enriched prompt. No explanations, no "WHY" section."""
 
 REFINE_SYSTEM = """You fix video generation prompts based on VLM feedback. You make SURGICAL fixes — change only what the VLM says is wrong, leave everything else VERBATIM.
 
@@ -209,7 +239,7 @@ def call_llm(prompt: str, system: str, model: str = "qwen-plus",
             {"role": "user", "content": prompt},
         ],
         temperature=temperature,
-        max_tokens=1024,
+        max_tokens=2048,
     )
     result = response.choices[0].message.content.strip()
     # 清理引号
@@ -221,39 +251,41 @@ def call_llm(prompt: str, system: str, model: str = "qwen-plus",
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 2: LLM 约束式改写
+# Step 2: LLM 丰富型改写
 # ─────────────────────────────────────────────────────────────────────────────
 
 def llm_rewrite(caption: str, model: str = "qwen-plus",
                 max_retries: int = 2) -> str:
-    """LLM 约束式微调改写（带 length/diff 验证）"""
+    """LLM 丰富型改写（允许大幅扩写，VLM 后续兜底验证）"""
     word_count = len(caption.split())
     user_msg = (
-        f"Optimize this VLM caption ({word_count} words) for Wan2.1 T2V generation. "
-        f"Make exactly 3 surgical modifications:\n\n"
-        f"1. SUBJECT-FIRST: Move the main subject to be the first words "
-        f"(delete 'The video shows...' preamble)\n"
-        f"2. TEMPORAL CHAIN: Add 'initially... then...' to the primary motion description "
-        f"(1-2 sentences only)\n"
-        f"3. STRONG ENDING: Ensure the final phrase is a vivid visual detail "
-        f"(reuse words from the text)\n\n"
-        f"COPY all other sentences VERBATIM. Do NOT add new objects or details. "
-        f"Output ≥90% of input length.\n\n"
+        f"Enrich this VLM caption ({word_count} words) into a detailed video generation "
+        f"prompt for Wan2.1 T2V.\n\n"
+        f"Requirements:\n"
+        f"- Subject-first opening with full appearance details (colors, materials, textures, spatial position)\n"
+        f"- Multi-paragraph structure (2-4 paragraphs)\n"
+        f"- Detailed motion with temporal chain and specific direction/speed\n"
+        f"- Background with specific materials, lighting quality, and depth cues\n"
+        f"- Camera description (shot type, movement, focus behavior)\n"
+        f"- Strong visual ending with concrete sensory detail\n"
+        f"- Target length: 150-250 words\n\n"
+        f"You MAY add reasonable visual details (materials, lighting, spatial relations) "
+        f"— a VLM will verify accuracy later.\n\n"
         f"INPUT:\n{caption}\n\n"
         f"OUTPUT:"
     )
 
     for attempt in range(max_retries + 1):
-        temp = 0.5 if attempt == 0 else max(0.3, 0.5 - attempt * 0.1)
+        temp = 0.7 if attempt == 0 else max(0.5, 0.7 - attempt * 0.1)
         result = call_llm(user_msg, REWRITE_SYSTEM, model, temperature=temp)
 
-        # ── 验证 1: 长度检查（≥70% 原文，≤150%）──
+        # ── 验证 1: 长度检查（≥100% 原文，≤200%）——丰富但不过度膨胀 ──
         result_words = len(result.split())
-        if result_words < int(word_count * 0.70):
-            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words} 词 (最低 {int(word_count * 0.70)})")
+        if result_words < int(word_count * 1.0):
+            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words} 词 (最低 {word_count})")
             continue
-        if result_words > int(word_count * 1.50):
-            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} 词 (最高 {int(word_count * 1.50)})")
+        if result_words > int(word_count * 2.0):
+            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} 词 (最高 {int(word_count * 2.0)})")
             continue
 
         # ── 验证 2: 不能以 preamble 开头 ──
@@ -261,11 +293,18 @@ def llm_rewrite(caption: str, model: str = "qwen-plus",
             logger.warning(f"  [重试 {attempt+1}] 仍以 preamble 开头")
             continue
 
-        # ── 验证 3: diff check（≤50%）──
-        edit_ratio = _compute_edit_ratio(caption, result)
-        if edit_ratio > 0.50:
-            logger.warning(f"  [重试 {attempt+1}] 改动过大: edit_ratio={edit_ratio:.0%}")
-            continue
+        # ── 验证 3: 必须包含原文的主要名词（防止完全跑偏）──
+        # 提取原文中的关键名词（简单启发式）
+        original_lower = caption.lower()
+        result_lower = result.lower()
+        # 检查原文至少一半的实词出现在结果中
+        original_words = set(w for w in original_lower.split() if len(w) > 4)
+        if original_words:
+            overlap = sum(1 for w in original_words if w in result_lower)
+            overlap_ratio = overlap / len(original_words)
+            if overlap_ratio < 0.4:
+                logger.warning(f"  [重试 {attempt+1}] 语义偏移过大: 关键词重叠仅 {overlap_ratio:.0%}")
+                continue
 
         return result
 
@@ -386,6 +425,7 @@ def generate_videos(data_dir: str, caption_dir: str, output_dir: str,
         "--steps", str(args.steps),
         "--guidance", str(args.guidance),
         "--seed", str(args.seed),
+        "--resume",  # 跳过已生成的视频
     ]
 
     logger.info(f"  运行: {' '.join(cmd)}")
