@@ -34,6 +34,7 @@ from .distributed import setup_single_gpu, load_model_single_gpu, cleanup_gpu_me
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
 from .svd_filter import SVDFilter
 from .velocity_matching import VelocityMatcher
+from .attn_inject import AttnInjector, AttnInjectConfig, AttentionKVCache
 from .video_utils import (
     load_video, save_video_tensor, normalize_video, denormalize_video,
     create_vertical_composite,
@@ -89,12 +90,23 @@ class PFlowConfig:
     velocity_motion_weight: float = 1.0  # 运动区域加权强度 (0=关闭, 1=全开)
     embed_strength: float = 0.005 # Δe 注入强度 (验证最优: 0.005)
 
+    # ── Attention Injection 参数 (Layer 4) ──
+    use_attn_inject: bool = False          # 启用 Self-Attention K/V 注入
+    attn_inject_gamma: float = 0.3         # 注入强度 γ (0=不注入, 1=完全替换)
+    attn_inject_blocks: str = "all"        # 注入的 block 范围: "all", "first_half", "last_half", 或 "0,5,10,15,20,25"
+    attn_inject_block_schedule: str = "uniform"  # block维度γ调度: uniform/front_heavy/back_heavy
+    attn_inject_timestep_schedule: str = "linear_decay"  # 时间维度γ调度: constant/linear_decay/cosine_decay
+
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
 
     # ── VLM ──
     vlm_provider: str = "local"
     vlm_model_path: str = "models/Qwen2.5-VL-7B-Instruct"
+
+    # ── 负面 Prompt ──
+    negative_prompt: str = ""            # 自定义负面 prompt (空=使用默认 NEGATIVE_PROMPT)
+    negative_prompt_file: str = ""       # 按样本加载负面 prompt 的目录 (优先级高于 negative_prompt)
 
     # ── 其他 ──
     seed: int = 42
@@ -110,6 +122,8 @@ class PFlowConfig:
             flags.append("blend")
         if self.use_velocity:
             flags.append("velocity")
+        if self.use_attn_inject:
+            flags.append(f"attn_inject(γ={self.attn_inject_gamma})")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -142,6 +156,7 @@ class PFlowPipeline:
 
         self._pipe = None
         self._vlm_client = None
+        self._attn_injector: Optional['AttnInjector'] = None
 
     @property
     def pipe(self):
@@ -228,6 +243,11 @@ class PFlowPipeline:
             caption_file = out / "vlm_caption.txt"
             caption_file.write_text(caption, encoding="utf-8")
 
+        # ── Step 2.5: 解析负面 prompt ──
+        neg_prompt = self._resolve_negative_prompt(sample_id)
+        if neg_prompt != NEGATIVE_PROMPT:
+            logger.info(f"  [NegPrompt] 使用自定义负面 prompt: {neg_prompt[:60]}...")
+
         # ── Step 3: 计算噪声先验 (如果启用) ──
         eta_temporal = None
         eta_inv_raw = None  # 未经 SVD 的原始反演噪声，供 velocity matching 使用
@@ -235,6 +255,10 @@ class PFlowPipeline:
         prompt_embeds_cached = None  # 缓存 prompt embedding
         if cfg.use_inversion:
             eta_temporal, eta_inv_raw, z0_cached, prompt_embeds_cached = self._compute_noise_prior(ref_video, caption)
+
+        # ── Step 3.2: Attention KV Caching (Layer 4, 如果启用) ──
+        if cfg.use_attn_inject and cfg.use_inversion:
+            self._setup_attn_injection(ref_video, caption, prompt_embeds_cached)
 
         # ── Step 3.5: Velocity Field Matching — 计算 Δe (如果启用) ──
         delta_e = None
@@ -245,6 +269,7 @@ class PFlowPipeline:
             )
 
         # ── Step 4: 生成循环 ──
+        # Note: if attn_inject is active, _generate_with_attn_inject is used instead of _generate
         num_iters = cfg.i_max if cfg.use_iter else 1
         current_prompt = caption
         prev_video = None
@@ -256,13 +281,20 @@ class PFlowPipeline:
             # 获取噪声
             latents = self._get_latents(eta_temporal, generator)
 
-            # 生成视频（如果有 Δe，通过 embedding hook 注入）
-            if delta_e is not None:
+            # 生成视频（根据启用的改动点选择生成方式）
+            if cfg.use_attn_inject and self._attn_injector is not None:
+                gen_video = self._generate_with_attn_inject(
+                    current_prompt, latents, generator, delta_e, cfg.embed_strength,
+                    negative_prompt=neg_prompt,
+                )
+            elif delta_e is not None:
                 gen_video = self._generate_with_embedding_hook(
-                    current_prompt, latents, generator, delta_e, cfg.embed_strength
+                    current_prompt, latents, generator, delta_e, cfg.embed_strength,
+                    negative_prompt=neg_prompt,
                 )
             else:
-                gen_video = self._generate(current_prompt, latents, generator)
+                gen_video = self._generate(current_prompt, latents, generator,
+                                           negative_prompt=neg_prompt)
             video_path_i = str(out / f"iter_{i:02d}.mp4")
             save_video_tensor(gen_video, video_path_i, fps=cfg.fps)
 
@@ -279,6 +311,13 @@ class PFlowPipeline:
                 )
 
             prev_video = gen_video
+
+        # ── Step 4.5: 清理 Attention Injector ──
+        if self._attn_injector is not None:
+            mem_mb = self._attn_injector.cache.memory_usage_mb()
+            logger.info(f"  [AttnInject] Clearing cache ({mem_mb:.1f} MB)")
+            self._attn_injector.clear()
+            self._attn_injector = None
 
         # ── Step 5: 输出最终结果 ──
         final_path = str(out / f"{sample_id}.mp4")
@@ -363,6 +402,31 @@ class PFlowPipeline:
         )
         return eta_temporal, eta_inv_raw, ref_latents, prompt_embeds
 
+    def _resolve_negative_prompt(self, sample_id: int) -> str:
+        """
+        解析负面 prompt，优先级：
+            1. negative_prompt_file 目录下的 {sample_id}.txt
+            2. config.negative_prompt (全局自定义)
+            3. 默认 NEGATIVE_PROMPT (硬编码)
+        """
+        cfg = self.config
+
+        # 优先从按样本的负面 prompt 目录加载
+        if cfg.negative_prompt_file:
+            neg_file = Path(cfg.negative_prompt_file) / f"{sample_id}.txt"
+            if neg_file.exists():
+                content = neg_file.read_text(encoding="utf-8").strip()
+                if content:
+                    return content
+                logger.warning(f"  [NegPrompt] 文件为空: {neg_file}, 使用 fallback")
+
+        # 全局自定义负面 prompt
+        if cfg.negative_prompt:
+            return cfg.negative_prompt
+
+        # 默认
+        return NEGATIVE_PROMPT
+
     def _get_latents(
         self,
         eta_temporal: Optional[torch.Tensor],
@@ -396,12 +460,13 @@ class PFlowPipeline:
         prompt: str,
         latents: Optional[torch.Tensor],
         generator: torch.Generator,
+        negative_prompt: str = "",
     ) -> torch.Tensor:
         """调用 Wan 2.1-1.3B 生成视频。"""
         cfg = self.config
         kwargs = {
             "prompt": prompt,
-            "negative_prompt": NEGATIVE_PROMPT,
+            "negative_prompt": negative_prompt or NEGATIVE_PROMPT,
             "height": cfg.height,
             "width": cfg.width,
             "num_frames": cfg.num_frames,
@@ -559,6 +624,7 @@ class PFlowPipeline:
         generator: torch.Generator,
         delta_e: torch.Tensor,
         strength: float,
+        negative_prompt: str = "",
     ) -> torch.Tensor:
         """
         改动点: 通过 text encoder hook 注入 Δe 生成视频。
@@ -610,7 +676,8 @@ class PFlowPipeline:
         hook_handle = text_encoder.register_forward_hook(text_encoder_hook)
 
         try:
-            video = self._generate(prompt, latents, generator)
+            video = self._generate(prompt, latents, generator,
+                                   negative_prompt=negative_prompt)
         finally:
             if hook_handle is not None:
                 hook_handle.remove()
@@ -620,6 +687,298 @@ class PFlowPipeline:
             f"injection strength={strength:.6f}"
         )
         return video
+
+    def _setup_attn_injection(
+        self, ref_video: torch.Tensor, caption: str,
+        prompt_embeds: Optional[torch.Tensor] = None,
+    ):
+        """
+        改动点: Layer 4 — Self-Attention K/V Injection (Setup Phase).
+
+        在 inversion 路径上进行一次额外的 forward pass，缓存每个 step 每个 block
+        的 attn1 输入（用于后续注入时重算参考 K/V）。
+
+        流程:
+            1. 解析 block 配置 → 确定哪些 block 需要注入
+            2. 创建 AttnInjector 并安装 caching hooks
+            3. 沿 inversion timestep 重新跑一次 transformer forward（不需要完整 ODE，
+               只在 generation 会用到的那些 timestep 上跑单步 forward 来缓存 attn 输入）
+
+        注意: 这个方法在 _compute_noise_prior 之后调用，此时 inversion trajectory 已知。
+        """
+        cfg = self.config
+        logger.info(
+            f"  [AttnInject] Setting up: γ={cfg.attn_inject_gamma}, "
+            f"blocks={cfg.attn_inject_blocks}, "
+            f"schedule={cfg.attn_inject_block_schedule}/{cfg.attn_inject_timestep_schedule}"
+        )
+
+        # Parse block selection
+        inject_blocks = self._parse_inject_blocks(cfg.attn_inject_blocks)
+
+        # Create config
+        attn_cfg = AttnInjectConfig(
+            gamma=cfg.attn_inject_gamma,
+            block_schedule=cfg.attn_inject_block_schedule,
+            timestep_schedule=cfg.attn_inject_timestep_schedule,
+            inject_blocks=inject_blocks,
+            inject_v=True,
+        )
+
+        # Create injector
+        transformer = self.pipe.transformer
+        self._attn_injector = AttnInjector(transformer, attn_cfg)
+
+        # Encode reference video latents
+        ref_norm = normalize_video(ref_video).unsqueeze(0)
+        ref_latents = encode_video_to_latents(self.pipe, ref_norm, self.device)
+
+        # Get prompt embeddings
+        if prompt_embeds is None:
+            prompt_embeds = self._encode_prompt(caption)
+
+        # Run caching: we simulate the generation timestep schedule and at each step,
+        # compute the corresponding x_t on the inversion trajectory, then forward through
+        # the transformer with caching hooks active.
+        num_steps = cfg.num_inference_steps
+        # Generation goes from t=1 (noise) to t=0 (data)
+        # For flow matching: x_t = (1-t)*noise + t*data
+        # At generation step i, t = 1 - i/N (decreasing from 1 to 0)
+
+        # We use the same inversion result: given ref_latents (z₁=data) and eta_inv (z₀=noise)
+        # x_t = (1-t)*eta_inv + t*ref_latents  →  this is the reference trajectory point at time t
+
+        # Get inverted noise (re-use from prior step via a lightweight re-inversion or from cache)
+        # Since _compute_noise_prior was already called, the eta_inv is the noise we got.
+        # We need to reconstruct it. The simplest approach: use the same inversion logic
+        # but only cache the intermediate trajectory. For efficiency, we'll just recompute x_t
+        # analytically (flow matching defines x_t = (1-t)ε + t*z₁)
+
+        logger.info(f"  [AttnInject] Caching attn1 inputs for {num_steps} generation steps...")
+
+        # Re-run inversion to get eta_inv (or reuse if available)
+        # Since _compute_noise_prior already ran, we have the prompt_embeds.
+        # We perform a lightweight inversion just to get eta_inv (without SVD filtering)
+        inverter = FlowMatchingInverter(
+            pipe=self.pipe,
+            num_inversion_steps=cfg.inversion_steps,
+            guidance_scale=1.0,
+            device=self.device,
+        )
+        with torch.no_grad():
+            if cfg.use_midpoint:
+                eta_inv = inverter.invert_midpoint(ref_latents, prompt_embeds, prompt_embeds)
+            else:
+                eta_inv = inverter.invert(ref_latents, prompt_embeds, prompt_embeds)
+
+        # Now cache: for each generation timestep, construct x_t and forward through transformer
+        with torch.no_grad():
+            for step_idx in range(num_steps):
+                # t goes from 1 to 0 during generation (same as diffusers scheduler)
+                t = 1.0 - step_idx / num_steps
+                t_tensor = torch.full(
+                    (ref_latents.shape[0],), t * 1000.0,
+                    device=self.device, dtype=ref_latents.dtype
+                )
+
+                # Reference trajectory: x_t = (1-t)*η_inv + t*z₁
+                x_t_ref = (1.0 - t) * eta_inv + t * ref_latents
+
+                # Install caching hooks
+                self._attn_injector.start_caching(step_idx=step_idx)
+
+                # Forward pass (just to trigger hooks, output discarded)
+                _ = self.pipe.transformer(
+                    hidden_states=x_t_ref,
+                    timestep=t_tensor,
+                    encoder_hidden_states=prompt_embeds,
+                    return_dict=False,
+                )
+
+                self._attn_injector.stop_caching()
+
+        mem_mb = self._attn_injector.cache.memory_usage_mb()
+        logger.info(
+            f"  [AttnInject] Caching complete: {num_steps} steps × "
+            f"{len(inject_blocks) if inject_blocks else 'all'} blocks, "
+            f"memory={mem_mb:.1f} MB"
+        )
+
+    def _parse_inject_blocks(self, blocks_str: str) -> Optional[List[int]]:
+        """Parse block selection string into list of indices."""
+        num_blocks = 30  # Wan2.1-1.3B has 30 blocks
+
+        if blocks_str == "all":
+            return None  # None means all blocks
+        elif blocks_str == "first_half":
+            return list(range(num_blocks // 2))
+        elif blocks_str == "last_half":
+            return list(range(num_blocks // 2, num_blocks))
+        else:
+            # Parse comma-separated indices: "0,5,10,15,20,25"
+            try:
+                indices = [int(x.strip()) for x in blocks_str.split(",")]
+                return [i for i in indices if 0 <= i < num_blocks]
+            except ValueError:
+                logger.warning(f"  [AttnInject] Invalid block spec '{blocks_str}', using all")
+                return None
+
+    @torch.no_grad()
+    def _generate_with_attn_inject(
+        self,
+        prompt: str,
+        latents: Optional[torch.Tensor],
+        generator: torch.Generator,
+        delta_e: Optional[torch.Tensor] = None,
+        embed_strength: float = 0.005,
+        negative_prompt: str = "",
+    ) -> torch.Tensor:
+        """
+        改动点: Layer 4 — 带 Self-Attention K/V Injection 的生成。
+
+        与标准 _generate 相同，但在每个 denoising step 中通过 hook 注入参考 K/V。
+        可以与 Layer 3 (Δe embedding hook) 同时使用。
+
+        Args:
+            prompt: Generation prompt.
+            latents: Initial noise (may include noise prior from L2).
+            generator: RNG.
+            delta_e: Optional Δe from velocity matching (Layer 3).
+            embed_strength: Δe injection strength (only used if delta_e is not None).
+        """
+        cfg = self.config
+        injector = self._attn_injector
+        num_steps = cfg.num_inference_steps
+
+        # If we also have delta_e, install the text encoder hook
+        text_encoder_hook_handle = None
+        if delta_e is not None:
+            text_encoder_hook_handle = self._install_embedding_hook(delta_e, embed_strength)
+
+        # We need to manually run the denoising loop to insert injection hooks at each step.
+        # Use the pipe's scheduler and transformer directly.
+
+        # --- Encode prompt ---
+        prompt_embeds = self._encode_prompt(prompt)
+        neg_text = negative_prompt or NEGATIVE_PROMPT
+        negative_prompt_embeds = self._encode_prompt(neg_text)
+
+        # --- Prepare latents ---
+        if latents is None:
+            # Generate random latents (same shape as what the pipe would generate)
+            # Shape: (1, C, F_latent, H_latent, W_latent)
+            # Wan2.1: C=16, F_latent=(num_frames-1)/4+1=21, H_latent=H/8=60, W_latent=W/8=104
+            latent_channels = self.pipe.transformer.config.in_channels
+            f_latent = (cfg.num_frames - 1) // 4 + 1
+            h_latent = cfg.height // 8
+            w_latent = cfg.width // 8
+            latents = torch.randn(
+                (1, latent_channels, f_latent, h_latent, w_latent),
+                device=self.device, dtype=self.dtype, generator=generator,
+            )
+        else:
+            latents = latents.to(device=self.device, dtype=self.dtype)
+
+        # --- Prepare scheduler ---
+        scheduler = self.pipe.scheduler
+        scheduler.set_timesteps(num_steps, device=self.device)
+        timesteps = scheduler.timesteps  # e.g., [999, 966, 933, ..., 0]
+
+        # Scale latents by scheduler's init sigma if required
+        latents = latents * scheduler.init_noise_sigma
+
+        # --- Denoising loop with injection ---
+        for step_idx, t in enumerate(timesteps):
+            # Compute timestep ratio for schedule (1.0 at start, 0.0 at end)
+            timestep_ratio = 1.0 - step_idx / max(num_steps - 1, 1)
+
+            # Start injecting for this step
+            injector.start_injecting(step_idx=step_idx, timestep_ratio=timestep_ratio)
+
+            # Expand latents for CFG
+            latent_model_input = torch.cat([latents, latents], dim=0)
+            latent_model_input = scheduler.scale_model_input(latent_model_input, t)
+
+            # Expand timestep
+            t_expand = t.expand(latent_model_input.shape[0])
+
+            # Combine embeddings for CFG
+            encoder_hidden_states = torch.cat(
+                [negative_prompt_embeds, prompt_embeds], dim=0
+            )
+
+            # Model forward (hooks will inject KV)
+            noise_pred = self.pipe.transformer(
+                hidden_states=latent_model_input,
+                timestep=t_expand,
+                encoder_hidden_states=encoder_hidden_states,
+                return_dict=False,
+            )[0]
+
+            # Stop injecting
+            injector.stop_injecting()
+
+            # CFG
+            noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2, dim=0)
+            noise_pred = noise_pred_uncond + cfg.guidance_scale * (
+                noise_pred_cond - noise_pred_uncond
+            )
+
+            # Scheduler step
+            latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+
+        # --- Remove embedding hook if installed ---
+        if text_encoder_hook_handle is not None:
+            text_encoder_hook_handle.remove()
+
+        # --- Decode latents ---
+        from .flow_matching import decode_latents_to_video
+        video = decode_latents_to_video(self.pipe, latents.unsqueeze(0) if latents.dim() == 4 else latents, self.device)
+
+        # Format output
+        if video.dim() == 5:
+            video = video[0]  # Remove batch dim: (C, F, H, W)
+        if video.min() < 0:
+            video = denormalize_video(video)
+        return video.clamp(0, 1)
+
+    def _install_embedding_hook(
+        self, delta_e: torch.Tensor, strength: float
+    ):
+        """Install text encoder hook for Δe injection (reusable helper)."""
+        text_encoder = self.pipe.text_encoder
+        hook_applied = [False]
+
+        def text_encoder_hook(module, input, output):
+            if hook_applied[0]:
+                return output
+            if isinstance(output, tuple):
+                hidden_states = output[0]
+            elif hasattr(output, "last_hidden_state"):
+                hidden_states = output.last_hidden_state
+            else:
+                hidden_states = output
+
+            de = delta_e.to(device=hidden_states.device, dtype=hidden_states.dtype)
+            if de.shape[1] != hidden_states.shape[1]:
+                min_len = min(de.shape[1], hidden_states.shape[1])
+                de_aligned = torch.zeros_like(hidden_states)
+                de_aligned[:, :min_len, :] = de[:, :min_len, :]
+                de = de_aligned
+
+            hidden_states = hidden_states + strength * de
+            hook_applied[0] = True
+
+            if isinstance(output, tuple):
+                return (hidden_states,) + output[1:]
+            elif hasattr(output, "last_hidden_state"):
+                output.last_hidden_state = hidden_states
+                return output
+            else:
+                return hidden_states
+
+        handle = text_encoder.register_forward_hook(text_encoder_hook)
+        return handle
 
     def _encode_prompt(self, prompt: str, max_sequence_length: int = 512) -> torch.Tensor:
         """

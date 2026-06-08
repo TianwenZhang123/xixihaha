@@ -95,6 +95,32 @@ USER_TEMPLATE = """Original prompt ({word_count} words):
 
 Rewrite this prompt following the Hybrid Strategy (subject-first, temporal action chain, preserve visual words). Output ONLY the rewritten prompt:"""
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 负面 Prompt 生成 System Prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+NEGATIVE_SYSTEM_PROMPT = """You are a video generation quality expert. Given a positive prompt describing a desired video, generate a NEGATIVE prompt that tells the video model what to AVOID.
+
+## Rules:
+1. The negative prompt should describe visual defects and unwanted artifacts specific to the content.
+2. Include both GENERIC quality issues and CONTENT-SPECIFIC issues.
+3. Generic issues: blurry, low quality, watermark, text overlay, static, overexposed, underexposed, jittery, flickering.
+4. Content-specific issues: identify what could go WRONG for this particular subject/scene.
+   - For people: extra fingers, deformed face, unnatural body proportions, inconsistent clothing
+   - For vehicles: floating wheels, distorted shape, inconsistent reflections
+   - For nature: repetitive textures, unnatural colors, frozen motion
+   - For animals: extra limbs, distorted anatomy, unnatural movement
+5. Keep it concise: 30-60 words max.
+6. Output ONLY the negative prompt, no explanations.
+7. Write in English.
+8. Do NOT use complete sentences — use comma-separated descriptive phrases."""
+
+NEGATIVE_USER_TEMPLATE = """Positive prompt:
+
+{positive_prompt}
+
+Generate a negative prompt (what to AVOID) tailored to this content. Output ONLY the negative prompt:"""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LLM 调用后端
@@ -181,6 +207,28 @@ def rewrite_caption(original: str, backend: str, model: str,
     return result
 
 
+def generate_negative_prompt(positive_prompt: str, backend: str, model: str,
+                             api_base: str = "", api_key: str = "",
+                             temperature: float = 0.5) -> str:
+    """基于正向 prompt 生成定制化负面 prompt"""
+    user_msg = NEGATIVE_USER_TEMPLATE.format(positive_prompt=positive_prompt)
+
+    if backend == "dashscope":
+        result = call_dashscope(user_msg, NEGATIVE_SYSTEM_PROMPT, model, api_key, temperature)
+    elif backend == "openai":
+        result = call_openai_compatible(user_msg, NEGATIVE_SYSTEM_PROMPT, model, api_base, api_key, temperature)
+    else:
+        raise ValueError(f"Unknown backend: {backend}")
+
+    # 清理引号
+    if result.startswith('"') and result.endswith('"'):
+        result = result[1:-1]
+    if result.startswith("'") and result.endswith("'"):
+        result = result[1:-1]
+
+    return result.strip()
+
+
 def _is_chinese_text(text: str) -> bool:
     """判断文本是否主要为中文（CJK 字符占比 > 30%）"""
     if not text:
@@ -256,6 +304,12 @@ def main():
     parser.add_argument("--api-key", type=str, default="",
                         help="API Key (也可通过环境变量 DASHSCOPE_API_KEY 或 OPENAI_API_KEY 设置)")
 
+    # 负面 prompt
+    parser.add_argument("--enable-negative", action="store_true",
+                        help="为每个正向 prompt 额外生成配套的负面 prompt")
+    parser.add_argument("--negative-output-dir", type=str, default="",
+                        help="负面 prompt 输出目录 (默认: output-dir 同级的 _negative 后缀目录)")
+
     # 生成参数
     parser.add_argument("--temperature", type=float, default=0.7,
                         help="生成温度 (默认: 0.7)")
@@ -296,10 +350,21 @@ def main():
         logger.error(f"未找到 caption 文件: {input_dir}/*.txt")
         sys.exit(1)
 
+    # 负面 prompt 目录
+    neg_output_dir = None
+    if args.enable_negative:
+        if args.negative_output_dir:
+            neg_output_dir = Path(args.negative_output_dir)
+        else:
+            neg_output_dir = output_dir.parent / (output_dir.name + "_negative")
+        neg_output_dir.mkdir(parents=True, exist_ok=True)
+
     logger.info(f"待处理: {len(caption_files)} 个样本")
     logger.info(f"后端: {args.backend}, 模型: {args.model}")
     logger.info(f"输入: {input_dir}")
     logger.info(f"输出: {output_dir}")
+    if neg_output_dir:
+        logger.info(f"负面 prompt 输出: {neg_output_dir}")
 
     # 统计
     success = 0
@@ -368,6 +433,25 @@ def main():
                 "new_words": validation["new_words"],
                 "ratio": validation["ratio"],
             })
+
+            # 生成负面 prompt (仅在改写成功时)
+            if neg_output_dir:
+                try:
+                    neg_prompt = generate_negative_prompt(
+                        positive_prompt=rewritten,
+                        backend=args.backend,
+                        model=args.model,
+                        api_base=args.api_base,
+                        api_key=api_key,
+                        temperature=0.5,
+                    )
+                    neg_file = neg_output_dir / f"{sample_id}.txt"
+                    neg_file.write_text(neg_prompt + "\n", encoding="utf-8")
+                    logger.info(f"    → negative prompt: {neg_prompt[:60]}...")
+                    time.sleep(args.delay)
+                except Exception as e:
+                    logger.warning(f"    → negative prompt 生成失败: {e}")
+
         elif rewritten:
             # 验证失败但有输出，仍然保存（标记警告）
             out_file.write_text(rewritten + "\n", encoding="utf-8")
