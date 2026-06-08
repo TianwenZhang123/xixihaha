@@ -122,6 +122,8 @@ Output ONLY the restructured prompt. No explanations."""
 
 USER_TEMPLATE = """Restructure this VLM caption ({word_count} words). First, identify what MOVES in this caption — that is your action subject. Then make ONLY 3 changes: (1) move the action subject to the first word (delete 'The video captures/shows/depicts/features...' if present), (2) find the 1-2 sentences about the subject's motion and add a temporal chain (initially/then/gradually), (3) end the last sentence with a key motion/visual word. Copy ALL other sentences VERBATIM — do not rephrase, compress, or merge paragraphs. Delete only meta-text like 'In summary/Overall/This perspective allows...'. Output must be ~{word_count} words (±15%). Do NOT compress.
 
+CRITICAL CONSTRAINT: You MUST preserve at least 90% of the original words in their exact form. Only add/modify the 3 surgical points above. Every adjective, noun, preposition from the original that is not in the motion sentences MUST appear unchanged in your output.
+
 INPUT:
 {original_caption}
 
@@ -259,9 +261,9 @@ def rewrite_caption(original: str, backend: str, model: str,
             logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words}/{word_count} = {ratio:.0%}")
             continue
 
-        # ── 验证 2: diff check（编辑距离不能超过 50%）──
+        # ── 验证 2: diff check（编辑距离不能超过 35%）──
         edit_ratio = _compute_edit_ratio(original, result)
-        if edit_ratio > 0.50:
+        if edit_ratio > 0.35:
             logger.warning(f"  [重试 {attempt+1}] 改动过大: edit_ratio={edit_ratio:.0%}")
             continue
 
@@ -377,8 +379,8 @@ def main():
                         help="负面 prompt 输出目录 (默认: output-dir 同级的 _negative 后缀目录)")
 
     # 生成参数
-    parser.add_argument("--temperature", type=float, default=0.5,
-                        help="生成温度 (默认: 0.5, V4 验证最佳值)")
+    parser.add_argument("--temperature", type=float, default=0.2,
+                        help="生成温度 (默认: 0.2, 低温度提高保留率)")
     parser.add_argument("--max-retries", type=int, default=3,
                         help="单个样本最大重试次数 (默认: 3)")
     parser.add_argument("--delay", type=float, default=1.0,
