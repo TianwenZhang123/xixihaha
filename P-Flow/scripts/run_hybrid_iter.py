@@ -293,18 +293,7 @@ def llm_rewrite(caption: str, model: str = "qwen-plus",
             logger.warning(f"  [重试 {attempt+1}] 仍以 preamble 开头")
             continue
 
-        # ── 验证 3: 必须包含原文的主要名词（防止完全跑偏）──
-        # 提取原文中的关键名词（简单启发式）
-        original_lower = caption.lower()
-        result_lower = result.lower()
-        # 检查原文至少一半的实词出现在结果中
-        original_words = set(w for w in original_lower.split() if len(w) > 4)
-        if original_words:
-            overlap = sum(1 for w in original_words if w in result_lower)
-            overlap_ratio = overlap / len(original_words)
-            if overlap_ratio < 0.4:
-                logger.warning(f"  [重试 {attempt+1}] 语义偏移过大: 关键词重叠仅 {overlap_ratio:.0%}")
-                continue
+        # ── 验证 3: 已移除（v6 策略：放开写，由后续 VLM verify 兜底纠错）──
 
         return result
 
