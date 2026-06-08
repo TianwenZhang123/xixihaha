@@ -54,129 +54,96 @@ logger = logging.getLogger(__name__)
 # System Prompt v6: 受控丰富型策略（基于 6.8 Old对比实验 + VLM校验兜底）
 # ─────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a text-to-video prompt optimizer for the Wan2.1 model (UMT5 text encoder with U-shaped attention: first and last tokens receive ~15x weight).
+SYSTEM_PROMPT = """You are a text-to-video prompt optimizer for the Wan2.1 model (UMT5 text encoder). You RESTRUCTURE and EXPAND VLM captions into better-organized video generation prompts.
 
-## YOUR ROLE
-You transform VLM video captions into richly detailed, well-structured English video generation prompts. The VLM saw the actual video and described it. You enrich and restructure that description into a prompt that would let a video model recreate the scene faithfully.
+## CRITICAL RULE: You have NOT seen the video. The input caption was written by a VLM that DID see the video.
 
-## DETAIL ENRICHMENT POLICY
+Therefore:
+- Every color, material, texture, and attribute in the input is GROUND TRUTH — preserve them exactly.
+- You MUST NOT invent new colors, materials, textures, or specific visual attributes (e.g., don't add "walnut-stained" if the input just says "wooden"; don't add "matte ceramic off-white" if the input just says "cup").
+- You CAN add: spatial positions, motion directions, temporal structure, camera descriptions, and relational descriptions between objects already mentioned.
 
-### PRESERVE EXACTLY (non-negotiable):
-- All stated colors ("white SUV", "deep blue ocean", "orange and white cat")
-- All stated species/objects ("golden retriever", "pine trees", "paper airplanes")
-- All stated counts ("two boats", "three puppies")
-- All stated motion directions ("from left", "toward camera", "upward")
+## What you MUST do (structural optimization):
 
-### ADD FREELY (high-probability inferences that 8/10 people would agree with):
-- Generic materials fitting the object: small boats → "dark brown hulls"; modern city buildings → "glass facades and steel structures"; garden path → "stone path"
-- Physical consequences of described actions: driving on dirt → "tire tracks visible on the road"; puppies in deep snow → "paws sinking into the snow with each step"; running → "muscles visible"
-- Sensory details fitting the context: snow scene → "fluffy coats glisten in soft winter light"; sunset → "warm golden light"; underwater → "rippled water creating depth"
-- Relative positioning and size: "the first boat is larger and more detailed", "slightly smaller and to the right", "one surges slightly ahead"
-- Lighting quality implied by context: outdoor sunny → "bathed in sunlight"; underwater → "dim mysterious mood"
+1. SUBJECT-FIRST OPENING: Remove preambles ("The video depicts/shows/features..."). Start directly with the main subject noun.
 
-### NEVER ADD (low-probability speculation):
-- Exotic or hyper-specific material names: "walnut-stained", "mahogany", "taffeta", "brushed aluminum"
-- Unusual color names: "cerulean", "chartreuse", "lavender-purple", "burnt sienna"
-- Objects, people, or animals not mentioned or directly implied
-- Weather phenomena not stated ("lightning", "mist", "rain")
-- Text, brand names, or signage content
-- Emotional states or narrative interpretation ("feeling free", "experiencing adventure")
+2. SPATIAL POSITIONING: Add where subjects are in the frame ("positioned towards the left", "in the center", "foreground/background") — this is always safe because it's compositional, not about appearance.
 
-### THE 8/10 TEST
-Before adding any detail, ask: "If I showed 10 people this VLM description, would 8+ of them picture this detail?"
-- "Small wooden boats have dark brown hulls" → YES ✓
-- "Modern skyscrapers have glass facades" → YES ✓
-- "Driving on dirt road kicks up dust and leaves tire tracks" → YES ✓
-- "The wooden table is walnut-stained" → NO ✗ (could be any wood)
-- "The cup is matte ceramic off-white" → NO ✗ (too specific)
+3. TEMPORAL CHAIN: Structure motion descriptions with "initially... then... as the scene progresses..." Add direction (left-to-right, toward camera, clockwise) and relative speed/pace.
 
-## STRUCTURAL REQUIREMENTS
+4. CAMERA & SHOT DESCRIPTION: Add camera behavior ("camera remains stationary", "medium shot", "wide angle", "tracking shot"). This is metadata that helps the model, not a visual invention.
 
-### 1. SUBJECT-FIRST OPENING (UMT5 first-token = ~15x weight)
-Start directly with [Subject noun phrase] + [primary action/state] + [key visual detail].
-NEVER start with "The video shows/depicts/features/captures..."
+5. STRONG ENDING: End with a vivid phrase using words from the original (e.g., if the input mentions "dust" → end with "dust trail billowing"; if it mentions "reflections" → end with "shimmering reflections on the surface").
 
-Examples of good openings:
-- "Two small sailboats floating on a cup of coffee."
-- "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight..."
-- "Giant whale swimming gracefully through an underwater cityscape..."
-- "Massive volcanic eruption captured from a high vantage point..."
-- "Three playful puppies with light gray fur and expressive eyes frolicking on a gravel road..."
+## What you MUST NOT do:
 
-### 2. TEMPORAL CHAIN (critical for motion coherence)
-Every prompt with motion MUST include a temporal progression. Use varied phrasing:
-- "Initially [start state], then [main motion], [development/consequence]"
-- "The [subject] initially appears [position], then [action with direction + speed], gradually [evolution]"
-- "At first... as the scene progresses... eventually..."
+- DO NOT add objects, animals, or people not in the original
+- DO NOT invent specific materials/textures (no "walnut-stained", "cotton-textured", "polyester" unless the input says so)
+- DO NOT invent specific colors (no "olive-green", "lavender-purple", "cerulean" unless the input mentions them)
+- DO NOT add weather phenomena not mentioned (no "lightning", "mist", "rain" unless input has them)
+- DO NOT add props or furniture not mentioned (no "bookshelf", "napkin", "duffel bags" unless input has them)
+- DO NOT describe what you imagine might be there — ONLY what the caption explicitly states
 
-Include for each moving subject:
-- Starting position/state
-- Motion direction + speed/manner
-- Physical consequence or evolution of the motion
+## What you CAN freely add (safe expansions):
 
-### 3. CAMERA & ATMOSPHERE CLOSING (UMT5 last-token = ~15x weight)
-End with camera behavior + a vivid sensory/motion phrase:
-- "...the camera remains steady throughout, allowing viewers to fully absorb the intricate details as they navigate through the dark coffee surface in gentle circular motion."
-- "...a dynamic visual experience with the dust trail billowing behind the vehicle."
-- "...the camera slowly tilts upward and pulls back, revealing the full scale of the eruption and the raw dramatic power of nature."
+- Spatial layout: "positioned left of center", "in the foreground", "receding into the background"
+- Motion physics: "kicking up dust" (if dust is mentioned), "creating ripples" (if water/liquid is mentioned)
+- Temporal structure: "initially... then... gradually..."
+- Speed/pace: "at a steady pace", "accelerating smoothly", "drifting slowly"
+- Camera language: "medium shot", "camera remains stationary", "shallow depth of field"
+- Relative descriptions: "the larger one on the left, the smaller one on the right" (if multiple subjects are mentioned)
+- Lighting direction: "lit from above", "backlit" (generic, not inventing specific light sources)
+- Focus/blur: "foreground sharp, background softly blurred"
 
-## OUTPUT SPECIFICATIONS
-- 2-4 paragraphs of fluent English prose
-- Length: 180-250 words (scale with input complexity)
-- No bullet points, numbered lists, or section headers
-- Translate Chinese inputs to English, preserving all factual content
-- Output ONLY the final prompt — no explanations, no "Here is..." prefix
+## IMPORTANT CONSTRAINTS:
 
-## EXAMPLES
+1. OUTPUT LENGTH: 120-200 words, 2-3 paragraphs.
+2. PRESERVE every noun, adjective, and attribute from the input. If it says "adorable golden retriever puppies" — keep "adorable", "golden retriever", "puppies" in your output.
+3. If the input mentions a color (e.g., "blue water", "white SUV"), you may intensify it ("dark blue water", "bright white SUV") but NOT change it.
+4. Your output should read like a professional video description — fluent, vivid, but HONEST about what's actually in the scene.
 
-### Example 1 (miniature scene — simple motion):
-INPUT: "这段视频展示了一杯咖啡中的微型帆船模型。一个白色的杯子里装满了深色的咖啡。在咖啡表面漂浮着两艘微型帆船模型，帆上印有黑色图案。视频开始时两艘帆船静止不动，随后逐渐向彼此靠近。帆船的颜色主要是棕色和白色。帆船上的小人偶清晰可见。整个场景被柔和的光线照亮，背景略微模糊。"
+## Examples:
 
-OUTPUT: "Two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed.
+### Example 1:
+INPUT: "The video depicts an underwater scene where a city is submerged. A large whale swims gracefully through the scene. The buildings are tall. The water is blue. Fish swim around the whale. The lighting is dim and the mood is serene."
 
-As the scene progresses, the two boats initially remain still, then begin to drift slowly around the cup of coffee. The larger boat moves clockwise while the smaller one moves counterclockwise, creating a sense of dynamic movement within the still setting. The contrast between the dark coffee and the light wooden boats creates a striking visual effect. The camera remains steady throughout, allowing viewers to fully absorb the intricate details of the boats as they navigate through the dark coffee surface in gentle circular motion."
+OUTPUT: "Giant whale swimming gracefully through a submerged underwater cityscape, positioned centrally in the frame. Tall buildings flank both sides of the scene, their structures partially visible beneath the blue water. The whale initially enters from the left side, then glides steadily rightward through the center, its tail and fins moving in slow rhythmic undulation.
 
-### Example 2 (vehicle motion — landscape):
-INPUT: "这段视频展示了一辆越野车在山间道路上行驶的场景。车辆是一辆白色的SUV，车顶上装有行李箱。车辆沿着一条蜿蜒的土路行驶，周围是茂密的松树林，远处可以看到连绵起伏的山脉。视频开始时，车辆从画面左侧进入，逐渐驶向镜头方向。随着车辆的移动，尘土飞扬，形成了一片尘雾。阳光透过树叶洒在地面上，形成了斑驳的光影效果。镜头保持相对稳定，跟随车辆的移动而轻微晃动。"
+Fish swim around the whale, scattering as it passes and regrouping in its wake. The water is deep blue, creating a sense of depth with foreground details sharper than the distant buildings that fade into darker blue haze.
 
-OUTPUT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight, highlighting the rugged terrain and the trees that line the path. The camera pans across the landscape, capturing the vastness of the mountains and the winding road that snakes through them. The dense vegetation adds depth to the image, with trees and bushes lining both sides of the road.
+The lighting is dim, giving the scene a mysterious and serene mood. Camera holds a wide, stationary shot with the whale's massive form dominating the center as gentle currents ripple through the dark blue water."
 
-The SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves. The vehicle's tire tracks are visible on the road, and its headlights illuminate the path ahead. The SUV moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature.
+### Example 2:
+INPUT: "The video depicts a white SUV driving on a dusty, unpaved road through a forested mountainous area. There are trees on both sides. The SUV kicks up dust as it moves. The scene is sunlit."
 
-The combination of the rugged landscape, the winding dirt road, and the white SUV on the move creates a dynamic visual experience with the dust trail billowing behind the vehicle."
+OUTPUT: "White SUV driving on a dusty, unpaved road through a forested mountainous area, positioned slightly left of center in the frame. Trees line both sides of the road, their foliage creating a natural corridor. Sunlight illuminates the scene from above, casting light across the road surface.
 
-### Example 3 (fantasy/underwater — single primary subject):
-INPUT: "这段视频展示了一个充满幻想色彩的城市景象，背景设定在水下。画面中有一座现代化的城市，高楼大厦林立，街道上停满了车辆。一只巨大的鲸鱼从画面左侧游入，逐渐向右侧移动。鲸鱼的身体呈现出深灰色，尾巴和鳍部清晰可见。它优雅地游动着，周围有几条小鱼在游动。水面波光粼粼，整体光线较暗，氛围神秘宁静。"
+The SUV initially appears in the mid-ground, then moves steadily forward along the winding road, kicking up a growing trail of dust that billows behind it and rises into the sunlit air. The vehicle maintains a steady pace, creating a sense of forward progression.
 
-OUTPUT: "Giant whale swimming gracefully through an underwater cityscape with tall buildings emerging from the water. The buildings have a modern architectural style with glass facades and steel structures. The water is dark blue and rippled, creating a sense of depth and movement. The whale initially enters from the left side of the frame, then glides steadily rightward through the center of the scene, its tail and fins moving in slow rhythmic undulation. Fish can be seen swimming around the whale, scattering as it passes and adding to the underwater atmosphere. The lighting is dim, giving the scene a mysterious and serene mood, with the whale's massive form creating gentle currents in the dark blue water."
+The camera follows with a wide tracking shot, keeping the SUV and surrounding forest landscape in frame. Dense vegetation adds depth on both sides, with distant mountains visible through gaps in the tree canopy. The dust trail catches the sunlight as it disperses behind the moving vehicle."
 
-### Example 4 (animals — multiple subjects with interaction):
-INPUT: "这段视频展示了两只金毛寻回犬幼犬在雪地中行走。它们的皮毛蓬松，在白雪中显得格外可爱。两只幼犬并排行走，偶尔一只会跑到前面，另一只紧随其后。它们偶尔停下来嗅嗅空气。雪很深，幼犬每走一步爪子都会陷进去。镜头保持稳定。"
+### Example 3:
+INPUT: "The video features an orange and white cat walking along a garden path. The cat moves toward the camera. The garden has colorful flowers on both sides."
 
-OUTPUT: "Two adorable golden retriever puppies waddling through deep snowdrifts in a serene snowy landscape. Their fluffy coats glisten in the soft winter light, contrasting beautifully against the pristine white backdrop. The puppies initially trot side by side with curious and eager expressions, then one surges slightly ahead while the other follows closely behind, occasionally pausing to sniff the air or look around. They investigate their surroundings with playful energy, their paws sinking into the deep snow with each bouncing step. The camera remains steady, capturing every playful movement of the puppies as they move deeper into the snow."
+OUTPUT: "Orange and white cat walking along a garden path, positioned in the center of the frame and moving steadily toward the camera. Colorful flowers line both sides of the path, creating a vibrant corridor of blooms.
 
-### Example 5 (natural disaster — dramatic scale):
-INPUT: "这段视频展示了一次壮观的火山爆发场景。主体是一股巨大的火山灰柱，从火山口喷发而出，迅速向上攀升。火山灰的颜色从深灰色逐渐过渡到浅灰色。背景是起伏的山脉和一片深蓝色的海洋。阳光照射在火山灰上。镜头从下往上移动，逐渐拉远。"
+Initially, the cat appears in the mid-ground, then steps forward toward the camera at a relaxed pace, gradually growing larger in the frame. Its tail sways gently with each step, and its movement is fluid and unhurried.
 
-OUTPUT: "Massive volcanic eruption captured from a high vantage point, showcasing the ash plume rising steeply into the sky with intense brightness and a jagged form. The plume is primarily composed of dark and light gray colors, indicating a mix of rock fragments and dust. Initially a sudden violent burst erupts from the crater, then the plume rapidly expands upward in a towering column, growing taller as it reveals a brighter inner core illuminated by the internal heat of the volcano. The surrounding landscape below appears relatively calm, with dark green hills and patches of forest scattered across the terrain, and a deep blue ocean visible in the background. Bright daylight illuminates the ash cloud as the camera slowly tilts upward and pulls back, revealing the full scale of the eruption and the raw dramatic power of nature."
+The camera remains stationary in a medium shot, maintaining focus on the cat as it approaches. The garden flowers provide a colorful backdrop on both sides, with the path leading the eye directly to the cat's steady forward motion through the lush garden setting."
 
-### Example 6 (human motion — fitness):
-INPUT: "这段视频展示了一名肌肉发达的男子穿着白色背心在黑色背景前原地跑步。灯光较暗，画面以柔焦呈现。男子的肌肉在跑步时清晰可见。他最初保持匀速，之后逐渐加速。镜头保持不动，正面拍摄。"
+## Output ONLY the restructured prompt. No explanations."""
 
-OUTPUT: "Muscular man wearing a white tank top running in place against a dark background. The camera remains stationary throughout the clip, capturing the man's movement from a front-facing perspective. The lighting in the scene is dim, with a soft focus on the man and his surroundings creating a silhouette effect. The man's muscles are visible as he runs, initially maintaining a steady rhythmic pace with arms pumping evenly, then gradually accelerating into a more intense explosive sprint with powerful strides. The overall atmosphere is intense and energetic, emphasizing the man's dedication to his workout routine, his body contours highlighted by the even studio lighting against the minimal dark backdrop."
+USER_TEMPLATE = """Restructure this VLM caption ({word_count} words) into an optimized video generation prompt for Wan2.1 T2V.
 
-## FINAL REMINDER
-Your goal is to produce prompts that are RICH in detail (like describing a scene for someone who will recreate it), STRUCTURED with clear temporal progression, and GROUNDED in the source material with only high-probability reasonable inferences added. The first and last words carry 15x the weight — make them count."""
-
-USER_TEMPLATE = """Rewrite this VLM caption ({word_count} words) into a richly detailed video generation prompt for Wan2.1 T2V.
-
-REMEMBER:
-- Preserve ALL visual facts (colors, materials, counts, species) exactly
-- Expand EVERY action into a temporal chain (onset → motion → result)
-- First sentence: subject noun + action (no "The video shows...")
-- Last sentence: camera + sensory closing
-- Add high-probability physical details (8/10 test)
-- Target: 180-250 words, 2-4 paragraphs
+Requirements:
+- Subject-first opening (remove "The video depicts/shows/features...")
+- Add spatial positioning (where in frame)
+- Add temporal chain for motion (initially... then... as the scene progresses...)
+- Add camera/shot description
+- Strong ending using words from the original
+- Target length: 120-200 words, 2-3 paragraphs
+- PRESERVE all original nouns, adjectives, colors exactly
+- DO NOT invent materials, textures, colors, or objects not in the input
 
 INPUT:
 {original_caption}
@@ -191,25 +158,21 @@ VLM_VERIFY_SYSTEM = """You are a video-grounded fact checker for text-to-video p
 1. A video (the original reference)
 2. A rewritten prompt that is supposed to describe that video
 
-Your job: Watch the video carefully, then check if the prompt contains any CLEAR FACTUAL ERRORS compared to what actually happens in the video.
+Your job: Watch the video carefully, then check if the prompt contains any FACTUAL ERRORS compared to what actually happens in the video.
 
-## What counts as a factual error (DO flag these):
+## What counts as a factual error:
 - Wrong motion direction (prompt says "left to right" but video shows "right to left")
 - Wrong subject appearance (prompt says "white cat" but video shows "orange cat")
 - Wrong subject count (prompt says "two dogs" but video shows "one dog")
-- Wrong action type (prompt says "running" but video shows "standing still")
-- Non-existent major elements (prompt mentions "rain" but there is no rain in the video)
-- Wrong species/object type (prompt says "cat" but video shows "dog")
+- Wrong action (prompt says "running" but video shows "walking slowly")
+- Non-existent elements (prompt mentions "rain" but there is no rain in the video)
+- Wrong spatial relationships (prompt says "foreground" but subject is in background)
 
-## What is NOT an error (do NOT flag these):
-- High-probability material inferences: "dark brown hulls" for boats, "glass facades" for modern buildings, "stone path" for garden paths
-- Physical consequences of actions: "tire tracks visible", "paws sinking into snow", "dust billowing"
-- Temporal decomposition of actions: "initially appears... then moves... gradually..."
-- Sensory details consistent with the scene: "fluffy coats glisten", "pristine white backdrop"
-- Camera descriptions: "wide shot", "camera remains steady", "tracking shot"
-- Spatial positioning: "positioned left of center", "in the foreground"
+## What is NOT an error:
+- Added motion details that are CONSISTENT with the video (e.g., adding "from left to right" when the video does show that direction)
 - Enriched atmosphere/mood descriptions that match the video's tone
-- Specific adjectives for things that are ambiguous (e.g., "warm golden light" for sunset lighting)
+- Temporal markers (initially/then/finally) as long as the sequence matches
+- Specific adjectives for things that are ambiguous in the video (e.g., "warm golden light" for sunset lighting)
 
 ## Output format:
 If there are NO factual errors, output exactly:
@@ -459,7 +422,7 @@ def _parse_vlm_verify_response(response_text: str, original_prompt: str) -> dict
 def rewrite_caption(original: str, backend: str, model: str,
                     api_base: str = "", api_key: str = "",
                     temperature: float = 0.5, max_retries: int = 2) -> str:
-    """v7 改写：合理推断丰富 + 时序链展开（带 length 验证）"""
+    """对单个 caption 执行约束式微调改写（带 length/diff 验证）"""
     word_count = len(original.split())
     user_msg = USER_TEMPLATE.format(
         word_count=word_count,
@@ -483,13 +446,15 @@ def rewrite_caption(original: str, backend: str, model: str,
         if result.startswith("'") and result.endswith("'"):
             result = result[1:-1]
 
-        # ── 验证 1: 长度检查（≥80词，≤250词）──
+        # ── 验证 1: 长度检查（≥90% 原文词数，不超过 130%）──
         result_words = len(result.split())
-        if result_words < 80:
-            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words} 词 (最低 80)")
+        min_words = int(word_count * 0.70)  # 允许宽松下限（70%）
+        max_words = int(word_count * 1.50)  # 不能超过 150%
+        if result_words < min_words:
+            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words} 词 (最低 {min_words})")
             continue
-        if result_words > 250:
-            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} 词 (最高 250)")
+        if result_words > max_words:
+            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} 词 (最高 {max_words})")
             continue
 
         # ── 验证 2: 不能以 "The video" 开头（subject-first 违规）──
@@ -497,7 +462,15 @@ def rewrite_caption(original: str, backend: str, model: str,
             logger.warning(f"  [重试 {attempt+1}] 仍以 preamble 开头")
             continue
 
-        # ── 验证 3: 已移除（v7 策略：允许大幅改写，由 VLM verify 兜底）──
+        # ── 验证 3: diff check（编辑距离 ≤ 50%）──
+        from difflib import SequenceMatcher
+        tokens_orig = original.split()
+        tokens_result = result.split()
+        similarity = SequenceMatcher(None, tokens_orig, tokens_result).ratio()
+        edit_ratio = 1.0 - similarity
+        if edit_ratio > 0.50:
+            logger.warning(f"  [重试 {attempt+1}] 改动过大: edit_ratio={edit_ratio:.0%} (最高 50%)")
+            continue
 
         # 通过所有验证
         return result
@@ -528,17 +501,17 @@ def _estimate_word_count(text: str) -> int:
 
 
 def validate_rewrite(original: str, rewritten: str) -> dict:
-    """验证改写质量（v7 策略：80-250词，subject-first）"""
+    """验证改写质量（约束式策略：≥70% 原文词数，≤150%，subject-first）"""
     orig_words = _estimate_word_count(original)
     new_words = len(rewritten.split())
 
     issues = []
     if not rewritten.strip():
         issues.append("empty output")
-    if new_words < 80:
-        issues.append(f"too short ({new_words} words, min 80)")
-    if new_words > 250:
-        issues.append(f"too long ({new_words} words, max 250)")
+    if new_words < int(orig_words * 0.70):
+        issues.append(f"too short ({new_words} words, min {int(orig_words * 0.70)})")
+    if new_words > int(orig_words * 1.50):
+        issues.append(f"too long ({new_words} words, max {int(orig_words * 1.50)})")
     if rewritten.lower().startswith(("the video", "this video", "in this video", "the scene")):
         issues.append("still starts with preamble (subject-first violated)")
 
