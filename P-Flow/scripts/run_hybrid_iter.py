@@ -273,7 +273,7 @@ def call_llm(prompt: str, system: str, model: str = "qwen-plus",
 
 def llm_rewrite(caption: str, model: str = "qwen-plus",
                 max_retries: int = 2) -> str:
-    """LLM v7d 改写：自然时序 + 最多1处推断(材质/光线) + 100-150词"""
+    """LLM v7e 改写：自然时序 + 最多1处推断(材质/光线) + 运动保真 + 100-150词"""
     word_count = len(caption.split())
     user_msg = (
         f"Rewrite this VLM caption ({word_count} words) into a video generation prompt.\n\n"

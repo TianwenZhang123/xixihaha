@@ -9,17 +9,11 @@ P-Flow Runner - 通过命令行 flag 控制各改动点。
     # 启用噪声先验 (inversion + svd + blend)
     python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend
 
-    # 启用 Velocity Matching (Δe embedding 注入)
-    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --velocity
-
-    # 噪声先验 + Velocity (推荐最强组合)
-    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --velocity
-
     # 启用迭代优化 (10轮VLM反馈)
     python run.py --video /path/to/ref.mp4 --caption "a cat" --iter 10
 
-    # 完整 P-Flow (所有改动点)
-    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --velocity --iter 10 --composite
+    # 完整 P-Flow (噪声先验 + 迭代优化)
+    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --iter 10 --composite
 
     # 用中点法替代Euler
     python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --midpoint
@@ -31,17 +25,13 @@ P-Flow Runner - 通过命令行 flag 控制各改动点。
     --inversion      启用 Flow Matching Inversion (从参考视频反演噪声)
     --svd            启用 SVD 两阶段滤波 (空间去内容 + 时间保运动)
     --blend          启用噪声混合 (η = sqrt(α)*η_temporal + sqrt(1-α)*η_random)
-    --velocity       启用 Velocity Field Matching (Δe embedding 注入, 需 --inversion)
-    --attn_inject    启用 Self-Attention K/V Injection (参考视频注意力注入, 需 --inversion)
     --iter N         启用迭代VLM优化 (N轮反馈循环)
     --midpoint       使用二阶中点法ODE求解器 (替代默认Euler)
     --composite      启用三面板垂直拼接 (ref|prev|current 送VLM对比)
 
 快捷组合:
     --noise_prior  等价于 --inversion --svd --blend
-    --velocity_full 等价于 --inversion --svd --blend --velocity
-    --attn_full    等价于 --inversion --svd --blend --attn_inject
-    --full         等价于 --inversion --svd --blend --velocity --attn_inject --iter 10 --composite
+    --full         等价于 --inversion --svd --blend --iter 10 --composite
 """
 
 import sys
@@ -73,33 +63,18 @@ def parse_args():
     p.add_argument("--inversion", action="store_true", help="启用 Flow Matching Inversion")
     p.add_argument("--svd", action="store_true", help="启用 SVD 滤波")
     p.add_argument("--blend", action="store_true", help="启用噪声混合")
-    p.add_argument("--velocity", action="store_true", help="启用 Velocity Field Matching (Δe, 需 --inversion)")
-    p.add_argument("--attn_inject", action="store_true", help="启用 Self-Attention K/V Injection (需 --inversion)")
     p.add_argument("--iter", type=int, default=0, help="迭代轮数 (0=不迭代)")
     p.add_argument("--midpoint", action="store_true", help="使用中点法ODE求解器")
     p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
 
     # ── 快捷组合 ──
     p.add_argument("--noise_prior", action="store_true", help="快捷: --inversion --svd --blend")
-    p.add_argument("--velocity_full", action="store_true", help="快捷: --inversion --svd --blend --velocity")
-    p.add_argument("--attn_full", action="store_true", help="快捷: --inversion --svd --blend --attn_inject")
     p.add_argument("--full", action="store_true", help="快捷: 全部启用 (iter=10)")
 
     # ── 参数调节 ──
-    p.add_argument("--alpha", type=float, default=0.001, help="噪声混合权重")
+    p.add_argument("--alpha", type=float, default=0.003, help="噪声混合权重 (推荐 0.001~0.01, P-Flow论文用 0.001)")
     p.add_argument("--rho_s", type=float, default=0.1, help="空间SVD阈值")
     p.add_argument("--rho_m", type=float, default=0.9, help="时间SVD阈值")
-    p.add_argument("--embed_strength", type=float, default=0.005, help="Δe 注入强度")
-    p.add_argument("--velocity_steps", type=int, default=30, help="Velocity matching 优化步数")
-    p.add_argument("--velocity_lr", type=float, default=1e-3, help="Velocity matching 学习率")
-    p.add_argument("--velocity_K", type=int, default=4, help="每步采样的时间步数量 (stratified)")
-    p.add_argument("--velocity_motion_weight", type=float, default=1.0, help="运动区域加权强度 (0=关闭, 1=全开)")
-    p.add_argument("--attn_inject_gamma", type=float, default=0.3, help="Attention Injection γ 强度 (0=不注入, 1=完全替换)")
-    p.add_argument("--attn_inject_blocks", type=str, default="all", help="注入的 block 范围: all/first_half/last_half/“0,5,10”")
-    p.add_argument("--attn_inject_block_schedule", type=str, default="uniform",
-                   choices=["uniform", "front_heavy", "back_heavy"], help="Block维度γ调度")
-    p.add_argument("--attn_inject_timestep_schedule", type=str, default="linear_decay",
-                   choices=["constant", "linear_decay", "cosine_decay"], help="时间维度γ调度")
     p.add_argument("--steps", type=int, default=30, help="推理步数")
     p.add_argument("--guidance", type=float, default=5.0, help="CFG scale")
     p.add_argument("--seed", type=int, default=42, help="随机种子")
@@ -111,6 +86,19 @@ def parse_args():
     p.add_argument("--width", type=int, default=832)
     p.add_argument("--num_frames", type=int, default=81)
     p.add_argument("--fps", type=int, default=15)
+
+    # ── V2 SVD 参数 ──
+    p.add_argument("--svd_mode", type=str, default="adaptive",
+                   choices=["v1", "renorm", "highfreq", "adaptive"],
+                   help="SVD滤波模式 (v1=原始, renorm=+标准化, highfreq=高频+标准化, adaptive=自动)")
+    p.add_argument("--svd_low_freq_ratio", type=float, default=0.3,
+                   help="低频段占比 (highfreq模式下, 前30%%奇异值视为低频)")
+    p.add_argument("--no_knee_auto", action="store_true",
+                   help="禁用自动拐点检测, 使用固定 low_freq_ratio")
+    p.add_argument("--svd_motion_threshold", type=float, default=0.15,
+                   help="adaptive模式的运动强度阈值 (低于此值跳过SVD)")
+    p.add_argument("--svd_diagnostics", action="store_true",
+                   help="保存SVD诊断信息 (分析用)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
@@ -139,38 +127,14 @@ def build_config(args) -> PFlowConfig:
         args.inversion = True
         args.svd = True
         args.blend = True
-        args.velocity = True
-        args.attn_inject = True
         args.composite = True
         if args.iter == 0:
             args.iter = 10
-
-    if args.attn_full:
-        args.inversion = True
-        args.svd = True
-        args.blend = True
-        args.attn_inject = True
-
-    if args.velocity_full:
-        args.inversion = True
-        args.svd = True
-        args.blend = True
-        args.velocity = True
 
     if args.noise_prior:
         args.inversion = True
         args.svd = True
         args.blend = True
-
-    # velocity 依赖 inversion
-    if args.velocity and not args.inversion:
-        print("警告: --velocity 需要 --inversion，自动启用 --inversion")
-        args.inversion = True
-
-    # attn_inject 依赖 inversion
-    if args.attn_inject and not args.inversion:
-        print("警告: --attn_inject 需要 --inversion，自动启用 --inversion")
-        args.inversion = True
 
     return PFlowConfig(
         t2v_path=args.model_path,
@@ -184,24 +148,14 @@ def build_config(args) -> PFlowConfig:
         use_inversion=args.inversion,
         use_svd=args.svd,
         use_blend=args.blend,
-        use_velocity=args.velocity,
-        use_attn_inject=args.attn_inject,
         use_iter=args.iter > 0,
         use_midpoint=args.midpoint,
         use_composite=args.composite,
         alpha=args.alpha,
         rho_s=args.rho_s,
         rho_m=args.rho_m,
-        embed_strength=args.embed_strength,
-        velocity_steps=args.velocity_steps,
-        velocity_lr=args.velocity_lr,
-        velocity_K=args.velocity_K,
-        velocity_motion_weight=args.velocity_motion_weight,
-        attn_inject_gamma=args.attn_inject_gamma,
-        attn_inject_blocks=args.attn_inject_blocks,
-        attn_inject_block_schedule=args.attn_inject_block_schedule,
-        attn_inject_timestep_schedule=args.attn_inject_timestep_schedule,
         inversion_steps=args.inversion_steps,
+        use_fast_svd=not args.no_fast_svd,
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,
         vlm_model_path=args.vlm_path,
@@ -209,6 +163,12 @@ def build_config(args) -> PFlowConfig:
         negative_prompt_file=args.negative_prompt_dir,
         seed=args.seed,
         temporal_energy_threshold=args.temporal_energy_threshold,
+        # V2 SVD 参数
+        svd_mode=args.svd_mode,
+        svd_low_freq_ratio=args.svd_low_freq_ratio,
+        svd_knee_auto=not args.no_knee_auto,
+        svd_motion_threshold=args.svd_motion_threshold,
+        svd_diagnostics=args.svd_diagnostics,
     )
 
 
@@ -293,12 +253,6 @@ def main():
     print(f"  Flags: {flags or ['baseline (无改动)']}")
     if config.use_blend:
         print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
-    if config.use_velocity:
-        print(f"  velocity: steps={config.velocity_steps}, lr={config.velocity_lr}, embed_strength={config.embed_strength}")
-        print(f"  velocity v2: K={config.velocity_K}, motion_weight={config.velocity_motion_weight}")
-    if config.use_attn_inject:
-        print(f"  attn_inject: γ={config.attn_inject_gamma}, blocks={config.attn_inject_blocks}")
-        print(f"  attn_inject schedule: block={config.attn_inject_block_schedule}, timestep={config.attn_inject_timestep_schedule}")
     if config.use_iter:
         print(f"  iterations={config.i_max}")
     print()

@@ -34,7 +34,7 @@ import torch
 
 from .distributed import setup_single_gpu, load_model_single_gpu, cleanup_gpu_memory
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
-from .svd_filter import SVDFilter, SVDFilterConfig, compute_temporal_energy_ratio, compute_svd_diagnostics
+from .svd_filter import SVDFilter, compute_temporal_energy_ratio
 from .video_utils import (
     load_video, save_video_tensor, normalize_video, denormalize_video,
     create_vertical_composite,
@@ -75,21 +75,12 @@ class PFlowConfig:
     use_midpoint: bool = False     # Midpoint ODE Solver
     use_composite: bool = False    # Vertical Composite for VLM
     # ── Noise Prior 参数 ──
-    alpha: float = 0.003           # 混合权重 (√α·η_temporal + √(1-α)·η_random)
-                                  # P-Flow论文用 0.001, 我们V2 renorm后有效信号增强约3x
-                                  # 推荐搜索范围: 0.001 ~ 0.01
+    alpha: float = 0.001           # 混合权重 (√α·η_temporal + √(1-α)·η_random)
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
     temporal_energy_threshold: float = 0.0  # 自适应SVD跳过阈值 (0=禁用; >0时低于此值跳过SVD)
-
-    # ── V2 SVD 新增参数 ──
-    svd_mode: str = "adaptive"    # SVD 滤波模式: v1 / renorm / highfreq / adaptive
-    svd_low_freq_ratio: float = 0.3  # 低频段占比 (highfreq 模式用)
-    svd_knee_auto: bool = True    # 自动拐点检测
-    svd_motion_threshold: float = 0.15  # 运动强度阈值 (adaptive 模式)
-    svd_diagnostics: bool = False # 是否保存 SVD 诊断信息
 
 
     # ── 迭代优化参数 ──
@@ -304,14 +295,9 @@ class PFlowPipeline:
         self, ref_video: torch.Tensor, prompt: str
     ) -> tuple:
         """
-        改动点: Inversion + SVD → η_temporal (V2)
+        改动点: Inversion + SVD → η_temporal
 
-        流程: V_ref → VAE encode → Flow Inversion → SVD V2 → η_temporal
-
-        V2 改进:
-            - SVD 滤波后自动 renormalize 到 N(0,1)
-            - 支持高频段分离 (避免与 v7e 文本运动描述冲突)
-            - 自适应模式根据 motion_strength 动态选择策略
+        流程: V_ref → VAE encode → Flow Inversion → (SVD filter) → η_temporal
 
         Returns:
             (eta_temporal, eta_inv_raw, z0, prompt_embeds):
@@ -344,40 +330,36 @@ class PFlowPipeline:
         # 保留原始反演噪声
         eta_inv_raw = eta_inv
 
-        # SVD Filtering V2
+        # SVD Filtering (如果启用)
         if self.config.use_svd:
-            svd_config = SVDFilterConfig(
-                rho_s=self.config.rho_s,
-                rho_m=self.config.rho_m,
-                mode=self.config.svd_mode,
-                low_freq_ratio=self.config.svd_low_freq_ratio,
-                knee_auto=self.config.svd_knee_auto,
-                motion_strength_threshold=self.config.svd_motion_threshold,
-                use_fast_svd=self.config.use_fast_svd,
-            )
-            svd_filter = SVDFilter(config=svd_config)
-
-            logger.info(
-                f"  [SVD-V2] mode={self.config.svd_mode}, "
-                f"ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}"
-            )
-
-            eta_temporal = svd_filter.filter(eta_inv)
-
-            # 可选: 保存诊断信息
-            if self.config.svd_diagnostics:
-                diag = compute_svd_diagnostics(eta_inv, config=svd_config)
-                logger.info(
-                    f"  [SVD-V2 Diagnostics] "
-                    f"motion_strength={diag['motion_strength']:.4f}, "
-                    f"k_m={diag['k_m']}, k_low={diag['k_low']}, "
-                    f"raw_std={diag['temporal_raw_std']:.4f}, "
-                    f"renormed_std={diag['temporal_renormed_std']:.4f}, "
-                    f"energy: low={diag['energy_low_freq_pct']:.1f}% "
-                    f"high={diag['energy_high_freq_pct']:.1f}% "
-                    f"residual={diag['energy_residual_pct']:.1f}%"
+            # 自适应跳过：计算 temporal 能量占比
+            if self.config.temporal_energy_threshold > 0:
+                energy_ratio = compute_temporal_energy_ratio(
+                    eta_inv, rho_s=self.config.rho_s, rho_m=self.config.rho_m
                 )
-                self._svd_diagnostics = diag
+                logger.info(f"  [SVD] temporal_energy_ratio={energy_ratio:.4f}, threshold={self.config.temporal_energy_threshold}")
+                if energy_ratio < self.config.temporal_energy_threshold:
+                    logger.info(f"  [SVD] ⏭️ 跳过 SVD (运动信号过弱，注入会引入噪声)")
+                    eta_temporal = eta_inv
+                else:
+                    logger.info(f"  [SVD] ✅ 应用 SVD (运动信号足够强)")
+                    svd_filter = SVDFilter(
+                        rho_s=self.config.rho_s, rho_m=self.config.rho_m
+                    )
+                    if self.config.use_fast_svd:
+                        eta_temporal = svd_filter.filter_efficient(eta_inv)
+                    else:
+                        eta_temporal = svd_filter.filter(eta_inv)
+            else:
+                # 非自适应模式：总是应用 SVD
+                logger.info(f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}, fast={self.config.use_fast_svd}")
+                svd_filter = SVDFilter(
+                    rho_s=self.config.rho_s, rho_m=self.config.rho_m
+                )
+                if self.config.use_fast_svd:
+                    eta_temporal = svd_filter.filter_efficient(eta_inv)
+                else:
+                    eta_temporal = svd_filter.filter(eta_inv)
         else:
             eta_temporal = eta_inv
 
@@ -419,20 +401,7 @@ class PFlowPipeline:
         """
         改动点: Noise Blending
 
-        混合公式: η = √α · η_temporal + √(1-α) · η_random
-        当 η_temporal ~ N(0,1) 且 η_random ~ N(0,1) 时, η ~ N(0,1) ✓
-
-        V2 renorm 的价值 (为什么不是让 α 变大):
-            V1: α=0.001, η_temporal std≈0.35 → 有效信号 = 0.001 × 0.35 ≈ 0.00035σ
-            V2: α=0.001, η_temporal std=1.0  → 有效信号 = 0.001 × 1.0  = 0.001σ (≈3x更强)
-
-            renorm 让小 α 下注入的运动结构不再被方差压缩"淹没"
-
-        为什么 α 必须很小 (0.001~0.01):
-            1. P-Flow 论文 Table 4: α=0.001 → DynDeg 0.94; α=0.01 → DynDeg 0.88 (↓6%)
-            2. η_temporal 经 SVD 低秩投影后是各向异性的 (非各向同性高斯)
-            3. 大 α 会过度约束去噪过程，压制动态
-            4. 小 α 的作用是"微弱的方向性锚点"，而非强制运动方向
+        η = √α · η_temporal + √(1-α) · η_random
         """
         if eta_temporal is None or not self.config.use_blend:
             return None  # 让 diffusers 自己采样随机噪声
@@ -445,18 +414,10 @@ class PFlowPipeline:
         )
 
         alpha = self.config.alpha
-        sqrt_alpha = torch.sqrt(torch.tensor(alpha, device=self.device))
-        sqrt_1_minus_alpha = torch.sqrt(torch.tensor(1.0 - alpha, device=self.device))
-
-        eta = sqrt_alpha * eta_temporal + sqrt_1_minus_alpha * eta_random
-
-        # 验证混合后分布 (应接近 N(0,1))
-        logger.debug(
-            f"  [Blend] α={alpha:.3f}, "
-            f"η_temporal std={eta_temporal.std():.4f}, "
-            f"η_mixed std={eta.std():.4f}, mean={eta.mean():.4f}"
+        eta = (
+            torch.sqrt(torch.tensor(alpha, device=self.device)) * eta_temporal
+            + torch.sqrt(torch.tensor(1.0 - alpha, device=self.device)) * eta_random
         )
-
         return eta
 
     @torch.no_grad()

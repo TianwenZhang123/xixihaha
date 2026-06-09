@@ -51,7 +51,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# System Prompt v6: 受控丰富型策略（基于 6.8 Old对比实验 + VLM校验兜底）
+# System Prompt v7e: 自然时序 + 最多1处推断 + 运动保真约束 + VLM校验兜底
 # ─────────────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are a text-to-video prompt optimizer. You restructure VLM captions into effective video generation prompts for the Wan2.1 model.
@@ -412,7 +412,7 @@ def _parse_vlm_verify_response(response_text: str, original_prompt: str) -> dict
 def rewrite_caption(original: str, backend: str, model: str,
                     api_base: str = "", api_key: str = "",
                     temperature: float = 0.5, max_retries: int = 2) -> str:
-    """v7d 改写：自然时序 + 最多1处推断(材质/光线) + 100-150词"""
+    """v7e 改写：自然时序 + 最多1处推断(材质/光线) + 运动保真 + 100-150词"""
     word_count = len(original.split())
     user_msg = USER_TEMPLATE.format(
         word_count=word_count,
@@ -481,7 +481,7 @@ def _estimate_word_count(text: str) -> int:
 
 
 def validate_rewrite(original: str, rewritten: str) -> dict:
-    """验证改写质量（v7d 策略：80-160词，subject-first）"""
+    """验证改写质量（v7e 策略：80-160词，subject-first，运动保真）"""
     orig_words = _estimate_word_count(original)
     new_words = len(rewritten.split())
 
