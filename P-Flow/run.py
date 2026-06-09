@@ -105,6 +105,8 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42, help="随机种子")
     p.add_argument("--inversion_steps", type=int, default=50, help="反演ODE步数 (30=快速, 50=标准)")
     p.add_argument("--no_fast_svd", action="store_true", help="禁用 randomized SVD (使用精确SVD)")
+    p.add_argument("--temporal_energy_threshold", type=float, default=0.0,
+                   help="自适应SVD跳过阈值 (0=禁用; 推荐0.01, 低于此值跳过SVD)")
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--width", type=int, default=832)
     p.add_argument("--num_frames", type=int, default=81)
@@ -206,6 +208,7 @@ def build_config(args) -> PFlowConfig:
         negative_prompt=args.negative_prompt,
         negative_prompt_file=args.negative_prompt_dir,
         seed=args.seed,
+        temporal_energy_threshold=args.temporal_energy_threshold,
     )
 
 

@@ -32,7 +32,7 @@ import torch
 
 from .distributed import setup_single_gpu, load_model_single_gpu, cleanup_gpu_memory
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
-from .svd_filter import SVDFilter
+from .svd_filter import SVDFilter, compute_temporal_energy_ratio
 from .velocity_matching import VelocityMatcher
 from .attn_inject import AttnInjector, AttnInjectConfig, AttentionKVCache
 from .video_utils import (
@@ -81,6 +81,7 @@ class PFlowConfig:
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
+    temporal_energy_threshold: float = 0.0  # 自适应SVD跳过阈值 (0=禁用; >0时低于此值跳过SVD)
 
     # ── Velocity Matching 参数 ──
     velocity_steps: int = 30      # Δe 优化步数 (轻量版, VMAD用100)
@@ -386,14 +387,34 @@ class PFlowPipeline:
 
         # SVD Filtering (如果启用)
         if self.config.use_svd:
-            logger.info(f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}, fast={self.config.use_fast_svd}")
-            svd_filter = SVDFilter(
-                rho_s=self.config.rho_s, rho_m=self.config.rho_m
-            )
-            if self.config.use_fast_svd:
-                eta_temporal = svd_filter.filter_efficient(eta_inv)
+            # 自适应跳过：计算 temporal 能量占比
+            if self.config.temporal_energy_threshold > 0:
+                energy_ratio = compute_temporal_energy_ratio(
+                    eta_inv, rho_s=self.config.rho_s, rho_m=self.config.rho_m
+                )
+                logger.info(f"  [SVD] temporal_energy_ratio={energy_ratio:.4f}, threshold={self.config.temporal_energy_threshold}")
+                if energy_ratio < self.config.temporal_energy_threshold:
+                    logger.info(f"  [SVD] ⏭️ 跳过 SVD (运动信号过弱，注入会引入噪声)")
+                    eta_temporal = eta_inv
+                else:
+                    logger.info(f"  [SVD] ✅ 应用 SVD (运动信号足够强)")
+                    svd_filter = SVDFilter(
+                        rho_s=self.config.rho_s, rho_m=self.config.rho_m
+                    )
+                    if self.config.use_fast_svd:
+                        eta_temporal = svd_filter.filter_efficient(eta_inv)
+                    else:
+                        eta_temporal = svd_filter.filter(eta_inv)
             else:
-                eta_temporal = svd_filter.filter(eta_inv)
+                # 非自适应模式：总是应用 SVD
+                logger.info(f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}, fast={self.config.use_fast_svd}")
+                svd_filter = SVDFilter(
+                    rho_s=self.config.rho_s, rho_m=self.config.rho_m
+                )
+                if self.config.use_fast_svd:
+                    eta_temporal = svd_filter.filter_efficient(eta_inv)
+                else:
+                    eta_temporal = svd_filter.filter(eta_inv)
         else:
             eta_temporal = eta_inv
 

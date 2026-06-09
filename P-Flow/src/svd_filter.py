@@ -230,3 +230,40 @@ def compute_svd_statistics(noise: torch.Tensor) -> Dict[str, torch.Tensor]:
         "spatial_rank": len(S_spatial),
         "temporal_rank": len(S_temporal),
     }
+
+
+def compute_temporal_energy_ratio(
+    noise_inv: torch.Tensor,
+    rho_s: float = 0.1,
+    rho_m: float = 0.9,
+) -> float:
+    """
+    计算 SVD 滤波后 temporal 成分的能量占比。
+
+    用于自适应判断是否应该跳过 SVD 噪声先验：
+    - 值越高 → 运动信号越强 → SVD 有效
+    - 值越低 → 静态/弱运动 → SVD 输出接近噪声，应跳过
+
+    Args:
+        noise_inv: 反演噪声 (C, F, H, W) 或 (B, C, F, H, W)
+        rho_s: 空间滤波阈值
+        rho_m: 时间保留阈值
+
+    Returns:
+        ratio: filtered_energy / original_energy (0~1)
+    """
+    if noise_inv.dim() == 5:
+        noise_inv = noise_inv[0]
+
+    if noise_inv.dtype in (torch.bfloat16, torch.float16):
+        noise_inv = noise_inv.float()
+
+    original_energy = (noise_inv ** 2).sum().item()
+    if original_energy == 0:
+        return 0.0
+
+    svd_filter = SVDFilter(rho_s=rho_s, rho_m=rho_m)
+    filtered = svd_filter._filter_single(noise_inv)
+    filtered_energy = (filtered ** 2).sum().item()
+
+    return filtered_energy / original_energy
