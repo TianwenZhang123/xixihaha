@@ -240,10 +240,33 @@ def run_batch(pipeline, args):
 def main():
     args = parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-    )
+    # ── 日志配置: 同时输出到终端 + 自动保存到文件 ──
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    log_format = "%(asctime)s [%(levelname)s] %(message)s"
+
+    # 确保输出目录存在
+    log_dir = Path(args.output_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "run_log.txt"
+
+    # 设置 root logger: 终端 + 文件双输出
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    formatter = logging.Formatter(log_format)
+
+    # 终端 handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # 文件 handler (追加模式，多次运行日志累积)
+    file_handler = logging.FileHandler(str(log_file), mode="a", encoding="utf-8")
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    logging.info(f"日志将保存到: {log_file.resolve()}")
 
     config = build_config(args)
 
