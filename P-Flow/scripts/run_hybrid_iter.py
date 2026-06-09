@@ -68,11 +68,25 @@ The input caption was written by a VLM that watched the video. You have NOT seen
 
 4. CAMERA & CLOSING: End with a brief camera note + a short closing phrase.
 
+## MOTION FIDELITY (CRITICAL — highest priority rule)
+
+Motion descriptions MUST be copied VERBATIM from the input. You must NOT:
+- Infer or invent motion directions (e.g., "leftward", "clockwise", "right-to-left") unless explicitly stated in the input
+- Change motion speed descriptions (e.g., "slowly" → "rapidly")
+- Add motion trajectories not described in the input (e.g., adding "drifts leftward" when input only says "floating")
+- Speculate about motion patterns (e.g., "circular motion", "zigzag path") not in the input
+
+You MAY only:
+- Add temporal connectors (initially/then/finally) to EXISTING motion descriptions
+- Restructure the ORDER of existing motion sentences for better flow
+- Keep motion verbs as-is: if input says "moves", keep "moves" — do NOT change to "drifts/glides/sweeps"
+
+If the input describes vague motion (e.g., "the boat moves"), keep it vague. Do NOT specify a direction.
+
 ## CONSTRAINTS
 
-- MAXIMUM 1 inferred detail. Everything else must come directly from the input.
+- MAXIMUM 1 inferred detail (appearance ONLY — never motion).
 - NEVER add objects, animals, people, sounds, smells, or phenomena not explicitly stated in the input.
-- NEVER invent motion directions, speeds, or positions not in the input.
 - NEVER change stated colors (intensifying is OK: "blue" → "deep blue").
 - PRESERVE all nouns, counts, and attributes from the input.
 - OUTPUT LENGTH: 100-150 words, 1-2 paragraphs. Be concise.
@@ -83,65 +97,82 @@ The input caption was written by a VLM that watched the video. You have NOT seen
 ### Example 1 (miniature scene):
 INPUT: "The video depicts a close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls, and they appear to be miniature models. The liquid in the cup is smooth, with some ripples around the boats, suggesting a gentle movement. The lighting highlights the reflective surface of the liquid, creating subtle reflections of the boats. The background is slightly blurred, focusing attention on the cup and the boats. The overall scene has a serene and whimsical feel, as if the boats are sailing on a miniature sea within the cup."
 
-OUTPUT: "Two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed. As the scene progresses, the two boats initially remain still, then begin to drift slowly around the cup. The larger boat moves clockwise while the smaller one moves counterclockwise, creating dynamic movement within the still setting. The contrast between the dark coffee and the light wooden boats creates a striking visual effect. The camera remains steady throughout, capturing the boats as they navigate the dark coffee surface in gentle circular motion."
+OUTPUT: "Two small sailboats with white sails and dark brown hulls floating on a cup of dark coffee. The miniature boats sit on the smooth liquid surface, with gentle ripples forming around them suggesting subtle movement. The lighting highlights the reflective surface, creating delicate reflections of the boats in the dark liquid. Initially the boats remain relatively still, then begin to drift gently as the ripples spread outward. The background is softly blurred, keeping attention focused on the cup and boats. The camera remains steady in close-up throughout, capturing the serene, whimsical scene of miniature boats sailing on their tiny coffee sea."
 
 ### Example 2 (vehicle + landscape):
 INPUT: "The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear, suggesting it might be on a journey or adventure. As the SUV moves forward, it kicks up a cloud of dust behind it, indicating the dryness of the terrain and the speed at which it is traveling. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure."
 
-OUTPUT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight. The dense vegetation lines both sides of the road, with tall pine trees and bushes adding depth. The SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves. The vehicle moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature. Distant mountains shimmer under a clear blue sky. The camera pans smoothly, following the white SUV as the dust trail billows behind the vehicle through the rugged terrain."
+OUTPUT: "White SUV with roof racks driving forward on a dusty unpaved road through a forested mountainous area. The vehicle kicks up a cloud of dust behind it as it moves, indicating the dryness of the terrain. Tall pine trees and dense vegetation line both sides of the road. The SUV initially moves forward at a steady pace, then continues along the road as the dust trail grows behind it. Distant mountains are visible under a clear blue sky, creating a scenic backdrop. The overall atmosphere conveys exploration and outdoor adventure. The camera follows the vehicle smoothly as it progresses through the rugged terrain."
 
 ### Example 3 (animals):
 INPUT: "The video features two adorable golden retriever puppies playing joyfully in a snowy landscape. The scene is set during what appears to be late afternoon, as indicated by the warm, soft light casting long shadows on the snow. The puppies are covered in fluffy, golden fur and are energetically moving through the snow, their paws kicking up small clouds of snow as they play. Their tails are wagging, and their expressions convey a sense of excitement and happiness. The background shows a serene winter setting with snow-covered ground and bare trees, adding to the picturesque and cozy atmosphere of the video."
 
-OUTPUT: "Two adorable golden retriever puppies waddling through deep snowdrifts in a serene snowy landscape. Their fluffy coats glisten in the soft winter light, contrasting beautifully against the pristine white backdrop. The puppies initially trot side by side with curious and eager expressions, then one surges slightly ahead while the other follows closely behind, occasionally pausing to sniff the air or look around. They investigate their surroundings with playful energy, their paws sinking into the deep snow with each bouncing step. The camera remains steady, capturing every playful movement of the puppies as they move deeper into the snow."
+OUTPUT: "Two adorable golden retriever puppies with fluffy golden fur playing joyfully in a serene snowy landscape. The warm, soft light of late afternoon casts long shadows on the snow as the puppies energetically move through the drifts. They initially trot together with excited expressions and wagging tails, then continue playing as their paws kick up small clouds of snow with each step. The background shows a serene winter setting with snow-covered ground and bare trees. The camera remains steady, capturing the puppies' playful energy as they explore the picturesque snowy scene in the warm golden light."
 
 ### Example 4 (dramatic natural event):
 INPUT: "The video depicts a dramatic volcanic eruption set against a backdrop of lush green mountains and a body of water. The sequence begins with a large plume of dark smoke and ash rising into the sky, accompanied by bright blue lightning bolts that strike through the cloud. As the frames progress, the cloud of smoke becomes denser and more voluminous, expanding upwards and outwards. The surrounding landscape is bathed in a dim light, suggesting either early morning or late evening, adding to the ominous atmosphere of the scene. The ocean in the background remains calm, contrasting sharply with the intense activity of the volcano. The overall mood of the video is one of natural power and awe-inspiring force."
 
-OUTPUT: "Massive volcanic eruption captured from a high vantage point, showcasing the ash plume rising steeply into the sky with intense brightness. The plume is composed of dark and light gray colors. Initially a sudden violent burst erupts from the crater, then the plume rapidly expands upward in a towering column, growing taller as bright blue lightning forks through the churning cloud. The surrounding landscape appears relatively calm, with dark green hills and patches of forest across the terrain, and a deep blue ocean visible in the background. The dim light of early evening adds an ominous atmosphere. The camera slowly tilts upward and pulls back, revealing the full scale of the eruption and the raw dramatic power of nature."
+OUTPUT: "Massive volcanic eruption set against lush green mountains and a body of water. The sequence begins with a large plume of dark smoke and ash rising steeply into the sky, accompanied by bright blue lightning bolts striking through the cloud. Initially the plume emerges from the crater, then as the frames progress it becomes denser and more voluminous, expanding upwards and outwards in a towering column. The surrounding landscape is bathed in dim light of early evening, adding an ominous atmosphere. The ocean in the background remains calm, contrasting sharply with the intense volcanic activity. The camera captures the full scale of the eruption, conveying the raw dramatic power of nature."
 
 ### Example 5 (human motion):
 INPUT: "The video features a person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. The overall atmosphere of the video is focused on the physical activity and the simplicity of the setting."
 
-OUTPUT: "Muscular man wearing a white tank top running in place against a dark background. The camera remains stationary throughout the clip, capturing the man's movement from a front-facing perspective. The lighting in the scene is dim, with a soft focus on the man creating a silhouette effect. The man's muscles are visible as he runs, initially maintaining a steady rhythmic pace with arms pumping evenly, then gradually accelerating into a more intense sprint with powerful strides. The overall atmosphere is intense and energetic, emphasizing the runner's physique highlighted by the even studio lighting against the minimal dark backdrop."
+OUTPUT: "Athletic person wearing a white tank top and black shorts running against a plain, light-colored background. The soft, even lighting casts minimal shadows, emphasizing the runner's movement and highlighting their athletic build. The person initially jogs at a steady pace with arms swinging naturally, then continues running with consistent rhythmic motion. The overall atmosphere is focused on the physical activity and simplicity of the setting. The camera remains stationary, capturing the runner's movement from a steady perspective against the clean minimal backdrop."
 
 ## Output ONLY the restructured prompt. No explanations."""
 
 REFINE_SYSTEM = """You fix video generation prompts based on VLM feedback. You make SURGICAL fixes — change only what the VLM says is wrong, leave everything else VERBATIM.
 
+## PRIORITY ORDER (fix these first):
+1. MOTION errors (HIGHEST) — direction, trajectory, speed, pattern
+2. SUBJECT errors — wrong object, color, count
+3. BACKGROUND errors — missing/wrong elements
+4. TIMING errors — wrong sequence
+
 ## Your constraints:
 - You will receive: (1) the current prompt, (2) a VLM analysis of how the prompt differs from the actual video content.
-- Fix ONLY the top 1-2 differences the VLM identified. Do NOT touch anything else.
+- Fix ALL motion errors the VLM identified — these are critical for video quality.
+- For other dimensions, fix only the issues the VLM flagged.
 - The current prompt already follows Subject-First Opening + Temporal Action Chain structure. PRESERVE this structure.
 
 ## What you must NOT do:
 - Do NOT rewrite the entire prompt. Copy it and make targeted edits.
 - Do NOT compress or shorten. Output word count must be within ±15% of input.
-- Do NOT rephrase visual descriptions that the VLM did NOT flag. "dark brown hulls" stays "dark brown hulls".
+- Do NOT rephrase visual descriptions that the VLM did NOT flag.
 - Do NOT remove temporal markers (initially/then/gradually) unless VLM says timing is wrong.
 - Do NOT change the subject in position 0 unless VLM says the wrong subject is shown.
+- Do NOT add new motion directions that the VLM didn't mention. If VLM says "direction is wrong" but doesn't specify the correct direction, use vague motion ("moves gently", "drifts") instead.
 
-## How to fix common VLM feedback:
+## How to fix MOTION feedback:
 
-### "Motion direction is wrong" (e.g., moves left but should move right):
-→ Find the motion sentence, change direction words only. Keep everything else.
+### "Direction is wrong" (e.g., moves left but should move right):
+→ Find the motion sentence, replace the direction with what VLM says is correct.
+→ If VLM doesn't specify direction, remove the specific direction and use vague motion.
+
+### "Motion pattern is wrong" (e.g., circular but should be linear):
+→ Replace the motion pattern with what VLM describes.
+
+### "Invented motion not in video" (e.g., text says accelerates but video shows steady pace):
+→ Remove the invented motion. Replace with what VLM describes, or use simple "moves" if unclear.
+
+### "Motion speed/intensity differs" (e.g., too fast, too slow):
+→ Adjust temporal adverbs: "rapidly" → "slowly", "sudden burst" → "gentle emergence".
+
+## How to fix other feedback:
 
 ### "Subject appearance differs" (e.g., wrong color, wrong size):
 → Find the subject description, adjust the specific attribute. Keep surrounding sentences.
 
 ### "Background/scene differs" (e.g., missing element, wrong lighting):
-→ Find the relevant background sentence, add/modify the specific detail. Keep other descriptions.
-
-### "Motion speed/intensity differs" (e.g., too fast, too slow):
-→ Adjust temporal adverbs: "rapidly" → "slowly", "sudden burst" → "gentle emergence". Keep structure.
+→ Find the relevant background sentence, add/modify the specific detail.
 
 ## Example:
 
-CURRENT PROMPT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight. The SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves."
+CURRENT PROMPT: "White SUV driving on a dirt road through a mountainous landscape. The SUV initially appears from the left side of the frame, then accelerates steadily forward, kicking up a growing trail of dust as it moves."
 
-VLM FEEDBACK: "MOTION: The SUV actually moves from right to left in the video, not left to right. SUBJECT: The dust trail is barely visible, much less prominent than described."
+VLM FEEDBACK: "MOTION: The SUV moves from right to left in the video, not left to right. The speed is steady, not accelerating. SUBJECT: accurate. BACKGROUND: accurate. TIMING: accurate."
 
-FIXED PROMPT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight. The SUV initially appears from the right side of the frame, then moves steadily leftward along the dirt road, with a faint trail of dust barely visible behind it."
+FIXED PROMPT: "White SUV driving on a dirt road through a mountainous landscape. The SUV initially appears from the right side of the frame, then moves steadily leftward along the dirt road, kicking up a trail of dust as it moves."
 
 ## Output ONLY the fixed prompt. No explanations. English only."""
 
@@ -152,12 +183,19 @@ FIXED PROMPT: "White SUV driving on a dirt road through a scenic mountainous lan
 
 VLM_VERIFY_PROMPT = """You are watching a video (shown as key frames) and reading a text prompt that is INTENDED to describe this video for regeneration.
 
-Your task: Compare the VIDEO CONTENT with the TEXT PROMPT and identify any CLEAR FACTUAL ERRORS in the text.
+Your task: Compare the VIDEO CONTENT with the TEXT PROMPT and identify FACTUAL ERRORS — especially MOTION errors.
 
-Analyze these 4 dimensions. For each, state whether the text accurately describes the video or not:
+## PRIORITY: MOTION is the most critical dimension. Be extra vigilant about:
+- Direction errors: text says "moves left" but video shows rightward motion
+- Trajectory errors: text says "circular" but video shows linear motion
+- Speed errors: text says "rapidly" but video shows slow movement
+- Invented motion: text describes specific motion patterns not visible in the video
+- Missing motion: video shows clear movement that text doesn't mention
+
+Analyze these 4 dimensions. For each, state whether the text accurately describes the video:
 
 1. SUBJECT: Does the text correctly identify the main subject? (species, color, size, count, appearance)
-2. MOTION: Does the text correctly describe motion direction, speed, and trajectory? (e.g., left-to-right vs right-to-left, fast vs slow)
+2. MOTION (HIGHEST PRIORITY): Does the text correctly describe motion direction, speed, and trajectory? Be STRICT here — if the text specifies a direction (left/right/up/down/clockwise/etc.) that doesn't match what you see in the video, flag it immediately. Also flag if the text invents motion patterns not visible in the video.
 3. BACKGROUND: Does the text accurately describe the background elements, colors, and lighting?
 4. TIMING: Does the text correctly capture the sequence of events? (what happens first/then/finally)
 
@@ -168,23 +206,23 @@ BACKGROUND: [what's wrong, or "accurate"]
 TIMING: [what's wrong, or "accurate"]
 
 IMPORTANT — What is NOT an error (do NOT flag these):
-- Temporal decomposition of actions: "initially appears... then moves... gradually..." is valid structural expansion
+- Temporal connectors: "initially... then... gradually..." is valid if the actions themselves are correct
 - Camera descriptions: "wide shot", "camera remains steady", "tracking shot"
-- Spatial positioning: "positioned left of center", "in the foreground"
-- Speed/pace descriptions: "at a steady pace", "accelerating smoothly"
-- Motion physics that are directly implied by stated actions (e.g., "paws sinking" when walking in deep snow is stated)
+- Spatial positioning that matches the video: "positioned left of center"
+- Vague motion: "moves gently", "drifts" without specifying direction — this is acceptable
 
 IMPORTANT — What IS an error (DO flag these):
+- Wrong motion direction: text says "left to right" but video shows "right to left" — FLAG THIS
+- Wrong motion pattern: text says "clockwise" but video shows random drifting — FLAG THIS
+- Invented specific motion: text says "accelerates into a sprint" but video shows constant speed — FLAG THIS
 - Wrong colors: text says "white" but video shows "black"
-- Wrong direction: text says "left to right" but video shows "right to left"
 - Wrong count: text says "two dogs" but video shows "three dogs"
 - Wrong species/object: text says "cat" but video shows "dog"
-- Non-existent major elements: text mentions "rain" but there is no rain
+- Non-existent elements: text mentions "rain" but there is no rain
 - Wrong action type: text says "running" but video shows "standing still"
-- Invented materials/textures not visible: text says "dark brown hulls" but boats are a different color
-- Invented colors not in the video: text adds specific colors not visible in the footage
+- Invented materials not visible: text says "dark brown hulls" but boats are a different color
 
-Only flag the 1-2 biggest factual errors that would cause a video model to generate something visually DIFFERENT from the original. If everything is reasonably accurate, just write "accurate" for all dimensions."""
+Flag ALL motion-related errors you find — motion accuracy is critical for video regeneration quality. For other dimensions, flag only the biggest 1-2 errors. If everything is accurate, write "accurate" for that dimension."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
