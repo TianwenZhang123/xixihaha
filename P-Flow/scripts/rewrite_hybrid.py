@@ -54,47 +54,42 @@ logger = logging.getLogger(__name__)
 # System Prompt v6: 受控丰富型策略（基于 6.8 Old对比实验 + VLM校验兜底）
 # ─────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a text-to-video prompt optimizer. You transform VLM captions into vivid, well-structured video generation prompts for the Wan2.1 model.
+SYSTEM_PROMPT = """You are a text-to-video prompt optimizer. You restructure VLM captions into effective video generation prompts for the Wan2.1 model.
 
 ## YOUR ROLE
-The input caption was written by a VLM that watched the video. You have NOT seen the video. Your job is to restructure and enrich the caption into a more effective generation prompt.
+The input caption was written by a VLM that watched the video. You have NOT seen the video. Your job is to restructure the caption into a tighter, more effective generation prompt — staying extremely faithful to the input content.
 
 ## STRUCTURE RULES
 
 1. SUBJECT-FIRST OPENING: Start with the main subject + action + key visual detail. Never start with "The video shows/depicts/features..."
 
-2. NATURAL TEMPORAL FLOW: Every motion MUST have temporal structure woven naturally into the prose. Use phrases like "initially... then...", "at first... before...", "starting from... moving steadily...", "gradually accelerating into...". The temporal flow should feel like natural narration, not a rigid template.
+2. NATURAL TEMPORAL FLOW: Weave temporal structure into motion descriptions using phrases like "initially... then...", "at first... before...", "gradually...". This should read as natural narration.
 
-3. VIVID SCENE DETAIL: Add up to 2 reasonable visual inferences to make the scene more concrete. These should be physically plausible details implied by the context (e.g., if input says "boats" you may add "dark hulls"; if it says "buildings" you may add "glass facades"; if it says "puppies in snow" you may add "fluffy coats glisten in the soft winter light"). These make the prompt more visually specific for the video model.
+3. ONE VISUAL INFERENCE (maximum): You may add exactly ONE material/texture/lighting detail that is physically implied by the input (e.g., "wooden hulls" → "dark brown hulls"; "buildings" → "glass facades"; "dim light" → "silhouette effect"). This must be a surface-level attribute — NEVER an entire new object, person, animal, action, or weather phenomenon.
 
-4. CAMERA & CLOSING: End with a brief camera description + a vivid closing phrase that echoes key words from the input.
+4. CAMERA & CLOSING: End with a brief camera note + a short closing phrase.
 
 ## CONSTRAINTS
 
-- DO NOT add more than 2 inferred visual details. Everything else must come directly from the input.
-- DO NOT add objects, animals, people, or weather phenomena not in the input.
-- DO NOT change stated colors (you may intensify: "blue" → "dark blue", but not "blue" → "green").
-- PRESERVE every noun, adjective, and attribute from the input verbatim.
-- OUTPUT LENGTH: 100-170 words, 1-3 paragraphs. Prefer concise, dense prose over padded text.
-- Output ONLY the final prompt. No explanations, no "Here is..." prefix.
+- MAXIMUM 1 inferred detail. Everything else must come directly from the input.
+- NEVER add objects, animals, people, sounds, smells, or phenomena not explicitly stated in the input.
+- NEVER invent motion directions, speeds, or positions not in the input.
+- NEVER change stated colors (intensifying is OK: "blue" → "deep blue").
+- PRESERVE all nouns, counts, and attributes from the input.
+- OUTPUT LENGTH: 100-150 words, 1-2 paragraphs. Be concise.
+- Output ONLY the final prompt. No explanations.
 
 ## EXAMPLES
 
 ### Example 1 (miniature scene):
 INPUT: "The video depicts a close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls, and they appear to be miniature models. The liquid in the cup is smooth, with some ripples around the boats, suggesting a gentle movement. The lighting highlights the reflective surface of the liquid, creating subtle reflections of the boats. The background is slightly blurred, focusing attention on the cup and the boats. The overall scene has a serene and whimsical feel, as if the boats are sailing on a miniature sea within the cup."
 
-OUTPUT: "Two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed.
-
-As the scene progresses, the two boats initially remain still, then begin to drift slowly around the cup of coffee. The larger boat moves clockwise while the smaller one moves counterclockwise, creating a sense of dynamic movement within the still setting. The contrast between the dark coffee and the light wooden boats creates a striking visual effect. The camera remains steady throughout, allowing viewers to fully absorb the intricate details of the boats as they navigate through the dark coffee surface in gentle circular motion."
+OUTPUT: "Two small sailboats floating on a cup of coffee. The first boat, positioned towards the left side of the frame, is larger and more detailed, with a white sail that has a black symbol on it. The second boat, slightly smaller and to the right, also features a white sail with a distinct black symbol. Both boats have dark brown hulls and appear to be intricately designed. As the scene progresses, the two boats initially remain still, then begin to drift slowly around the cup. The larger boat moves clockwise while the smaller one moves counterclockwise, creating dynamic movement within the still setting. The contrast between the dark coffee and the light wooden boats creates a striking visual effect. The camera remains steady throughout, capturing the boats as they navigate the dark coffee surface in gentle circular motion."
 
 ### Example 2 (vehicle + landscape):
 INPUT: "The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear, suggesting it might be on a journey or adventure. As the SUV moves forward, it kicks up a cloud of dust behind it, indicating the dryness of the terrain and the speed at which it is traveling. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure."
 
-OUTPUT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight, highlighting the rugged terrain and the trees that line the path. The camera pans across the landscape, capturing the vastness of the mountains and the winding road that snakes through them. The dense vegetation adds depth to the image, with trees and bushes lining both sides of the road.
-
-The SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves. The vehicle's tire tracks are visible on the road, and its headlights illuminate the path ahead. The SUV moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature.
-
-The combination of the rugged landscape, the winding dirt road, and the white SUV on the move creates a dynamic visual experience with the dust trail billowing behind the vehicle."
+OUTPUT: "White SUV driving on a dirt road through a scenic mountainous landscape bathed in sunlight. The dense vegetation lines both sides of the road, with tall pine trees and bushes adding depth. The SUV initially appears from the left side of the frame, then accelerates steadily forward along the dirt road, kicking up a growing trail of dust as it moves. The vehicle moves at a steady pace, creating a sense of progression within the stillness of the surrounding nature. Distant mountains shimmer under a clear blue sky. The camera pans smoothly, following the white SUV as the dust trail billows behind the vehicle through the rugged terrain."
 
 ### Example 3 (animals):
 INPUT: "The video features two adorable golden retriever puppies playing joyfully in a snowy landscape. The scene is set during what appears to be late afternoon, as indicated by the warm, soft light casting long shadows on the snow. The puppies are covered in fluffy, golden fur and are energetically moving through the snow, their paws kicking up small clouds of snow as they play. Their tails are wagging, and their expressions convey a sense of excitement and happiness. The background shows a serene winter setting with snow-covered ground and bare trees, adding to the picturesque and cozy atmosphere of the video."
@@ -104,24 +99,24 @@ OUTPUT: "Two adorable golden retriever puppies waddling through deep snowdrifts 
 ### Example 4 (dramatic natural event):
 INPUT: "The video depicts a dramatic volcanic eruption set against a backdrop of lush green mountains and a body of water. The sequence begins with a large plume of dark smoke and ash rising into the sky, accompanied by bright blue lightning bolts that strike through the cloud. As the frames progress, the cloud of smoke becomes denser and more voluminous, expanding upwards and outwards. The surrounding landscape is bathed in a dim light, suggesting either early morning or late evening, adding to the ominous atmosphere of the scene. The ocean in the background remains calm, contrasting sharply with the intense activity of the volcano. The overall mood of the video is one of natural power and awe-inspiring force."
 
-OUTPUT: "Massive volcanic eruption captured from a high vantage point, showcasing the ash plume rising steeply into the sky with intense brightness and a jagged form. The plume is primarily composed of dark and light gray colors, indicating a mix of rock fragments and dust. Initially a sudden violent burst erupts from the crater, then the plume rapidly expands upward in a towering column, growing taller as it reveals a brighter inner core illuminated by the internal heat of the volcano. The surrounding landscape below appears relatively calm, with dark green hills and patches of forest scattered across the terrain, and a deep blue ocean visible in the background. Bright daylight illuminates the ash cloud as the camera slowly tilts upward and pulls back, revealing the full scale of the eruption and the raw dramatic power of nature."
+OUTPUT: "Massive volcanic eruption captured from a high vantage point, showcasing the ash plume rising steeply into the sky with intense brightness. The plume is composed of dark and light gray colors. Initially a sudden violent burst erupts from the crater, then the plume rapidly expands upward in a towering column, growing taller as bright blue lightning forks through the churning cloud. The surrounding landscape appears relatively calm, with dark green hills and patches of forest across the terrain, and a deep blue ocean visible in the background. The dim light of early evening adds an ominous atmosphere. The camera slowly tilts upward and pulls back, revealing the full scale of the eruption and the raw dramatic power of nature."
 
 ### Example 5 (human motion):
 INPUT: "The video features a person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. The overall atmosphere of the video is focused on the physical activity and the simplicity of the setting."
 
-OUTPUT: "Muscular man wearing a white tank top running in place against a dark background. The camera remains stationary throughout the clip, capturing the man's movement from a front-facing perspective. The lighting in the scene is dim, with a soft focus on the man and his surroundings creating a silhouette effect. The man's muscles are visible as he runs, initially maintaining a steady rhythmic pace with arms pumping evenly, then gradually accelerating into a more intense explosive sprint with powerful strides. The overall atmosphere is intense and energetic, emphasizing the man's dedication to his workout routine, his body contours highlighted by the even studio lighting against the minimal dark backdrop."
+OUTPUT: "Muscular man wearing a white tank top running in place against a dark background. The camera remains stationary throughout the clip, capturing the man's movement from a front-facing perspective. The lighting in the scene is dim, with a soft focus on the man creating a silhouette effect. The man's muscles are visible as he runs, initially maintaining a steady rhythmic pace with arms pumping evenly, then gradually accelerating into a more intense sprint with powerful strides. The overall atmosphere is intense and energetic, emphasizing the runner's physique highlighted by the even studio lighting against the minimal dark backdrop."
 
 ## Output ONLY the restructured prompt. No explanations."""
 
-USER_TEMPLATE = """Rewrite this VLM caption ({word_count} words) into a vivid video generation prompt.
+USER_TEMPLATE = """Rewrite this VLM caption ({word_count} words) into a video generation prompt.
 
 RULES:
 - Start with subject + action (no "The video shows...")
-- Weave natural temporal flow into motion descriptions (initially/then/gradually)
-- You may add up to 2 reasonable visual inferences to enrich the scene
-- End with camera description + vivid closing phrase
-- PRESERVE all stated colors, materials, counts from the input
-- Target: 100-170 words, 1-3 paragraphs, concise and dense
+- Weave natural temporal flow (initially/then/gradually)
+- Maximum 1 inferred detail (material/texture/lighting only)
+- NEVER add objects, animals, actions not in the input
+- PRESERVE all stated colors, counts, attributes
+- Target: 100-150 words, 1-2 paragraphs
 
 INPUT:
 {original_caption}
@@ -403,7 +398,7 @@ def _parse_vlm_verify_response(response_text: str, original_prompt: str) -> dict
 def rewrite_caption(original: str, backend: str, model: str,
                     api_base: str = "", api_key: str = "",
                     temperature: float = 0.5, max_retries: int = 2) -> str:
-    """v7c 改写：自然时序 + 最多2处视觉推断 + 100-170词"""
+    """v7d 改写：自然时序 + 最多1处推断(材质/光线) + 100-150词"""
     word_count = len(original.split())
     user_msg = USER_TEMPLATE.format(
         word_count=word_count,
@@ -427,13 +422,13 @@ def rewrite_caption(original: str, backend: str, model: str,
         if result.startswith("'") and result.endswith("'"):
             result = result[1:-1]
 
-        # ── 验证 1: 长度检查（≥80词，≤170词）──
+        # ── 验证 1: 长度检查（≥80词，≤160词）──
         result_words = len(result.split())
         if result_words < 80:
             logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words} 词 (最低 80)")
             continue
-        if result_words > 170:
-            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} 词 (最高 170)")
+        if result_words > 160:
+            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} 词 (最高 160)")
             continue
 
         # ── 验证 2: 不能以 "The video" 开头（subject-first 违规）──
@@ -472,7 +467,7 @@ def _estimate_word_count(text: str) -> int:
 
 
 def validate_rewrite(original: str, rewritten: str) -> dict:
-    """验证改写质量（v7c 策略：80-170词，subject-first）"""
+    """验证改写质量（v7d 策略：80-160词，subject-first）"""
     orig_words = _estimate_word_count(original)
     new_words = len(rewritten.split())
 
@@ -481,8 +476,8 @@ def validate_rewrite(original: str, rewritten: str) -> dict:
         issues.append("empty output")
     if new_words < 80:
         issues.append(f"too short ({new_words} words, min 80)")
-    if new_words > 170:
-        issues.append(f"too long ({new_words} words, max 170)")
+    if new_words > 160:
+        issues.append(f"too long ({new_words} words, max 160)")
     if rewritten.lower().startswith(("the video", "this video", "in this video", "the scene")):
         issues.append("still starts with preamble (subject-first violated)")
 
