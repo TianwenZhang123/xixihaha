@@ -89,7 +89,7 @@ class PFlowConfig:
     svd_low_freq_ratio: float = 0.3  # 低频段占比 (highfreq 模式用)
     svd_knee_auto: bool = True    # 自动拐点检测
     svd_motion_threshold: float = 0.15  # 运动强度阈值 (adaptive 模式)
-    svd_diagnostics: bool = False # 是否保存 SVD 诊断信息
+    svd_diagnostics: bool = True  # 是否保存 SVD 诊断信息 (诊断期间默认开启)
 
 
     # ── 迭代优化参数 ──
@@ -239,8 +239,16 @@ class PFlowPipeline:
 
         # ── Step 3: 计算噪声先验 (如果启用) ──
         eta_temporal = None
+        prompt_embeds_for_diag = None
         if cfg.use_inversion:
-            eta_temporal, _, _, _ = self._compute_noise_prior(ref_video, caption)
+            eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds_for_diag = \
+                self._compute_noise_prior(ref_video, caption)
+
+        # ── Step 3.5: Prompt-Noise 方向冲突诊断 ──
+        if eta_temporal is not None and prompt_embeds_for_diag is not None:
+            self._diagnose_prompt_noise_conflict(
+                eta_temporal, prompt_embeds_for_diag, caption, generator
+            )
 
         # ── Step 4: 生成循环 ──
         num_iters = cfg.i_max if cfg.use_iter else 1
@@ -294,6 +302,11 @@ class PFlowPipeline:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
 
         logger.info(f"[P-Flow] Done in {elapsed:.1f}s → {final_path}")
+        # ── 样本完成总结 (便于后续与指标关联分析) ──
+        logger.info(f"  [SAMPLE SUMMARY] sample_id={sample_id}")
+        logger.info(f"  [SAMPLE SUMMARY] full_caption={caption}")
+        logger.info(f"  [SAMPLE SUMMARY] caption_length={len(caption)} chars, word_count={len(caption.split())}")
+        logger.info(f"  [SAMPLE SUMMARY] elapsed={elapsed:.1f}s, output={final_path}")
         return metadata
 
     # ─────────────────────────────────────────────────────────────
@@ -340,6 +353,29 @@ class PFlowPipeline:
             eta_inv = inverter.invert(
                 ref_latents, prompt_embeds, prompt_embeds
             )
+
+        # ── 诊断: Inversion 质量 ──
+        eta_rand_ref = torch.randn_like(eta_inv)
+        inv_std = eta_inv.std().item()
+        inv_mean = eta_inv.mean().item()
+        inv_min = eta_inv.min().item()
+        inv_max = eta_inv.max().item()
+        # 与纯随机噪声的余弦相似度 (应接近 0 如果 inversion 有意义)
+        cos_sim_random = torch.nn.functional.cosine_similarity(
+            eta_inv.flatten().unsqueeze(0),
+            eta_rand_ref.flatten().unsqueeze(0)
+        ).item()
+        # 与原始 latent 的余弦相似度 (检查 inversion 是否"走远了")
+        cos_sim_latent = torch.nn.functional.cosine_similarity(
+            eta_inv.flatten().unsqueeze(0),
+            ref_latents.flatten().unsqueeze(0)
+        ).item()
+        logger.info(
+            f"  [Inversion Quality] η_inv: std={inv_std:.4f}, mean={inv_mean:.4f}, "
+            f"range=[{inv_min:.3f}, {inv_max:.3f}], "
+            f"cos_sim(η_inv, random)={cos_sim_random:.4f}, "
+            f"cos_sim(η_inv, z0)={cos_sim_latent:.4f}"
+        )
 
         # 保留原始反演噪声
         eta_inv_raw = eta_inv
@@ -450,11 +486,38 @@ class PFlowPipeline:
 
         eta = sqrt_alpha * eta_temporal + sqrt_1_minus_alpha * eta_random
 
-        # 验证混合后分布 (应接近 N(0,1))
-        logger.debug(
-            f"  [Blend] α={alpha:.3f}, "
+        # ── 诊断: Blend 效果 ──
+        # 1. 混合后分布
+        logger.info(
+            f"  [Blend] α={alpha:.4f} (√α={sqrt_alpha.item():.4f}), "
             f"η_temporal std={eta_temporal.std():.4f}, "
             f"η_mixed std={eta.std():.4f}, mean={eta.mean():.4f}"
+        )
+        # 2. η_temporal 与 η_random 的相关性 (应接近 0)
+        cos_t_r = torch.nn.functional.cosine_similarity(
+            eta_temporal.flatten().unsqueeze(0),
+            eta_random.flatten().unsqueeze(0)
+        ).item()
+        # 3. η_mixed 与 η_random 的相关性 (α 小时应接近 1.0)
+        cos_m_r = torch.nn.functional.cosine_similarity(
+            eta.flatten().unsqueeze(0),
+            eta_random.flatten().unsqueeze(0)
+        ).item()
+        # 4. η_mixed 与 η_temporal 的相关性 (α 小时应接近 √α ≈ 0.055)
+        cos_m_t = torch.nn.functional.cosine_similarity(
+            eta.flatten().unsqueeze(0),
+            eta_temporal.flatten().unsqueeze(0)
+        ).item()
+        logger.info(
+            f"  [Blend Diag] cos(temporal, random)={cos_t_r:.4f}, "
+            f"cos(mixed, random)={cos_m_r:.4f}, "
+            f"cos(mixed, temporal)={cos_m_t:.4f}"
+        )
+        # 5. 有效信号强度: mixed 中来自 temporal 的"方向偏移量"
+        direction_shift = (eta - eta_random).norm().item() / eta_random.norm().item()
+        logger.info(
+            f"  [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖={direction_shift:.6f} "
+            f"(越大越说明 temporal 有影响)"
         )
 
         return eta
@@ -576,3 +639,229 @@ class PFlowPipeline:
                 truncation=True, return_tensors="pt",
             )
             return self.pipe.text_encoder(inputs.input_ids.to(self.device))[0]
+
+    def _diagnose_prompt_noise_conflict(
+        self,
+        eta_temporal: torch.Tensor,
+        prompt_embeds: torch.Tensor,
+        caption: str,
+        generator: torch.Generator,
+    ) -> None:
+        """
+        诊断 Prompt-SVD 运动方向冲突。
+
+        核心问题假设:
+            v7e 的精炼 prompt 已经包含精确的运动描述 (如 "camera slowly pans left")，
+            而 SVD 从参考视频中提取的运动方向可能与 prompt 描述的方向不一致。
+            当两者冲突时，SVD noise prior 反而会干扰生成质量。
+
+        诊断策略:
+            1. 分析 η_temporal 的时间方向性 (帧间差分的方向一致性)
+            2. 检查 prompt 中是否包含运动关键词
+            3. 分析 η_temporal 各帧的方向变化模式
+            4. 计算 "temporal coherence" — 相邻帧噪声的余弦相似度
+        """
+        logger.info("  ═══════════════════════════════════════════════")
+        logger.info("  [CONFLICT DIAG] Prompt-SVD 方向冲突诊断")
+        logger.info("  ═══════════════════════════════════════════════")
+
+        # ── 1. Caption 运动关键词分析 ──
+        motion_keywords = {
+            "direction": ["left", "right", "up", "down", "forward", "backward",
+                         "pan", "tilt", "zoom", "rotate", "orbit", "track"],
+            "speed": ["slow", "fast", "rapid", "gentle", "steady", "quick",
+                     "gradually", "smoothly", "abruptly"],
+            "camera": ["camera", "lens", "angle", "perspective", "view",
+                      "close-up", "wide shot", "dolly"],
+            "motion": ["move", "sway", "drift", "flow", "glide", "shift",
+                      "wave", "flutter", "shake", "tremble", "bounce"],
+        }
+
+        caption_lower = caption.lower()
+        found_keywords = {}
+        for category, keywords in motion_keywords.items():
+            matches = [kw for kw in keywords if kw in caption_lower]
+            if matches:
+                found_keywords[category] = matches
+
+        logger.info(f"  [CONFLICT DIAG] Caption 运动关键词:")
+        if found_keywords:
+            for cat, kws in found_keywords.items():
+                logger.info(f"    {cat}: {kws}")
+            logger.info(
+                f"  [CONFLICT DIAG] ⚠️ Caption 包含 {sum(len(v) for v in found_keywords.values())} 个运动关键词 "
+                f"→ prompt 已有明确运动指令，SVD 方向若不一致则产生冲突"
+            )
+        else:
+            logger.info(
+                f"  [CONFLICT DIAG] ✓ Caption 不含显式运动关键词 → SVD 冲突风险低"
+            )
+
+        # ── 2. η_temporal 时间方向性分析 ──
+        # η_temporal shape: [B, C, F, H, W] 或 [B, F, C, H, W]
+        # 通过帧间差分分析运动方向的一致性
+        eta = eta_temporal
+        if eta.dim() == 5:
+            # 假设 [B, C, F, H, W]
+            if eta.shape[2] > eta.shape[1]:
+                # 可能是 [B, F, C, H, W]，转成 [B, C, F, H, W]
+                eta = eta.permute(0, 2, 1, 3, 4)
+            num_frames = eta.shape[2]
+        elif eta.dim() == 4:
+            # [C, F, H, W]
+            num_frames = eta.shape[1]
+            eta = eta.unsqueeze(0)  # → [1, C, F, H, W]
+        else:
+            logger.warning(f"  [CONFLICT DIAG] η_temporal 维度异常: {eta.shape}, 跳过帧分析")
+            return
+
+        logger.info(f"  [CONFLICT DIAG] η_temporal shape={list(eta_temporal.shape)}, parsed frames={num_frames}")
+
+        if num_frames < 2:
+            logger.warning("  [CONFLICT DIAG] 帧数<2, 无法分析时间方向性")
+            return
+
+        # ── 3. 帧间余弦相似度 (Temporal Coherence) ──
+        # 如果 SVD 提取了有意义的运动，相邻帧应该有方向性 (cos > 0)
+        frame_cos_sims = []
+        for f in range(num_frames - 1):
+            f1 = eta[0, :, f, :, :].flatten()
+            f2 = eta[0, :, f + 1, :, :].flatten()
+            cos = torch.nn.functional.cosine_similarity(
+                f1.unsqueeze(0), f2.unsqueeze(0)
+            ).item()
+            frame_cos_sims.append(cos)
+
+        mean_cos = sum(frame_cos_sims) / len(frame_cos_sims)
+        std_cos = (sum((c - mean_cos) ** 2 for c in frame_cos_sims) / len(frame_cos_sims)) ** 0.5
+        max_cos = max(frame_cos_sims)
+        min_cos = min(frame_cos_sims)
+
+        logger.info(
+            f"  [CONFLICT DIAG] 帧间余弦相似度: mean={mean_cos:.4f}, std={std_cos:.4f}, "
+            f"range=[{min_cos:.4f}, {max_cos:.4f}]"
+        )
+        if mean_cos > 0.3:
+            logger.info(
+                f"  [CONFLICT DIAG] ⚠️ 高帧间相关性 (mean_cos={mean_cos:.4f} > 0.3) "
+                f"→ SVD 提取了强方向性运动，如与 prompt 方向不一致则冲突严重"
+            )
+        elif mean_cos > 0.1:
+            logger.info(
+                f"  [CONFLICT DIAG] ℹ️ 中等帧间相关性 (mean_cos={mean_cos:.4f}) "
+                f"→ SVD 有一定方向偏好"
+            )
+        else:
+            logger.info(
+                f"  [CONFLICT DIAG] ✓ 低帧间相关性 (mean_cos={mean_cos:.4f} ≤ 0.1) "
+                f"→ SVD 噪声接近随机，冲突风险低"
+            )
+
+        # ── 4. 帧间差分方向一致性 (Motion Direction Consistency) ──
+        # Δf = frame[f+1] - frame[f], 检查所有 Δf 是否指向同一方向
+        if num_frames >= 3:
+            deltas = []
+            for f in range(num_frames - 1):
+                delta = eta[0, :, f + 1, :, :] - eta[0, :, f, :, :]
+                deltas.append(delta.flatten())
+
+            # 计算相邻 delta 之间的余弦相似度
+            delta_cos_sims = []
+            for i in range(len(deltas) - 1):
+                cos = torch.nn.functional.cosine_similarity(
+                    deltas[i].unsqueeze(0), deltas[i + 1].unsqueeze(0)
+                ).item()
+                delta_cos_sims.append(cos)
+
+            mean_delta_cos = sum(delta_cos_sims) / len(delta_cos_sims)
+            logger.info(
+                f"  [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos={mean_delta_cos:.4f} "
+                f"(>0.5=强方向运动, <0.1=无规律)"
+            )
+
+            # 第一个 delta 与最后一个 delta 的方向
+            if len(deltas) >= 2:
+                first_last_cos = torch.nn.functional.cosine_similarity(
+                    deltas[0].unsqueeze(0), deltas[-1].unsqueeze(0)
+                ).item()
+                logger.info(
+                    f"  [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)={first_last_cos:.4f} "
+                    f"(高值=持续单向运动)"
+                )
+
+        # ── 5. SVD 运动能量的空间分布 ──
+        # 哪些空间区域 SVD 有最大影响？
+        spatial_energy = eta[0].pow(2).sum(dim=0).sum(dim=0)  # [H, W]
+        h, w = spatial_energy.shape
+        # 四象限能量分布
+        top_left = spatial_energy[:h // 2, :w // 2].sum().item()
+        top_right = spatial_energy[:h // 2, w // 2:].sum().item()
+        bot_left = spatial_energy[h // 2:, :w // 2].sum().item()
+        bot_right = spatial_energy[h // 2:, w // 2:].sum().item()
+        total = top_left + top_right + bot_left + bot_right + 1e-8
+
+        logger.info(
+            f"  [CONFLICT DIAG] SVD 空间能量分布 (%):"
+            f" TL={top_left / total * 100:.1f}%"
+            f" TR={top_right / total * 100:.1f}%"
+            f" BL={bot_left / total * 100:.1f}%"
+            f" BR={bot_right / total * 100:.1f}%"
+        )
+
+        # 偏移方向判断
+        left_energy = (top_left + bot_left) / total
+        right_energy = (top_right + bot_right) / total
+        top_energy = (top_left + top_right) / total
+        bot_energy = (bot_left + bot_right) / total
+
+        svd_direction_hints = []
+        if left_energy > 0.55:
+            svd_direction_hints.append("SVD 能量偏左")
+        elif right_energy > 0.55:
+            svd_direction_hints.append("SVD 能量偏右")
+        if top_energy > 0.55:
+            svd_direction_hints.append("SVD 能量偏上")
+        elif bot_energy > 0.55:
+            svd_direction_hints.append("SVD 能量偏下")
+
+        if svd_direction_hints:
+            logger.info(
+                f"  [CONFLICT DIAG] SVD 方向偏好: {', '.join(svd_direction_hints)}"
+            )
+            # 检查是否与 prompt 中的方向关键词冲突
+            if found_keywords.get("direction"):
+                prompt_dirs = found_keywords["direction"]
+                logger.info(
+                    f"  [CONFLICT DIAG] ⚠️ Prompt 方向: {prompt_dirs} vs SVD: {svd_direction_hints}"
+                    f" → 请人工判断是否冲突"
+                )
+        else:
+            logger.info(
+                f"  [CONFLICT DIAG] SVD 能量空间均匀分布，无明显方向偏好"
+            )
+
+        # ── 6. 关键结论 ──
+        conflict_risk = "LOW"
+        reasons = []
+
+        if found_keywords and mean_cos > 0.1:
+            conflict_risk = "MEDIUM"
+            reasons.append("prompt 有运动词 + SVD 有方向性")
+        if found_keywords and mean_cos > 0.3:
+            conflict_risk = "HIGH"
+            reasons.append("prompt 有运动词 + SVD 方向性强")
+        if found_keywords.get("direction") and svd_direction_hints:
+            conflict_risk = "HIGH"
+            reasons.append("prompt 和 SVD 都有方向偏好")
+
+        logger.info(
+            f"  [CONFLICT DIAG] ★ 冲突风险评估: {conflict_risk}"
+        )
+        if reasons:
+            logger.info(f"  [CONFLICT DIAG]   原因: {'; '.join(reasons)}")
+        logger.info(
+            f"  [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，"
+            f"考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; "
+            f"(3) 使用简化 prompt 无运动描述"
+        )
+        logger.info("  ═══════════════════════════════════════════════")
