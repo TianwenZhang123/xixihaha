@@ -1,0 +1,132 @@
+{
+  "mcpServers": {
+    "codezy-be-mcp": {
+      "keyword": "@cs/mcp-tools-for-ide",
+      "command": "npx",
+      "args": [
+        "-y",
+        "--registry=http://r.npm.sankuai.com",
+        "@cs/mcp-tools-for-ide@1.0.18"
+      ],
+      "env": {
+        "CODEZY_TOOL_SCOPE": "be"
+      }
+    },
+    "codezy-be-debug-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "--registry=http://r.npm.sankuai.com",
+        "@cs/mcp-tools-for-ide@1.0.16-alpha.2"
+      ],
+      "env": {
+        "CODEZY_TOOL_SCOPE": "be"
+      }
+    },
+    "hive-mcp": {
+      "command": "uvx",
+      "args": [
+        "--index",
+        "http://pypi.sankuai.com/simple",
+        "--from",
+        "git+ssh://git@git.sankuai.com/waimb/waimai-ai-tools.git#subdirectory=mcp/meituan-local-mcp",
+        "hive-mcp"
+      ]
+    },
+    "jumper-mcp": {
+      "command": "uvx",
+      "args": [
+        "--index",
+        "http://pypi.sankuai.com/simple",
+        "--from",
+        "git+ssh://git@git.sankuai.com/waimb/waimai-ai-tools.git#subdirectory=mcp/meituan-local-mcp",
+        "jumper-mcp"
+      ]
+    },
+    "lion-mcp": {
+      "command": "uvx",
+      "args": [
+        "--index",
+        "http://pypi.sankuai.com/simple",
+        "--from",
+        "git+ssh://git@git.sankuai.com/waimb/waimai-ai-tools.git#subdirectory=mcp/meituan-local-mcp",
+        "lion-mcp"
+      ]
+    },
+    "logcenter-mcp": {
+      "command": "uvx",
+      "args": [
+        "--index",
+        "http://pypi.sankuai.com/simple",
+        "--from",
+        "git+ssh://git@git.sankuai.com/waimb/waimai-ai-tools.git#subdirectory=mcp/meituan-local-mcp",
+        "logcenter-mcp"
+      ]
+    },
+    "logmaster-mcp": {
+      "command": "uvx",
+      "args": [
+        "--index",
+        "http://pypi.sankuai.com/simple",
+        "--from",
+        "git+ssh://git@git.sankuai.com/waimb/waimai-ai-tools.git#subdirectory=mcp/meituan-local-mcp",
+        "logmaster-mcp"
+      ]
+    },
+    "mtrace-mcp": {
+      "command": "uvx",
+      "args": [
+        "--index",
+        "http://pypi.sankuai.com/simple",
+        "--from",
+        "git+ssh://git@git.sankuai.com/waimb/waimai-ai-tools.git#subdirectory=mcp/meituan-local-mcp",
+        "mtrace-mcp"
+      ]
+    },
+    "octo-mcp": {
+      "command": "uvx",
+      "args": [
+        "--index",
+        "http://pypi.sankuai.com/simple",
+        "--from",
+        "git+ssh://git@git.sankuai.com/waimb/waimai-ai-tools.git#subdirectory=mcp/meituan-local-mcp",
+        "octo-mcp"
+      ]
+    },
+    "rds-mcp": {
+      "command": "uvx",
+      "args": [
+        "--index",
+        "http://pypi.sankuai.com/simple",
+        "--from",
+        "git+ssh://git@git.sankuai.com/waimb/waimai-ai-tools.git#subdirectory=mcp/meituan-local-mcp",
+        "rds-mcp"
+      ]
+    },
+    "squirrel-mcp": {
+      "command": "uvx",
+      "args": [
+        "--index",
+        "http://pypi.sankuai.com/simple",
+        "--from",
+        "git+ssh://git@git.sankuai.com/waimb/waimai-ai-tools.git#subdirectory=mcp/meituan-local-mcp",
+        "squirrel-mcp"
+      ]
+    },
+    "codezy-fe-debug-mcp": {
+      "keyword": "@cs/mcp-tools-for-ide",
+      "command": "npx",
+      "args": [
+        "-y",
+        "--registry=http://r.npm.sankuai.com",
+        "@cs/mcp-tools-for-ide@1.0.18"
+      ],
+      "env": {
+        "CODEZY_TOOL_SCOPE": "fe_debug"
+      }
+    },
+    "MSC-DocQuery-Friday-Server": {
+      "url": "http://172.18.82.18:3033/sse"
+    }
+  }
+}

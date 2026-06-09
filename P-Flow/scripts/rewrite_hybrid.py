@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """
-Hybrid Prompt 改写脚本 v6 — 受控丰富型策略
+Hybrid Prompt 改写脚本 v8 — 外观权威 + 运动极简策略
 
-基于 P-Flow 全部实验数据设计（5.28周会+6.4周会+L1对比实验+6.8 Old对比）：
+基于 P-Flow SVD noise prior 诊断实验结论设计：
 
 核心发现：
-  1. Old 版本（丰富型改写）CLIP 最高（0.896），因为包含精确的外观/材质/空间描述
-  2. V4 版本（约束型改写）XCLIP 最高（0.786+L2），因为有良好的时序结构
-  3. 新策略：像 Old 一样大胆丰富细节，再用 VLM 兜底纠正错误
-  4. UMT5 编码后的 DiT cross-attention 呈 U 型分布：
-     首词和末词权重相等（~0.029-0.030），中间几乎均匀（~0.001）
-     → 首词和尾词是黄金位置
-  5. Temporal chain (initially→then→finally) 对 XCLIP 有效 (+1.7%)
-  6. Negative prompt 对 Wan2.1 UMT5 有害 (-5.9% XCLIP)
+  1. SVD noise prior 在简单 prompt (captions_qwen) 下能有效补充运动先验
+  2. v7e 丰富型 prompt 含详细时序/运动描述 → SVD 变成冗余噪声 (η方向偏移仅5.5%)
+  3. 诊断结果: η_temporal 无时序连贯性 (mean_cos≈0.05), 本质是随机噪声
+  4. 根因: prompt 已有 5-9 个运动关键词/sample, 完全指定了运动, SVD 无处发力
+  5. 解决方案: prompt 只负责「看起来像什么」(外观/材质/空间), SVD 负责「怎么动」
 
-策略：主动丰富外观/空间/摄影细节 + 保持时序结构 + VLM 校验兜底
+策略：丰富外观/材质/空间/光照描述 (驱动高 CLIP) + 最小化运动/时序 (让 SVD 生效)
 
-流程: VLM caption → LLM enrich(详细) → VLM verify(full video) → LLM fix
+流程: VLM caption → LLM rewrite(外观丰富+运动极简) → VLM verify(full video) → LLM fix
 
 用法:
     python scripts/rewrite_hybrid.py \
@@ -51,7 +48,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# System Prompt v7e: 自然时序 + 最多1处推断 + 运动保真约束 + VLM校验兜底
+# System Prompt v8: 不主动添加时序 + 保留原文运动 + 外观丰富 (SVD noise prior 补充运动)
+#
+# 设计理由 (P-Flow 实验结论):
+#   - SVD noise prior 在简单 prompt (captions_qwen) 下能有效补充运动先验
+#   - v7e 主动添加 "initially...then...gradually" 时序链 → prompt 运动信息过载
+#   - SVD 变成冗余噪声 (η方向偏移仅5.5%)
+#   - 修正: 保留原文已有的运动描述, 但不主动添加/丰富时序细节
+#   - 让 SVD 有空间补充 prompt 中未覆盖的运动信息
 # ─────────────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are a text-to-video prompt optimizer. You restructure VLM captions into effective video generation prompts for the Wan2.1 model.
@@ -63,26 +67,23 @@ The input caption was written by a VLM that watched the video. You have NOT seen
 
 1. SUBJECT-FIRST OPENING: Start with the main subject + action + key visual detail. Never start with "The video shows/depicts/features..."
 
-2. NATURAL TEMPORAL FLOW: Weave temporal structure into motion descriptions using phrases like "initially... then...", "at first... before...", "gradually...". This should read as natural narration.
+2. APPEARANCE & SPATIAL DETAIL: Describe what is visible — materials, textures, colors, lighting, spatial arrangement, background elements. Be specific and vivid about visual attributes.
 
 3. ONE VISUAL INFERENCE (maximum): You may add exactly ONE material/texture/lighting detail that is physically implied by the input (e.g., "wooden hulls" → "dark brown hulls"; "buildings" → "glass facades"; "dim light" → "silhouette effect"). This must be a surface-level attribute — NEVER an entire new object, person, animal, action, or weather phenomenon.
 
 4. CAMERA & CLOSING: End with a brief camera note + a short closing phrase.
 
-## MOTION FIDELITY (CRITICAL — highest priority rule)
+## MOTION HANDLING (CRITICAL — highest priority rule)
 
-Motion descriptions MUST be copied VERBATIM from the input. You must NOT:
-- Infer or invent motion directions (e.g., "leftward", "clockwise", "right-to-left") unless explicitly stated in the input
-- Change motion speed descriptions (e.g., "slowly" → "rapidly")
-- Add motion trajectories not described in the input (e.g., adding "drifts leftward" when input only says "floating")
-- Speculate about motion patterns (e.g., "circular motion", "zigzag path") not in the input
+PRESERVE motion descriptions from the input AS-IS, but DO NOT add temporal detail:
 
-You MAY only:
-- Add temporal connectors (initially/then/finally) to EXISTING motion descriptions
-- Restructure the ORDER of existing motion sentences for better flow
-- Keep motion verbs as-is: if input says "moves", keep "moves" — do NOT change to "drifts/glides/sweeps"
+- KEEP any motion/action descriptions that already exist in the input (e.g., "kicks up dust", "floating", "running at a steady pace")
+- DO NOT add temporal connectors or phase descriptions (no "initially... then...", "at first... before...", "gradually...", "begins to... continues to...")
+- DO NOT add motion directions, speeds, or trajectories not stated in the input
+- DO NOT invent temporal progression or decompose a single action into phases
+- DO NOT change motion verbs: if input says "moves", keep "moves" — do NOT change to "drifts/glides/sweeps"
 
-If the input describes vague motion (e.g., "the boat moves"), keep it vague. Do NOT specify a direction.
+In short: faithfully relay what the VLM described about motion, but never ENRICH or ELABORATE on it. Let the motion stay as simple as the VLM stated it.
 
 ## CONSTRAINTS
 
@@ -98,27 +99,27 @@ If the input describes vague motion (e.g., "the boat moves"), keep it vague. Do 
 ### Example 1 (miniature scene):
 INPUT: "The video depicts a close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls, and they appear to be miniature models. The liquid in the cup is smooth, with some ripples around the boats, suggesting a gentle movement. The lighting highlights the reflective surface of the liquid, creating subtle reflections of the boats. The background is slightly blurred, focusing attention on the cup and the boats. The overall scene has a serene and whimsical feel, as if the boats are sailing on a miniature sea within the cup."
 
-OUTPUT: "Two small sailboats with white sails and dark brown hulls floating on a cup of dark coffee. The miniature boats sit on the smooth liquid surface, with gentle ripples forming around them suggesting subtle movement. The lighting highlights the reflective surface, creating delicate reflections of the boats in the dark liquid. Initially the boats remain relatively still, then begin to drift gently as the ripples spread outward. The background is softly blurred, keeping attention focused on the cup and boats. The camera remains steady in close-up throughout, capturing the serene, whimsical scene of miniature boats sailing on their tiny coffee sea."
+OUTPUT: "Two small toy sailboats with white sails and dark brown hulls floating on a cup of dark coffee. The miniature boats sit on the smooth liquid surface, with gentle ripples around them suggesting subtle movement. The lighting highlights the reflective surface, creating delicate reflections of the boats in the dark liquid. The background is softly blurred, keeping attention focused on the cup and boats. The camera remains steady in close-up throughout, capturing the serene, whimsical scene of miniature boats sailing on their tiny coffee sea."
 
 ### Example 2 (vehicle + landscape):
 INPUT: "The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear, suggesting it might be on a journey or adventure. As the SUV moves forward, it kicks up a cloud of dust behind it, indicating the dryness of the terrain and the speed at which it is traveling. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure."
 
-OUTPUT: "White SUV with roof racks driving forward on a dusty unpaved road through a forested mountainous area. The vehicle kicks up a cloud of dust behind it as it moves, indicating the dryness of the terrain. Tall pine trees and dense vegetation line both sides of the road. The SUV initially moves forward at a steady pace, then continues along the road as the dust trail grows behind it. Distant mountains are visible under a clear blue sky, creating a scenic backdrop. The overall atmosphere conveys exploration and outdoor adventure. The camera follows the vehicle smoothly as it progresses through the rugged terrain."
+OUTPUT: "White SUV with roof racks driving forward on a dusty unpaved road through a forested mountainous area. The vehicle kicks up a cloud of dust behind it as it moves, indicating the dryness of the terrain. Tall pine trees and dense vegetation line both sides of the road. Distant mountains are visible under a clear blue sky, creating a scenic backdrop. The overall atmosphere conveys exploration and outdoor adventure. The camera follows the vehicle smoothly through the rugged terrain."
 
 ### Example 3 (animals):
 INPUT: "The video features two adorable golden retriever puppies playing joyfully in a snowy landscape. The scene is set during what appears to be late afternoon, as indicated by the warm, soft light casting long shadows on the snow. The puppies are covered in fluffy, golden fur and are energetically moving through the snow, their paws kicking up small clouds of snow as they play. Their tails are wagging, and their expressions convey a sense of excitement and happiness. The background shows a serene winter setting with snow-covered ground and bare trees, adding to the picturesque and cozy atmosphere of the video."
 
-OUTPUT: "Two adorable golden retriever puppies with fluffy golden fur playing joyfully in a serene snowy landscape. The warm, soft light of late afternoon casts long shadows on the snow as the puppies energetically move through the drifts. They initially trot together with excited expressions and wagging tails, then continue playing as their paws kick up small clouds of snow with each step. The background shows a serene winter setting with snow-covered ground and bare trees. The camera remains steady, capturing the puppies' playful energy as they explore the picturesque snowy scene in the warm golden light."
+OUTPUT: "Two adorable golden retriever puppies with fluffy golden fur playing joyfully in a serene snowy landscape. The warm, soft light of late afternoon casts long shadows on the snow as the puppies energetically move through the drifts, their paws kicking up small clouds of snow. Their tails are wagging with excited expressions conveying happiness. The background shows a serene winter setting with snow-covered ground and bare trees. The camera remains steady, capturing the puppies' playful energy in the picturesque snowy scene bathed in warm golden light."
 
 ### Example 4 (dramatic natural event):
 INPUT: "The video depicts a dramatic volcanic eruption set against a backdrop of lush green mountains and a body of water. The sequence begins with a large plume of dark smoke and ash rising into the sky, accompanied by bright blue lightning bolts that strike through the cloud. As the frames progress, the cloud of smoke becomes denser and more voluminous, expanding upwards and outwards. The surrounding landscape is bathed in a dim light, suggesting either early morning or late evening, adding to the ominous atmosphere of the scene. The ocean in the background remains calm, contrasting sharply with the intense activity of the volcano. The overall mood of the video is one of natural power and awe-inspiring force."
 
-OUTPUT: "Massive volcanic eruption set against lush green mountains and a body of water. The sequence begins with a large plume of dark smoke and ash rising steeply into the sky, accompanied by bright blue lightning bolts striking through the cloud. Initially the plume emerges from the crater, then as the frames progress it becomes denser and more voluminous, expanding upwards and outwards in a towering column. The surrounding landscape is bathed in dim light of early evening, adding an ominous atmosphere. The ocean in the background remains calm, contrasting sharply with the intense volcanic activity. The camera captures the full scale of the eruption, conveying the raw dramatic power of nature."
+OUTPUT: "Massive volcanic eruption set against lush green mountains and a body of water. A large plume of dark smoke and ash rises into the sky, accompanied by bright blue lightning bolts striking through the cloud. The cloud of smoke becomes denser and more voluminous, expanding upwards and outwards. The surrounding landscape is bathed in dim evening light, adding an ominous atmosphere. The ocean in the background remains calm, contrasting sharply with the intense volcanic activity. The camera captures the full scale of the eruption, conveying the raw dramatic power of nature."
 
 ### Example 5 (human motion):
 INPUT: "The video features a person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. The overall atmosphere of the video is focused on the physical activity and the simplicity of the setting."
 
-OUTPUT: "Athletic person wearing a white tank top and black shorts running against a plain, light-colored background. The soft, even lighting casts minimal shadows, emphasizing the runner's movement and highlighting their athletic build. The person initially jogs at a steady pace with arms swinging naturally, then continues running with consistent rhythmic motion. The overall atmosphere is focused on the physical activity and simplicity of the setting. The camera remains stationary, capturing the runner's movement from a steady perspective against the clean minimal backdrop."
+OUTPUT: "Athletic person wearing a white tank top and black shorts running against a plain, light-colored background. The soft, even lighting casts minimal shadows, emphasizing the runner's movement and highlighting their athletic build. The person jogs at a steady pace with arms swinging naturally. The overall atmosphere is focused on the physical activity and simplicity of the setting. The camera remains stationary, capturing the runner's movement from a steady perspective against the clean minimal backdrop."
 
 ## Output ONLY the restructured prompt. No explanations."""
 
@@ -126,7 +127,8 @@ USER_TEMPLATE = """Rewrite this VLM caption ({word_count} words) into a video ge
 
 RULES:
 - Start with subject + action (no "The video shows...")
-- Weave natural temporal flow (initially/then/gradually)
+- Enrich appearance details (materials, textures, colors, lighting)
+- PRESERVE motion as-is from input — do NOT add temporal sequences (no "initially/then/gradually")
 - Maximum 1 inferred detail (material/texture/lighting only)
 - NEVER add objects, animals, actions not in the input
 - PRESERVE all stated colors, counts, attributes
@@ -412,7 +414,7 @@ def _parse_vlm_verify_response(response_text: str, original_prompt: str) -> dict
 def rewrite_caption(original: str, backend: str, model: str,
                     api_base: str = "", api_key: str = "",
                     temperature: float = 0.5, max_retries: int = 2) -> str:
-    """v7e 改写：自然时序 + 最多1处推断(材质/光线) + 运动保真 + 100-150词"""
+    """v8 改写：不主动添加时序 + 保留原文运动 + 外观丰富 + 100-150词"""
     word_count = len(original.split())
     user_msg = USER_TEMPLATE.format(
         word_count=word_count,
@@ -481,7 +483,7 @@ def _estimate_word_count(text: str) -> int:
 
 
 def validate_rewrite(original: str, rewritten: str) -> dict:
-    """验证改写质量（v7e 策略：80-160词，subject-first，运动保真）"""
+    """验证改写质量（v8 策略：80-160词，subject-first，不主动添加时序）"""
     orig_words = _estimate_word_count(original)
     new_words = len(rewritten.split())
 
