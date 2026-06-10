@@ -97,6 +97,10 @@ class PFlowConfig:
     qga_low_mult: float = 0.25         # quality=0 时的 alpha 倍率 (base_alpha * 0.25)
     qga_high_mult: float = 2.5         # quality=1 时的 alpha 倍率 (base_alpha * 2.5)
 
+    # ── 方向 C: 频域噪声重塑 (Spectrum-Aligned Noise) ──
+    freq_reshape: bool = False          # 是否启用频域重塑 (替代 linear blend)
+    freq_reshape_beta: float = 1.0     # 重塑强度: 0=不重塑(纯随机), 1=完全匹配频谱形状
+                                       # 推荐搜索范围: 0.3~1.0
 
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
@@ -120,7 +124,10 @@ class PFlowConfig:
         if self.use_svd:
             flags.append("svd")
         if self.use_blend:
-            flags.append("blend")
+            if self.freq_reshape:
+                flags.append(f"freq_reshape(β={self.freq_reshape_beta})")
+            else:
+                flags.append("blend")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -459,22 +466,31 @@ class PFlowPipeline:
         generator: torch.Generator,
     ) -> Optional[torch.Tensor]:
         """
-        改动点: Noise Blending
+        改动点: Noise Blending / Frequency Reshaping
 
-        混合公式: η = √α · η_temporal + √(1-α) · η_random
-        当 η_temporal ~ N(0,1) 且 η_random ~ N(0,1) 时, η ~ N(0,1) ✓
+        原始混合公式: η = √α · η_temporal + √(1-α) · η_random
+        频域重塑公式: η = IFFT( |FFT(η_temporal)|^β · phase(FFT(η_random)) ) → renorm to N(0,1)
 
-        V2 renorm 的价值 (为什么不是让 α 变大):
-            V1: α=0.001, η_temporal std≈0.35 → 有效信号 = 0.001 × 0.35 ≈ 0.00035σ
-            V2: α=0.001, η_temporal std=1.0  → 有效信号 = 0.001 × 1.0  = 0.001σ (≈3x更强)
+        方向 C (Spectrum-Aligned Noise Initialization):
+            核心洞察: one-shot linear blend 的问题在于直接注入 η_temporal 的"内容",
+            对某些样本 η_temporal 是有毒的 (如 sample 7/31 的 XCLIP 崩塌)。
 
-            renorm 让小 α 下注入的运动结构不再被方差压缩"淹没"
+            频域重塑不注入 η_temporal 的具体内容，而只转移其"时间频谱形状":
+            - 参考视频快速运动 → 高频能量强 → 重塑后的噪声也高频能量强 → 引导模型生成快运动
+            - 参考视频缓慢运动 → 低频能量强 → 重塑后的噪声也低频能量强 → 引导模型生成慢运动
+            - 不引入 η_temporal 的空间结构或方向 → 不会产生冲突
 
-        为什么 α 必须很小 (0.001~0.01):
-            1. P-Flow 论文 Table 4: α=0.001 → DynDeg 0.94; α=0.01 → DynDeg 0.88 (↓6%)
-            2. η_temporal 经 SVD 低秩投影后是各向异性的 (非各向同性高斯)
-            3. 大 α 会过度约束去噪过程，压制动态
-            4. 小 α 的作用是"微弱的方向性锚点"，而非强制运动方向
+            参考论文: FreqPrior (ICLR 2025) — 频域噪声塑形保持 Gaussian 分布
+
+        β (freq_reshape_beta) 控制重塑强度:
+            β=0: 不重塑，等价于纯随机噪声
+            β=1: 完全匹配 η_temporal 的频谱形状
+            推荐: β=0.5~1.0
+
+        为什么比 linear blend 更安全:
+            1. 不注入 η_temporal 的具体空间/方向内容 → 无毒性风险
+            2. 保持 N(0,1) 分布 → 不违反扩散模型假设
+            3. 只传递"运动节奏" → 比传递"运动方向"更通用
         """
         if eta_temporal is None or not self.config.use_blend:
             return None  # 让 diffusers 自己采样随机噪声
@@ -486,6 +502,12 @@ class PFlowPipeline:
             generator=generator,
         )
 
+        # ── 方向 C: 频域噪声重塑 (Spectrum-Aligned Noise) ──
+        if self.config.freq_reshape:
+            eta = self._freq_reshape_noise(eta_temporal, eta_random)
+            return eta
+
+        # ── 原始 Linear Blend 路径 (保留兼容) ──
         alpha = self.config.alpha
 
         # ── Quality-Gated Alpha (方案 B): per-sample adaptive alpha ──
@@ -542,6 +564,129 @@ class PFlowPipeline:
         )
 
         return eta
+
+    def _freq_reshape_noise(
+        self,
+        eta_temporal: torch.Tensor,
+        eta_random: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        方向 C 核心实现: Spectrum-Aligned Noise Initialization.
+
+        算法步骤:
+            1. 沿时间维度 (frame axis) 对 η_temporal 做 rFFT，取功率谱 |F_t(f)|²
+            2. 沿时间维度对 η_random 做 rFFT，得到 F_r(f) = |F_r(f)| · e^{jφ_r(f)}
+            3. 计算目标频谱幅度: A_target(f) = |F_t(f)|^β (β=freq_reshape_beta)
+            4. 用平滑的频谱形状调制 η_random: F_out(f) = A_target(f) · e^{jφ_r(f)}
+               但这会改变总能量，所以需要归一化
+            5. IRFFT 回时域
+            6. 全局 renormalization 到 N(0,1)
+
+        关键设计:
+            - 只沿 frame 维度做 FFT (不动空间维度) → 只传递时间节奏
+            - 使用 η_random 的相位 → 保持随机性，不引入 η_temporal 的具体内容
+            - β < 1 时做平滑的"部分重塑"，β=0 退化为纯随机
+            - 最终 renorm 到 N(0,1) → 满足扩散模型假设
+
+        Inspired by:
+            - FreqPrior (ICLR 2025): frequency-domain noise shaping
+            - FreeInit (ECCV 2024): low-freq preservation concept
+        """
+        cfg = self.config
+        beta = cfg.freq_reshape_beta
+
+        # eta_temporal shape: (B, C, F, H, W) 或 (1, C, F, H, W)
+        # 沿 frame 维度 (dim=2) 做 FFT
+        # 先转 float32 保证 FFT 精度
+        orig_dtype = eta_random.dtype
+        eta_t_f32 = eta_temporal.float()
+        eta_r_f32 = eta_random.float()
+
+        # ── Step 1: 计算 η_temporal 的时间频谱幅度 ──
+        # rFFT along frame dimension (dim=2 for 5D: B,C,F,H,W)
+        frame_dim = 2
+        F_temporal = torch.fft.rfft(eta_t_f32, dim=frame_dim)
+        # 功率谱: 每个频率 bin 的平均幅度 (在 B,C,H,W 上平均，得到 per-frequency 的形状)
+        amp_temporal = F_temporal.abs()  # (B, C, F//2+1, H, W)
+
+        # 对空间维度取均值得到"全局频谱形状" → (1, 1, F//2+1, 1, 1)
+        # 这避免了传递空间结构，只保留全局时间节奏
+        spectrum_shape = amp_temporal.mean(dim=(0, 1, 3, 4), keepdim=True)  # (1,1,nfreq,1,1)
+
+        # 归一化频谱形状 (使得 mean=1，纯形状信息)
+        spectrum_shape = spectrum_shape / (spectrum_shape.mean() + 1e-8)
+
+        # 应用 β 控制重塑强度: shape^β, β=0→全1(不重塑), β=1→完全匹配
+        # 使用 log 域插值: exp(β * log(shape)) = shape^β
+        reshape_filter = spectrum_shape.pow(beta)  # (1,1,nfreq,1,1)
+
+        # ── Step 2: 对 η_random 做频域调制 ──
+        F_random = torch.fft.rfft(eta_r_f32, dim=frame_dim)
+
+        # 保留 η_random 的相位，用 reshape_filter 调制幅度
+        F_shaped = F_random * reshape_filter
+
+        # ── Step 3: IRFFT 回时域 ──
+        num_frames = eta_r_f32.shape[frame_dim]
+        eta_shaped = torch.fft.irfft(F_shaped, n=num_frames, dim=frame_dim)
+
+        # ── Step 4: Renormalization to N(0,1) ──
+        eta_mean = eta_shaped.mean()
+        eta_std = eta_shaped.std()
+        if eta_std < 1e-8:
+            logger.warning("  [FreqReshape] near-zero std after IRFFT, falling back to random")
+            return eta_random
+
+        eta_out = (eta_shaped - eta_mean) / eta_std
+
+        # 恢复原始 dtype
+        eta_out = eta_out.to(orig_dtype)
+
+        # ── 诊断日志 ──
+        # 频谱形状分析
+        spec_np = spectrum_shape.squeeze().cpu()
+        logger.info(
+            f"  [FreqReshape] β={beta:.2f}, spectrum_shape: "
+            f"DC={spec_np[0]:.3f}, mid={spec_np[len(spec_np)//2]:.3f}, "
+            f"high={spec_np[-1]:.3f}, ratio(DC/high)={spec_np[0]/(spec_np[-1]+1e-8):.2f}"
+        )
+        logger.info(
+            f"  [FreqReshape] η_shaped: mean={eta_out.mean():.4f}, std={eta_out.std():.4f}"
+        )
+
+        # 与 η_temporal 和 η_random 的相关性
+        cos_out_t = torch.nn.functional.cosine_similarity(
+            eta_out.flatten().unsqueeze(0).float(),
+            eta_temporal.flatten().unsqueeze(0).float()
+        ).item()
+        cos_out_r = torch.nn.functional.cosine_similarity(
+            eta_out.flatten().unsqueeze(0).float(),
+            eta_random.flatten().unsqueeze(0).float()
+        ).item()
+        logger.info(
+            f"  [FreqReshape] cos(shaped, temporal)={cos_out_t:.4f}, "
+            f"cos(shaped, random)={cos_out_r:.4f}"
+        )
+
+        # 验证频谱确实被重塑了: 比较 η_out 和 η_random 的频谱
+        F_out = torch.fft.rfft(eta_out.float(), dim=frame_dim)
+        amp_out = F_out.abs().mean(dim=(0, 1, 3, 4))
+        amp_rand = F_random.abs().mean(dim=(0, 1, 3, 4))
+        # 计算频谱相关性: reshaped vs temporal 应 > reshaped vs random
+        amp_t_global = amp_temporal.mean(dim=(0, 1, 3, 4))
+        corr_out_t = torch.nn.functional.cosine_similarity(
+            amp_out.unsqueeze(0), amp_t_global.unsqueeze(0)
+        ).item()
+        corr_rand_t = torch.nn.functional.cosine_similarity(
+            amp_rand.unsqueeze(0), amp_t_global.unsqueeze(0)
+        ).item()
+        logger.info(
+            f"  [FreqReshape] spectrum_corr: shaped_vs_temporal={corr_out_t:.4f}, "
+            f"random_vs_temporal={corr_rand_t:.4f} "
+            f"(shaped should be higher)"
+        )
+
+        return eta_out
 
     @torch.no_grad()
     def _generate(

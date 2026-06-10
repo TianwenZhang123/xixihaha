@@ -325,14 +325,19 @@ def call_vlm_dashscope(video_path: str, user_msg: str, system_msg: str,
     # Try video upload first
     video_url = _upload_video_to_dashscope(video_path, api_key, model)
 
-    if video_url:
+    if video_url and video_url.startswith("https://"):
+        # Only use video_url if it's an accessible HTTPS URL
         content = [
             {"type": "video_url", "video_url": {"url": video_url}},
             {"type": "text", "text": user_msg},
         ]
     else:
-        # Fallback to frame extraction
-        logger.warning("Video upload failed, falling back to frame extraction")
+        # Fallback to frame extraction (base64)
+        # oss:// URLs are not supported by OpenAI-compatible endpoint
+        if video_url:
+            logger.warning(f"Video upload returned non-HTTPS URL ({video_url}), falling back to frame extraction")
+        else:
+            logger.warning("Video upload failed, falling back to frame extraction")
         frames_b64 = _extract_frames_base64(video_path, num_frames=16)
         if not frames_b64:
             raise RuntimeError(f"Cannot extract frames from: {video_path}")

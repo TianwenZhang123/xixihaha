@@ -110,6 +110,12 @@ def parse_args():
     p.add_argument("--qga_high_mult", type=float, default=2.5,
                    help="quality=1 时的 alpha 倍率")
 
+    # ── 方向 C: 频域噪声重塑 (Spectrum-Aligned Noise) ──
+    p.add_argument("--freq_reshape", action="store_true",
+                   help="启用频域噪声重塑 (替代 linear blend, 只传递时间频谱形状)")
+    p.add_argument("--freq_reshape_beta", type=float, default=1.0,
+                   help="频域重塑强度: 0=不重塑(纯随机), 1=完全匹配频谱 (推荐0.5~1.0)")
+
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
                    help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
@@ -184,6 +190,9 @@ def build_config(args) -> PFlowConfig:
         qga_base_alpha=args.qga_base_alpha,
         qga_low_mult=args.qga_low_mult,
         qga_high_mult=args.qga_high_mult,
+        # 方向 C: 频域噪声重塑
+        freq_reshape=args.freq_reshape,
+        freq_reshape_beta=args.freq_reshape_beta,
     )
 
 
@@ -290,7 +299,10 @@ def main():
     print(f"P-Flow | {config.experiment_name()}")
     print(f"  Flags: {flags or ['baseline (无改动)']}")
     if config.use_blend:
-        print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
+        if config.freq_reshape:
+            print(f"  freq_reshape: β={config.freq_reshape_beta}, rho_s={config.rho_s}, rho_m={config.rho_m}")
+        else:
+            print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
     if config.use_iter:
         print(f"  iterations={config.i_max}")
     print()
