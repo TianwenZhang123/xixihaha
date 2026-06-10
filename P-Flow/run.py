@@ -89,8 +89,8 @@ def parse_args():
 
     # ── V2 SVD 参数 ──
     p.add_argument("--svd_mode", type=str, default="adaptive",
-                   choices=["v1", "renorm", "highfreq", "adaptive"],
-                   help="SVD滤波模式 (v1=原始, renorm=+标准化, highfreq=高频+标准化, adaptive=自动)")
+                   choices=["v1", "renorm", "rescale", "highfreq", "adaptive"],
+                   help="SVD滤波模式 (v1=原始, renorm=+标准化, rescale=等比缩放保方向, highfreq=高频+标准化, adaptive=自动)")
     p.add_argument("--svd_low_freq_ratio", type=float, default=0.3,
                    help="低频段占比 (highfreq模式下, 前30%%奇异值视为低频)")
     p.add_argument("--no_knee_auto", action="store_true",
@@ -99,6 +99,16 @@ def parse_args():
                    help="adaptive模式的运动强度阈值 (低于此值跳过SVD)")
     p.add_argument("--svd_diagnostics", action="store_true",
                    help="保存SVD诊断信息 (分析用)")
+
+    # ── Quality-Gated Alpha (方案 B) ──
+    p.add_argument("--quality_gated_alpha", action="store_true",
+                   help="启用 per-sample adaptive alpha (根据SVD方向质量动态调节注入量)")
+    p.add_argument("--qga_base_alpha", type=float, default=0.004,
+                   help="Quality-Gated Alpha 的基础 alpha")
+    p.add_argument("--qga_low_mult", type=float, default=0.25,
+                   help="quality=0 时的 alpha 倍率")
+    p.add_argument("--qga_high_mult", type=float, default=2.5,
+                   help="quality=1 时的 alpha 倍率")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
@@ -169,6 +179,11 @@ def build_config(args) -> PFlowConfig:
         svd_knee_auto=not args.no_knee_auto,
         svd_motion_threshold=args.svd_motion_threshold,
         svd_diagnostics=args.svd_diagnostics,
+        # Quality-Gated Alpha
+        quality_gated_alpha=args.quality_gated_alpha,
+        qga_base_alpha=args.qga_base_alpha,
+        qga_low_mult=args.qga_low_mult,
+        qga_high_mult=args.qga_high_mult,
     )
 
 

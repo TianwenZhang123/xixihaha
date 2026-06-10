@@ -85,11 +85,17 @@ class PFlowConfig:
     temporal_energy_threshold: float = 0.0  # 自适应SVD跳过阈值 (0=禁用; >0时低于此值跳过SVD)
 
     # ── V2 SVD 新增参数 ──
-    svd_mode: str = "adaptive"    # SVD 滤波模式: v1 / renorm / highfreq / adaptive
+    svd_mode: str = "adaptive"    # SVD 滤波模式: v1 / renorm / rescale / highfreq / adaptive
     svd_low_freq_ratio: float = 0.3  # 低频段占比 (highfreq 模式用)
     svd_knee_auto: bool = True    # 自动拐点检测
     svd_motion_threshold: float = 0.15  # 运动强度阈值 (adaptive 模式)
     svd_diagnostics: bool = True  # 是否保存 SVD 诊断信息 (诊断期间默认开启)
+
+    # ── Quality-Gated Alpha (方案 B) ──
+    quality_gated_alpha: bool = False   # 是否启用 per-sample adaptive alpha
+    qga_base_alpha: float = 0.004      # 基础 alpha (当 quality_gated_alpha=False 时不影响原有 self.config.alpha)
+    qga_low_mult: float = 0.25         # quality=0 时的 alpha 倍率 (base_alpha * 0.25)
+    qga_high_mult: float = 2.5         # quality=1 时的 alpha 倍率 (base_alpha * 2.5)
 
 
     # ── 迭代优化参数 ──
@@ -481,6 +487,21 @@ class PFlowPipeline:
         )
 
         alpha = self.config.alpha
+
+        # ── Quality-Gated Alpha (方案 B): per-sample adaptive alpha ──
+        if self.config.quality_gated_alpha:
+            quality = self._compute_direction_quality(eta_temporal)
+            cfg = self.config
+            effective_alpha = cfg.qga_base_alpha * (
+                cfg.qga_low_mult + (cfg.qga_high_mult - cfg.qga_low_mult) * quality
+            )
+            logger.info(
+                f"  [QGA] quality={quality:.4f} → effective_alpha={effective_alpha:.6f} "
+                f"(base={cfg.qga_base_alpha}, range=[{cfg.qga_base_alpha * cfg.qga_low_mult:.6f}, "
+                f"{cfg.qga_base_alpha * cfg.qga_high_mult:.6f}])"
+            )
+            alpha = effective_alpha
+
         sqrt_alpha = torch.sqrt(torch.tensor(alpha, device=self.device))
         sqrt_1_minus_alpha = torch.sqrt(torch.tensor(1.0 - alpha, device=self.device))
 
@@ -607,6 +628,91 @@ class PFlowPipeline:
             logger.warning(f"  VLM failed at iter {iteration}: {e}")
 
         return current_prompt
+
+    def _compute_direction_quality(self, eta_temporal: torch.Tensor) -> float:
+        """
+        计算 SVD 方向质量分数 (Quality-Gated Alpha 方案 B)。
+
+        综合三个子指标:
+            1. temporal_coherence: 相邻帧余弦相似度均值 (方向一致性)
+            2. spatial_anisotropy: 空间能量分布的各向异性 (非均匀=有方向)
+            3. first_last_consistency: 首末帧余弦相似度 (长程一致性)
+
+        Returns:
+            quality ∈ [0, 1], 越高表示 SVD 方向越可靠
+        """
+        # 解析 eta_temporal 的帧维度
+        eta = eta_temporal
+        if eta.dim() == 5:
+            # [B, C, F, H, W]
+            if eta.shape[2] > eta.shape[1]:
+                eta = eta.permute(0, 2, 1, 3, 4)  # → [B, C, F, H, W]
+            num_frames = eta.shape[2]
+            # reshape to (F, -1)
+            frames_flat = eta[0].permute(1, 0, 2, 3).reshape(num_frames, -1)  # [F, C*H*W]
+        elif eta.dim() == 4:
+            # [C, F, H, W]
+            num_frames = eta.shape[1]
+            frames_flat = eta.permute(1, 0, 2, 3).reshape(num_frames, -1)  # [F, C*H*W]
+        else:
+            logger.warning(f"  [QGA] eta_temporal 维度异常: {eta.shape}, 返回 quality=0.5")
+            return 0.5
+
+        if num_frames < 2:
+            logger.warning("  [QGA] 帧数<2, 返回 quality=0.5")
+            return 0.5
+
+        # ── 子指标 1: temporal_coherence ──
+        # 相邻帧 cosine similarity 的均值
+        cos_sims = []
+        for f in range(num_frames - 1):
+            cos = torch.nn.functional.cosine_similarity(
+                frames_flat[f].unsqueeze(0), frames_flat[f + 1].unsqueeze(0)
+            ).item()
+            cos_sims.append(cos)
+        temporal_coherence = max(0.0, min(1.0, sum(cos_sims) / len(cos_sims)))
+
+        # ── 子指标 2: spatial_anisotropy ──
+        # 按空间维度分 4 个象限，计算各象限能量占比
+        if eta.dim() == 5:
+            spatial = eta[0]  # [C, F, H, W]
+        else:
+            spatial = eta  # [C, F, H, W]
+        # 总能量按空间分布: sum over C and F → [H, W]
+        energy_map = spatial.pow(2).sum(dim=0).sum(dim=0)  # [H, W]
+        h, w = energy_map.shape
+        q_tl = energy_map[:h // 2, :w // 2].sum().item()
+        q_tr = energy_map[:h // 2, w // 2:].sum().item()
+        q_bl = energy_map[h // 2:, :w // 2].sum().item()
+        q_br = energy_map[h // 2:, w // 2:].sum().item()
+        total_energy = q_tl + q_tr + q_bl + q_br + 1e-8
+        quadrant_ratios = [q_tl / total_energy, q_tr / total_energy,
+                           q_bl / total_energy, q_br / total_energy]
+        max_ratio = max(quadrant_ratios)
+        # 归一化: 0.25 是均匀时的值, 0.50 时为满分
+        spatial_anisotropy = max(0.0, min(1.0, (max_ratio - 0.25) / 0.25))
+
+        # ── 子指标 3: first_last_consistency ──
+        # 首帧和末帧的 cosine similarity
+        first_last_cos = torch.nn.functional.cosine_similarity(
+            frames_flat[0].unsqueeze(0), frames_flat[-1].unsqueeze(0)
+        ).item()
+        first_last_consistency = max(0.0, min(1.0, first_last_cos))
+
+        # ── 综合 ──
+        quality = (
+            0.5 * temporal_coherence
+            + 0.3 * spatial_anisotropy
+            + 0.2 * first_last_consistency
+        )
+        quality = max(0.0, min(1.0, quality))
+
+        logger.info(
+            f"  [QGA Quality] temporal_coherence={temporal_coherence:.4f}, "
+            f"spatial_anisotropy={spatial_anisotropy:.4f} (max_quad_ratio={max_ratio:.4f}), "
+            f"first_last_consistency={first_last_consistency:.4f} → quality={quality:.4f}"
+        )
+        return quality
 
     def _encode_prompt(self, prompt: str, max_sequence_length: int = 512) -> torch.Tensor:
         """

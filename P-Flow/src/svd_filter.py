@@ -50,9 +50,10 @@ class SVDFilterConfig:
     rho_m: float = 0.9           # 时间能量阈值 (保留 top-k_m 使得能量 ≥ ρ_m)
 
     # ── V2 新增: 滤波模式 ──
-    mode: Literal["v1", "renorm", "highfreq", "adaptive"] = "adaptive"
+    mode: Literal["v1", "renorm", "rescale", "highfreq", "adaptive"] = "adaptive"
     # v1       = 原始行为 (向后兼容)
-    # renorm   = V1 + renormalization
+    # renorm   = V1 + renormalization (强制 N(0,1))
+    # rescale  = Direction-Preserving Rescale (等比缩放，保留方向结构)
     # highfreq = 仅高频段 + renormalization
     # adaptive = 自动判断 (推荐): 根据 motion_strength 决定模式
 
@@ -63,6 +64,10 @@ class SVDFilterConfig:
     # ── V2 新增: Renormalization ──
     renorm_target_std: float = 1.0   # 目标标准差 (扩散模型假设 N(0,1))
     renorm_target_mean: float = 0.0  # 目标均值
+
+    # ── V2 新增: Direction-Preserving Rescale ──
+    rescale_target_effective: float = 0.0234  # 目标有效注入量 (v1 中位数 √0.004 × 0.37)
+    rescale_only_boost: bool = True           # True: 只放大不缩小 (保护已足够的样本)
 
     # ── V2 新增: 自适应模式参数 ──
     motion_strength_threshold: float = 0.15  # motion_strength > 此值才注入
@@ -267,6 +272,15 @@ class SVDFilter:
             )
             return result
 
+        elif mode == "rescale":
+            # Direction-Preserving Rescale: 等比缩放，保留方向间相对结构
+            result = self._rescale(noise_temporal)
+            logger.debug(
+                f"  [Stage3] mode=rescale, "
+                f"pre_std={noise_temporal.std():.4f} → post_std={result.std():.4f}"
+            )
+            return result
+
         elif mode == "highfreq":
             # 高频段提取 + renormalization
             C, F, H, W = noise_after_spatial.shape
@@ -387,6 +401,63 @@ class SVDFilter:
         knee_idx = max(1, min(knee_idx, k_m - 1))
 
         return knee_idx
+
+    def _rescale(self, noise: torch.Tensor) -> torch.Tensor:
+        """
+        Direction-Preserving Rescale (方案 C).
+
+        核心思路:
+            不做 (x-mean)/std 的全量归一化，而是做等比缩放:
+            - 计算当前 effective injection = sqrt(alpha) * std
+            - 如果 current_effective < target_effective，按比例放大
+            - 如果 current_effective >= target_effective 且 only_boost=True，不动
+
+        相比 renorm 的优势:
+            1. 保留方向信息的相对结构 (各维度比例不变)
+            2. 只拉升信号不足的样本，不干扰已经好的样本
+            3. 不同样本仍然有不同的注入量 (保持 v1 自适应特性)
+
+        数学等价:
+            scale = target_effective / current_effective
+            η_out = η_in * scale
+            实际 direction_shift = sqrt(alpha) * η_out.std() / η_rand.std()
+                                 = sqrt(alpha) * (η_in.std() * scale) / 1.0
+                                 = target_effective
+        """
+        cfg = self.config
+        current_std = noise.std()
+
+        if current_std < 1e-8:
+            logger.warning("  [Rescale] near-zero std, returning as-is")
+            return noise
+
+        # 当前有效注入量 (在 pipeline 中 blend 后的等效影响)
+        # pipeline 中: η = √α·η_temporal + √(1-α)·η_random
+        # direction_shift ≈ √α · η_temporal.std() (因为 η_random.std() ≈ 1)
+        # 注意: 这里的 alpha 是 pipeline 层的，SVD filter 不知道具体值
+        # 但我们可以直接用 std 来做等比缩放:
+        #   目标 std = target_effective / √α
+        # 不过更优雅的做法是: 让 rescale 只关注 std 的绝对值
+        # v1 baseline 中位 std ≈ 0.37, 我们目标让所有样本 std >= 0.37
+        target_std = cfg.rescale_target_effective / math.sqrt(0.004)  # ≈ 0.37
+
+        if cfg.rescale_only_boost and current_std >= target_std:
+            # 当前已经足够强，不缩放
+            logger.debug(
+                f"  [Rescale] current_std={current_std:.4f} >= "
+                f"target_std={target_std:.4f}, no scaling"
+            )
+            return noise
+
+        # 等比缩放: 保留方向，只调整幅度
+        scale = target_std / current_std
+        result = noise * scale
+
+        logger.debug(
+            f"  [Rescale] scale={scale:.4f}, "
+            f"std: {current_std:.4f} → {result.std():.4f}"
+        )
+        return result
 
     def _renormalize(self, noise: torch.Tensor) -> torch.Tensor:
         """
