@@ -110,9 +110,9 @@ def parse_args():
     p.add_argument("--qga_high_mult", type=float, default=2.5,
                    help="quality=1 时的 alpha 倍率")
 
-    # ── 方向 C: 频域噪声重塑 (Spectrum-Aligned Noise) ──
+    # ── 方向 C: 频域噪声重塑 (叠加在 alpha blend 上) ──
     p.add_argument("--freq_reshape", action="store_true",
-                   help="启用频域噪声重塑 (替代 linear blend, 只传递时间频谱形状)")
+                   help="启用频域噪声重塑 (对 η_random 预处理后再 alpha 混合, 需配合 --blend --alpha)")
     p.add_argument("--freq_reshape_beta", type=float, default=1.0,
                    help="频域重塑强度: 0=不重塑(纯随机), 1=完全匹配频谱 (推荐0.5~1.0)")
 
@@ -300,7 +300,8 @@ def main():
     print(f"  Flags: {flags or ['baseline (无改动)']}")
     if config.use_blend:
         if config.freq_reshape:
-            print(f"  freq_reshape: β={config.freq_reshape_beta}, rho_s={config.rho_s}, rho_m={config.rho_m}")
+            print(f"  η_random 频域重塑(β={config.freq_reshape_beta}) + alpha blend(α={config.alpha})")
+            print(f"  rho_s={config.rho_s}, rho_m={config.rho_m}")
         else:
             print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
     if config.use_iter:

@@ -125,9 +125,9 @@ class PFlowConfig:
             flags.append("svd")
         if self.use_blend:
             if self.freq_reshape:
-                flags.append(f"freq_reshape(β={self.freq_reshape_beta})")
+                flags.append(f"blend(α={self.alpha})+freq_reshape(β={self.freq_reshape_beta})")
             else:
-                flags.append("blend")
+                flags.append(f"blend(α={self.alpha})")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -502,27 +502,42 @@ class PFlowPipeline:
             generator=generator,
         )
 
-        # ── 方向 C: 频域噪声重塑 (Spectrum-Aligned Noise) ──
+        # ── 方向 C: 频域噪声重塑作为 η_random 预处理 ──
+        # 如果启用 freq_reshape，先对 η_random 做频谱对齐，然后继续走 alpha 混合
         if self.config.freq_reshape:
-            eta = self._freq_reshape_noise(eta_temporal, eta_random)
-            return eta
+            eta_random = self._freq_reshape_noise(eta_temporal, eta_random)
+            logger.info(
+                f"  [FreqReshape+Blend] η_random 已频域重塑 (β={self.config.freq_reshape_beta}), "
+                f"继续 alpha={self.config.alpha} 混合"
+            )
 
-        # ── 原始 Linear Blend 路径 (保留兼容) ──
+        # # ══════════════════════════════════════════════════════════════
+        # # [DEPRECATED] 方向 C 旧版: 独立 freq_reshape (完全绕开 alpha blend)
+        # # 实验结论: 独立模式无法利用 η_temporal 的内容信息，改为预处理叠加模式
+        # # ══════════════════════════════════════════════════════════════
+        # if self.config.freq_reshape:
+        #     eta = self._freq_reshape_noise(eta_temporal, eta_random)
+        #     return eta
+
+        # ── Linear Blend 路径 ──
         alpha = self.config.alpha
 
-        # ── Quality-Gated Alpha (方案 B): per-sample adaptive alpha ──
-        if self.config.quality_gated_alpha:
-            quality = self._compute_direction_quality(eta_temporal)
-            cfg = self.config
-            effective_alpha = cfg.qga_base_alpha * (
-                cfg.qga_low_mult + (cfg.qga_high_mult - cfg.qga_low_mult) * quality
-            )
-            logger.info(
-                f"  [QGA] quality={quality:.4f} → effective_alpha={effective_alpha:.6f} "
-                f"(base={cfg.qga_base_alpha}, range=[{cfg.qga_base_alpha * cfg.qga_low_mult:.6f}, "
-                f"{cfg.qga_base_alpha * cfg.qga_high_mult:.6f}])"
-            )
-            alpha = effective_alpha
+        # # ══════════════════════════════════════════════════════════════
+        # # [DEPRECATED] Quality-Gated Alpha (方案 B): per-sample adaptive alpha
+        # # 实验结论: α=0.01 时 S7 XCLIP -34.5%，QGA 无法拯救有毒 η_temporal
+        # # ══════════════════════════════════════════════════════════════
+        # if self.config.quality_gated_alpha:
+        #     quality = self._compute_direction_quality(eta_temporal)
+        #     cfg = self.config
+        #     effective_alpha = cfg.qga_base_alpha * (
+        #         cfg.qga_low_mult + (cfg.qga_high_mult - cfg.qga_low_mult) * quality
+        #     )
+        #     logger.info(
+        #         f"  [QGA] quality={quality:.4f} → effective_alpha={effective_alpha:.6f} "
+        #         f"(base={cfg.qga_base_alpha}, range=[{cfg.qga_base_alpha * cfg.qga_low_mult:.6f}, "
+        #         f"{cfg.qga_base_alpha * cfg.qga_high_mult:.6f}])"
+        #     )
+        #     alpha = effective_alpha
 
         sqrt_alpha = torch.sqrt(torch.tensor(alpha, device=self.device))
         sqrt_1_minus_alpha = torch.sqrt(torch.tensor(1.0 - alpha, device=self.device))
