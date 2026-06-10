@@ -60,31 +60,50 @@ SYSTEM_PROMPT = """You clean up VLM video captions for a T2V model (Wan2.1 with 
 ## Your 3 tasks (NOTHING ELSE):
 
 ### 1. SUBJECT-FIRST OPENING
-Remove "The video depicts/features/captures/shows..." preamble. Start directly with the main subject noun phrase.
+Remove ONLY the "The video depicts/features/captures/shows" preamble phrase. Keep EVERYTHING else unchanged — including verb forms (-ing stays -ing).
 
 Rules:
-- Identify what is the PRIMARY SUBJECT (the thing that moves or is most prominent)
-- Start the output with that subject's noun phrase (with article)
-- Do NOT change the subject's description — copy it exactly from the input
-- Convert passive voice to active where the subject allows it naturally
+- Delete ONLY the leading "The video [verb]" phrase (typically 3-5 words)
+- Keep the rest of the sentence EXACTLY as-is, do NOT convert verb tenses
+- Do NOT restructure or compress the sentence
 
-Examples:
-- "The video depicts a white SUV driving..." → "A white SUV drives..."
-- "The video features two golden retriever puppies playing..." → "Two golden retriever puppies play..."
-- "The video captures a cheetah in motion, running..." → "A cheetah runs..."
+### 2. REMOVE NOISE (delete ONLY these specific patterns — nothing else):
 
-### 2. REMOVE NOISE (delete these, do not replace them):
+- Hedging trailing clauses (", suggesting...", ", indicating that..."): ONLY delete from the comma onwards
+- Overall summary sentences: DELETE any sentence starting with "The overall atmosphere/mood/scene/effect..."
+- Redundant emotional trailing clauses: ", conveying a sense of...", ", adding to the...", ", creating a sense of..."
 
-Delete ALL of the following patterns wherever they appear:
-- Hedging phrases: "suggesting...", "indicating that...", "appears to be...", "might be...", "possibly...", "likely...", "could be...", "perhaps..."
-  - Delete the entire clause that starts with these words
-  - Example: "carrying luggage or gear, suggesting it might be on a journey or adventure" → "carrying luggage"
-- Meta-commentary about the video: "As the frames progress,", "Throughout the video,", "In one part of the video,"
-- Overall summary sentences: Any sentence starting with "The overall atmosphere/mood/scene/effect..." — DELETE THE ENTIRE SENTENCE
-- Redundant emotional interpretations: "conveying a sense of excitement", "adding to the whimsical feel", "creating a sense of urgency"
-  - Only delete these when they are standalone clauses/phrases, NOT when they are part of a motion description
+Do NOT delete:
+- Any phrase that contains a motion verb (walk, run, drive, fly, swim, move, ride, skate, jump, fall, climb, spin, roll, slide, flow, kick, swing)
+- Any standalone sentence that describes what happens in the scene
 
-IMPORTANT: When deleting a hedging clause, make sure the remaining sentence is grammatically correct. If deleting leaves a dangling comma or incomplete sentence, clean it up minimally.
+IMPORTANT: When in doubt, KEEP the phrase. Over-deletion is worse than under-deletion.
+
+### FULL EXAMPLES (study these carefully):
+
+**Example 1 — INPUT (94 words):**
+"The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear, suggesting it might be on a journey or adventure. As the SUV moves forward, it kicks up a cloud of dust behind it, indicating the dryness of the terrain and the speed at which it is traveling. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure."
+
+**Example 1 — OUTPUT (93 words):**
+"A white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it, with the dry terrain visible beneath its tires. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The road stretches ahead into the tree-lined distance. The camera follows smoothly from a rear low angle, capturing the dust trail."
+
+**What was done:** Removed "The video depicts"; deleted ", suggesting it might be on a journey or adventure"; deleted ", indicating the dryness of the terrain and the speed at which it is traveling"; deleted "The overall atmosphere..." sentence; redistributed deleted words into spatial detail already implied by the scene ("dry terrain visible beneath its tires", "road stretches ahead") and a slightly longer camera sentence. ALL motion preserved ("driving", "moves forward", "kicks up a cloud of dust"). Word count: 94→93 (≈same).
+
+**Example 2 — INPUT (77 words):**
+"The video features a person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. The overall atmosphere of the video is focused on the physical activity and the simplicity of the setting."
+
+**Example 2 — OUTPUT (76 words):**
+"A person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. Their stride is consistent and controlled throughout. The camera holds steady in a full-body medium shot from the side."
+
+**What was done:** Removed "The video features"; deleted "The overall atmosphere..." sentence (25 words); added one brief factual expansion ("Their stride is consistent and controlled throughout") and a longer camera sentence to compensate. ALL motion preserved ("running", "jogging", "swinging", "run"). Word count: 77→76 (≈same).
+
+**Example 3 — INPUT (88 words):**
+"The video features a charming scene of an orange and white cat walking along a garden path. The path is lined with lush greenery, vibrant flowers, and colorful blooms in shades of pink, yellow, and red. The cat, with its bright eyes and fluffy tail, moves gracefully towards the camera, its ears perked up as it explores the surroundings. The background is softly blurred, emphasizing the cat's movement and the vivid colors of the garden. The overall atmosphere is serene and picturesque, capturing the beauty of nature and the playful spirit of the cat."
+
+**Example 3 — OUTPUT (86 words):**
+"An orange and white cat walking along a garden path. The path is lined with lush greenery, vibrant flowers, and colorful blooms in shades of pink, yellow, and red. The cat, with its bright eyes and fluffy tail, moves gracefully towards the camera, its ears perked up as it explores the surroundings. The background is softly blurred, emphasizing the cat's movement and the vivid colors of the garden. Sunlight filters through the foliage onto the path. The camera tracks smoothly at the cat's eye level from a low angle."
+
+**What was done:** Removed "The video features a charming scene of"; deleted "The overall atmosphere..." sentence (19 words); added brief spatial/lighting detail already visible in the scene ("Sunlight filters through the foliage onto the path") and a longer camera sentence. ALL motion preserved ("walking", "moves gracefully", "explores"). Word count: 88→86 (≈same).
 
 ### 3. CAMERA CLOSING
 Add ONE brief camera/shot description as the final sentence. Choose based on the scene content:
@@ -105,7 +124,7 @@ The camera sentence must be SHORT (under 15 words). Do not elaborate.
 
 4. **Preserve all factual content**: Every object, person, animal, color, spatial relationship, and described detail from the input must remain in the output (unless it was a hedging/noise phrase you're removing).
 
-5. **Length**: Output should be SHORTER than input (you're removing noise, not adding content). Target: 85-95% of input length.
+5. **Length**: Output should be approximately THE SAME length as input. Target: 95-105% of input length. You remove preamble + trailing noise, but compensate with a camera sentence and optionally one brief spatial/composition detail (ONLY describing what is already visible — no inference).
 
 ## Process:
 1. Identify the primary subject (what moves or is most prominent)
@@ -117,7 +136,7 @@ The camera sentence must be SHORT (under 15 words). Do not elaborate.
 
 Output ONLY the cleaned caption. No explanations."""
 
-USER_TEMPLATE = """Clean up this VLM caption ({word_count} words). Remove preamble, hedging phrases, and overall-summary sentences. Start with the main subject. Add a brief camera note at the end. Do NOT change any motion/action descriptions. Do NOT add new information. Target ~{target_words} words.
+USER_TEMPLATE = """Clean up this VLM caption ({word_count} words). ONLY do these 3 things: (1) Remove the "The video depicts/shows/features/captures" opening phrase, (2) Delete hedging TRAILING CLAUSES (after comma) and overall-summary sentences, (3) Add a camera sentence at end (and optionally one brief spatial detail to maintain length). Keep ALL motion verbs in their ORIGINAL form (-ing stays -ing). Output MUST be ~{target_words} words (same length as input).
 
 INPUT:
 {original_caption}
@@ -188,7 +207,7 @@ def rewrite_caption(original: str, backend: str, model: str,
                     temperature: float = 0.3, max_retries: int = 3) -> str:
     """v8-minimal 改写：纯结构清理（去preamble + 去猜测 + 补镜头）"""
     word_count = len(original.split())
-    target_words = int(word_count * 0.9)  # 目标90%长度
+    target_words = word_count  # 目标≈等长（删噪声 + 补镜头/空间描述）
 
     user_msg = USER_TEMPLATE.format(
         word_count=word_count,
@@ -220,13 +239,13 @@ def rewrite_caption(original: str, backend: str, model: str,
 
         # ── 验证 2: 长度检查（不能比原文长太多）──
         result_words = len(result.split())
-        if result_words > word_count * 1.1:
-            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} > {word_count}*1.1")
+        if result_words > word_count * 1.15:
+            logger.warning(f"  [重试 {attempt+1}] 输出过长: {result_words} > {word_count}*1.15")
             continue
 
-        # ── 验证 3: 不能太短（至少原文60%）──
-        if result_words < word_count * 0.6:
-            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words} < {word_count}*0.6")
+        # ── 验证 3: 不能太短（至少原文85%）──
+        if result_words < word_count * 0.85:
+            logger.warning(f"  [重试 {attempt+1}] 输出过短: {result_words} < {word_count}*0.85")
             continue
 
         # 通过所有验证
@@ -247,8 +266,8 @@ def validate_rewrite(original: str, rewritten: str) -> dict:
         issues.append("empty output")
     if rewritten.lower().startswith(("the video", "this video", "in this video")):
         issues.append("still starts with preamble (subject-first violated)")
-    if new_words > orig_words * 1.1:
-        issues.append(f"longer than input ({new_words} > {orig_words}*1.1)")
+    if new_words > orig_words * 1.15:
+        issues.append(f"longer than input ({new_words} > {orig_words}*1.15)")
 
     # 检查是否保留了关键运动动词
     motion_verbs = ["running", "walking", "driving", "flying", "swimming",
