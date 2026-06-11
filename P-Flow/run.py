@@ -147,6 +147,34 @@ def parse_args():
     p.add_argument("--cegi_residual_alpha", type=float, default=0.0,
                    help="未选中 channel 的注入强度 (默认 0=纯随机; 可设 0.002 保留微弱 prior)")
 
+    # ── 方向 G: Multi-Scale Temporal Decomposition Injection (MSTDI) ──
+    p.add_argument("--mstdi", action="store_true",
+                   help="启用 MSTDI: 多尺度时序分解注入, 低频集中注入 temporal prior")
+    p.add_argument("--mstdi_levels", type=int, default=3,
+                   help="金字塔层数 (默认 3: 1/4, 1/2, 原始; 推荐 2~4)")
+    p.add_argument("--mstdi_alpha_base", type=float, default=0.05,
+                   help="最粗尺度 alpha (默认 0.05; 推荐 0.02~0.10)")
+    p.add_argument("--mstdi_alpha_decay", type=float, default=0.25,
+                   help="每层 alpha 衰减倍率 (默认 0.25: L0=0.05 → L1=0.0125 → L2≈0.003)")
+
+    # ── 方向 H: Temporal Phase Injection (TPI) ──
+    p.add_argument("--tpi", action="store_true",
+                   help="启用 TPI: 只注入 temporal 的时间相位, 保留 random 幅度")
+    p.add_argument("--tpi_gamma", type=float, default=0.5,
+                   help="相位插值强度 (0=纯random, 1=纯temporal; 默认 0.5; 推荐 0.3~0.7)")
+    p.add_argument("--tpi_freq_min", type=int, default=1,
+                   help="注入起始频率 bin (默认 1 跳过 DC; 0=包括 DC)")
+    p.add_argument("--tpi_freq_max", type=int, default=-1,
+                   help="注入结束频率 bin (默认 -1=所有; 可设 5 只注入低频)")
+
+    # ── 方向 I: Orthogonal Complement Suppression (OCS) ──
+    p.add_argument("--ocs", action="store_true",
+                   help="启用 OCS: 抑制 η_random 中与 temporal 主方向正交的分量")
+    p.add_argument("--ocs_top_k", type=int, default=3,
+                   help="SVD 保留的主成分数 (默认 3; 推荐 2~5)")
+    p.add_argument("--ocs_suppress_ratio", type=float, default=0.5,
+                   help="正交补抑制比例 (0=不抑制, 1=完全去除; 默认 0.5; 推荐 0.3~0.7)")
+
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
                    help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
@@ -239,6 +267,20 @@ def build_config(args) -> PFlowConfig:
         cegi_top_k=args.cegi_top_k,
         cegi_alpha=args.cegi_alpha,
         cegi_residual_alpha=args.cegi_residual_alpha,
+        # 方向 G: MSTDI
+        mstdi=args.mstdi,
+        mstdi_levels=args.mstdi_levels,
+        mstdi_alpha_base=args.mstdi_alpha_base,
+        mstdi_alpha_decay=args.mstdi_alpha_decay,
+        # 方向 H: TPI
+        tpi=args.tpi,
+        tpi_gamma=args.tpi_gamma,
+        tpi_freq_min=args.tpi_freq_min,
+        tpi_freq_max=args.tpi_freq_max,
+        # 方向 I: OCS
+        ocs=args.ocs,
+        ocs_top_k=args.ocs_top_k,
+        ocs_suppress_ratio=args.ocs_suppress_ratio,
     )
 
 

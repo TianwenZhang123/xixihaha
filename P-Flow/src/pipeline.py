@@ -124,6 +124,24 @@ class PFlowConfig:
     cegi_alpha: float = 0.02           # 被选中 channel 的注入强度 (集中注入, 比 baseline 大)
     cegi_residual_alpha: float = 0.0   # 未选中 channel 的注入强度 (0=纯随机, >0 保留微弱 prior)
 
+    # ── 方向 G: Multi-Scale Temporal Decomposition Injection (MSTDI) ──
+    mstdi: bool = False                 # 是否启用 MSTDI (多尺度时序分解注入)
+    mstdi_levels: int = 3              # 金字塔层数 (2=粗/细, 3=粗/中/细, 4=四层)
+    mstdi_alpha_base: float = 0.05     # 最粗层的 alpha (强注入控制全局运动)
+    mstdi_alpha_decay: float = 0.25    # 每层 alpha 衰减比例 (alpha[i+1] = alpha[i] * decay)
+                                       # 默认: L0=0.05, L1=0.0125, L2=0.003125 → 高频几乎不注入
+
+    # ── 方向 H: Temporal Phase Injection (TPI) ──
+    tpi: bool = False                   # 是否启用 TPI (时间相位注入)
+    tpi_gamma: float = 0.5             # 相位注入强度 (0=纯随机相位, 1=完全用参考相位)
+    tpi_freq_min: int = 1              # 最小注入频率 bin (跳过 DC=0)
+    tpi_freq_max: int = -1             # 最大注入频率 bin (-1=全部)
+
+    # ── 方向 I: Orthogonal Complement Suppression (OCS) ──
+    ocs: bool = False                   # 是否启用 OCS (正交补空间抑制)
+    ocs_top_k: int = 3                 # SVD 保留的主成分数
+    ocs_suppress_ratio: float = 0.5    # 正交空间的抑制比例 (0=不抑制, 1=完全移除)
+
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
 
@@ -148,6 +166,12 @@ class PFlowConfig:
         if self.use_blend:
             if self.cegi:
                 flags.append(f"blend(CEGI: top_k={self.cegi_top_k}, α_inject={self.cegi_alpha}, α_residual={self.cegi_residual_alpha})")
+            elif self.mstdi:
+                flags.append(f"blend(MSTDI: levels={self.mstdi_levels}, α_base={self.mstdi_alpha_base}, decay={self.mstdi_alpha_decay})")
+            elif self.tpi:
+                flags.append(f"blend(TPI: γ={self.tpi_gamma}, freq=[{self.tpi_freq_min},{self.tpi_freq_max}])")
+            elif self.ocs:
+                flags.append(f"blend(OCS: top_k={self.ocs_top_k}, suppress={self.ocs_suppress_ratio})")
             elif self.podi:
                 flags.append(f"blend(PODI: α={self.podi_alpha}, min_align={self.podi_min_alignment})")
             elif self.adaptive_alpha:
@@ -557,6 +581,24 @@ class PFlowPipeline:
             eta = self._cegi_blend(eta_temporal, eta_random)
             return eta
 
+        # ── 方向 G: Multi-Scale Temporal Decomposition Injection (MSTDI) ──
+        # 核心思想: 在空间低频层用大 α 注入 (控制全局运动), 高频层保持随机 (保证视觉质量)
+        if self.config.mstdi:
+            eta = self._mstdi_blend(eta_temporal, eta_random)
+            return eta
+
+        # ── 方向 H: Temporal Phase Injection (TPI) ──
+        # 核心思想: 保留 η_random 的幅度谱, 只在时间维相位中注入参考视频的运动信息
+        if self.config.tpi:
+            eta = self._tpi_blend(eta_temporal, eta_random)
+            return eta
+
+        # ── 方向 I: Orthogonal Complement Suppression (OCS) ──
+        # 核心思想: 在 η_random 中抑制与 η_temporal 主方向正交的分量, 间接增强 temporal 信号
+        if self.config.ocs:
+            eta = self._ocs_blend(eta_temporal, eta_random)
+            return eta
+
         # ── 方向 E: Prompt-Orthogonal Decomposition Injection (PODI) ──
         # 核心思想: η_temporal 中包含与 prompt 对齐的分量 (有益) 和正交分量 (可能有害)
         # 只注入对齐分量，过滤掉正交/冲突的成分 → 安全提升 alpha
@@ -913,6 +955,343 @@ class PFlowPipeline:
         )
 
         return eta
+
+    def _mstdi_blend(
+        self,
+        eta_temporal: torch.Tensor,
+        eta_random: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        方向 G 核心实现: Multi-Scale Temporal Decomposition Injection (MSTDI).
+
+        核心思想:
+            将噪声在空间维度做多尺度分解 (Gaussian Pyramid)，
+            在粗尺度 (低频) 用大 α 注入 temporal prior → 控制全局运动方向,
+            在细尺度 (高频) 用小/零 α → 保持随机性保证视觉质量。
+
+        理论支撑:
+            - FreeInit (ECCV 2024): 低频分量决定全局运动
+            - Video-MSG (2025): 多尺度引导策略
+            - 扩散模型 coarse-to-fine 特性: 低频结构有"杠杆效应"
+
+        算法:
+            1. 对 η_temporal 和 η_random 分别做 spatial avg pooling 到多个尺度
+            2. 在每个尺度上用递减的 α 做 linear blend
+            3. 通过 Laplacian 差分重建全分辨率噪声
+            4. 最终 renorm 到 N(0,1)
+        """
+        cfg = self.config
+        B, C, F, H, W = eta_temporal.shape
+        num_levels = cfg.mstdi_levels
+
+        # 计算每层的 alpha (指数衰减)
+        alphas = []
+        a = cfg.mstdi_alpha_base
+        for i in range(num_levels):
+            alphas.append(a)
+            a *= cfg.mstdi_alpha_decay
+
+        logger.info(
+            f"  [MSTDI] levels={num_levels}, alpha_schedule={[f'{a:.5f}' for a in alphas]}"
+        )
+
+        # ── Step 1: 构建多尺度 blended tensors ──
+        # 使用 avg_pool3d 对 spatial 维度下采样 (保持 frame 维度不变)
+        import torch.nn.functional as F_nn
+
+        eta_t_f32 = eta_temporal.float()
+        eta_r_f32 = eta_random.float()
+
+        # 每层的 blend 结果 (从粗到细)
+        blended_levels = []
+        for level_idx in range(num_levels):
+            scale_factor = 2 ** (num_levels - 1 - level_idx)  # L0=最粗(4x缩), L2=原始(1x)
+
+            if scale_factor > 1:
+                # 下采样 spatial 维度: (B, C, F, H, W) → (B, C, F, H/s, W/s)
+                # 先 reshape 为 (B*C, F, H, W) 再 pool，再 reshape 回来
+                eta_t_down = F_nn.avg_pool3d(
+                    eta_t_f32.reshape(B * C, F, H, W).unsqueeze(1),
+                    kernel_size=(1, scale_factor, scale_factor),
+                    stride=(1, scale_factor, scale_factor),
+                ).squeeze(1).reshape(B, C, F, H // scale_factor, W // scale_factor)
+
+                eta_r_down = F_nn.avg_pool3d(
+                    eta_r_f32.reshape(B * C, F, H, W).unsqueeze(1),
+                    kernel_size=(1, scale_factor, scale_factor),
+                    stride=(1, scale_factor, scale_factor),
+                ).squeeze(1).reshape(B, C, F, H // scale_factor, W // scale_factor)
+            else:
+                eta_t_down = eta_t_f32
+                eta_r_down = eta_r_f32
+
+            # Blend at this level
+            alpha_level = alphas[level_idx]
+            sqrt_a = alpha_level ** 0.5
+            sqrt_1ma = (1.0 - alpha_level) ** 0.5
+            blended = sqrt_a * eta_t_down + sqrt_1ma * eta_r_down
+
+            blended_levels.append((blended, scale_factor, alpha_level))
+
+            logger.info(
+                f"  [MSTDI] Level {level_idx}: scale=1/{scale_factor}, "
+                f"shape={list(blended.shape)}, α={alpha_level:.5f}"
+            )
+
+        # ── Step 2: 从粗到细重建 (Laplacian-style) ──
+        # 策略: 从最粗层开始，逐层上采样并加上细层的高频残差
+        # 最粗层直接用 blended，中间层取 (blended - upsample(coarser)) 作为细节
+        # 最终 = coarsest_upsampled + detail_1 + detail_2 + ...
+
+        # 从最粗层开始
+        result = blended_levels[0][0]  # 最粗层的 blend
+
+        for level_idx in range(1, num_levels):
+            blended_curr, scale_curr, _ = blended_levels[level_idx]
+            _, scale_prev, _ = blended_levels[level_idx - 1]
+
+            # 上采样前一层结果到当前层分辨率
+            target_h = H // scale_curr
+            target_w = W // scale_curr
+
+            # result 当前分辨率是上一层的, 需要上采样
+            result_up = F_nn.interpolate(
+                result.reshape(B * C, F, result.shape[3], result.shape[4]).unsqueeze(1),
+                size=(F, target_h, target_w),
+                mode='trilinear',
+                align_corners=False,
+            ).squeeze(1).reshape(B, C, F, target_h, target_w)
+
+            # 当前层的高频细节 = blended_curr - upsample(上一层 blended)
+            prev_blended = blended_levels[level_idx - 1][0]
+            prev_up = F_nn.interpolate(
+                prev_blended.reshape(B * C, F, prev_blended.shape[3], prev_blended.shape[4]).unsqueeze(1),
+                size=(F, target_h, target_w),
+                mode='trilinear',
+                align_corners=False,
+            ).squeeze(1).reshape(B, C, F, target_h, target_w)
+
+            high_freq_detail = blended_curr - prev_up
+
+            # 累积: 粗层上采样 + 当前层高频细节
+            result = result_up + high_freq_detail
+
+        # ── Step 3: 全局 renorm 到 N(0,1) ──
+        eta = result
+        eta = (eta - eta.mean()) / (eta.std() + 1e-8)
+        eta = eta.to(eta_temporal.dtype)
+
+        # ── 诊断 ──
+        direction_shift = (eta - eta_random).norm().item() / eta_random.norm().item()
+        cos_m_r = torch.nn.functional.cosine_similarity(
+            eta.flatten().unsqueeze(0),
+            eta_random.flatten().unsqueeze(0).float()
+        ).item()
+        cos_m_t = torch.nn.functional.cosine_similarity(
+            eta.flatten().unsqueeze(0),
+            eta_temporal.flatten().unsqueeze(0).float()
+        ).item()
+
+        logger.info(
+            f"  [MSTDI Blend Diag] direction_shift={direction_shift:.6f}, "
+            f"cos(mixed, random)={cos_m_r:.4f}, cos(mixed, temporal)={cos_m_t:.4f}"
+        )
+        logger.info(f"  [MSTDI Blend] η_out: mean={eta.mean():.4f}, std={eta.std():.4f}")
+
+        return eta
+
+    def _tpi_blend(
+        self,
+        eta_temporal: torch.Tensor,
+        eta_random: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        方向 H 核心实现: Temporal Phase Injection (TPI).
+
+        核心思想:
+            在 3D 频域中保留 η_random 的幅度谱 (保证功率谱不变 → Gaussian property),
+            只在时间维度的相位中注入 η_temporal 的运动结构。
+
+        理论支撑:
+            - 信号处理经典实验: 相位决定结构 (交换两张图的幅度和相位, 视觉内容跟随相位)
+            - 方向 C 频域重塑只改了幅度 → 几乎无效
+            - 相位携带的信息量远大于幅度
+
+        算法:
+            1. 对 η_temporal 和 η_random 做时间维度 rFFT
+            2. 提取 η_temporal 的相位, η_random 的幅度和相位
+            3. 对时间频率 > 0 的 bin 做相位插值: φ_out = (1-γ)φ_rand + γ·φ_ref
+            4. 用 η_random 的幅度 + 混合相位重建
+            5. IRFFT 回时域, renorm 到 N(0,1)
+        """
+        cfg = self.config
+        gamma = cfg.tpi_gamma
+        B, C, F, H, W = eta_temporal.shape
+
+        eta_t_f32 = eta_temporal.float()
+        eta_r_f32 = eta_random.float()
+
+        # ── Step 1: 时间维度 FFT (dim=2, frame 维度) ──
+        F_ref = torch.fft.rfft(eta_t_f32, dim=2)   # (B, C, F//2+1, H, W) complex
+        F_rand = torch.fft.rfft(eta_r_f32, dim=2)  # (B, C, F//2+1, H, W) complex
+
+        # ── Step 2: 分离幅度和相位 ──
+        amp_rand = F_rand.abs()        # η_random 的幅度 (保留)
+        phase_rand = F_rand.angle()    # η_random 的相位
+        phase_ref = F_ref.angle()      # η_temporal 的相位 (参考)
+
+        # ── Step 3: 选择性相位注入 (跳过 DC) ──
+        freq_bins = F_ref.shape[2]  # F//2 + 1
+        freq_min = cfg.tpi_freq_min
+        freq_max = freq_bins if cfg.tpi_freq_max < 0 else min(cfg.tpi_freq_max, freq_bins)
+
+        # 构造 phase_out: 默认等于 phase_rand, 在指定频率范围内做插值
+        phase_out = phase_rand.clone()
+
+        if freq_min < freq_max:
+            # 相位插值: 使用圆周插值避免 wrapping 问题
+            # 方法: 将相位差包裹到 [-π, π], 再做线性插值
+            phase_diff = phase_ref[:, :, freq_min:freq_max, :, :] - phase_rand[:, :, freq_min:freq_max, :, :]
+            # Wrap to [-π, π]
+            phase_diff = torch.atan2(torch.sin(phase_diff), torch.cos(phase_diff))
+            # Interpolate
+            phase_out[:, :, freq_min:freq_max, :, :] = phase_rand[:, :, freq_min:freq_max, :, :] + gamma * phase_diff
+
+        # ── Step 4: 重建频域信号 (保留 random 幅度 + 混合相位) ──
+        F_out = amp_rand * torch.exp(1j * phase_out)
+
+        # ── Step 5: IRFFT 回时域 ──
+        eta_f32 = torch.fft.irfft(F_out, n=F, dim=2)  # (B, C, F, H, W)
+
+        # ── Step 6: 全局 renorm 到 N(0,1) ──
+        eta = (eta_f32 - eta_f32.mean()) / (eta_f32.std() + 1e-8)
+        eta = eta.to(eta_temporal.dtype)
+
+        # ── 诊断 ──
+        direction_shift = (eta - eta_random).norm().item() / eta_random.norm().item()
+        cos_m_r = torch.nn.functional.cosine_similarity(
+            eta.flatten().unsqueeze(0),
+            eta_random.flatten().unsqueeze(0).float()
+        ).item()
+        cos_m_t = torch.nn.functional.cosine_similarity(
+            eta.flatten().unsqueeze(0),
+            eta_temporal.flatten().unsqueeze(0).float()
+        ).item()
+
+        logger.info(
+            f"  [TPI] γ={gamma:.2f}, freq_range=[{freq_min}, {freq_max}), "
+            f"total_freq_bins={freq_bins}"
+        )
+        logger.info(
+            f"  [TPI Blend Diag] direction_shift={direction_shift:.6f}, "
+            f"cos(mixed, random)={cos_m_r:.4f}, cos(mixed, temporal)={cos_m_t:.4f}"
+        )
+        logger.info(f"  [TPI Blend] η_out: mean={eta.mean():.4f}, std={eta.std():.4f}")
+
+        return eta
+
+    def _ocs_blend(
+        self,
+        eta_temporal: torch.Tensor,
+        eta_random: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        方向 I 核心实现: Orthogonal Complement Suppression (OCS).
+
+        核心思想:
+            不注入 η_temporal 的内容 (避免毒性),
+            而是对 η_random 做处理: 抑制与 η_temporal 主方向正交的分量。
+            效果: η_random "偏向" temporal 主方向，间接增强 temporal 信号的影响力。
+
+        与 PODI 的区别:
+            - PODI: 从 η_temporal 中提取信号 → 信号太弱 (7%~11%)
+            - OCS: 从 η_random 中抑制噪声 → 相对增强 temporal 方向
+            - OCS 不直接注入 temporal content → 不引入"毒性"
+
+        算法:
+            1. 对 η_temporal (flatten per-frame) 做 SVD，取 top-k 主成分 V_k
+            2. 将 η_random (per-frame) 分解: proj (在 V_k 上) + orth (正交补)
+            3. 抑制 orth: η_out = proj + (1 - suppress_ratio) * orth
+            4. Renorm 到 N(0,1)
+        """
+        cfg = self.config
+        B, C, F, H, W = eta_temporal.shape
+        top_k = cfg.ocs_top_k
+        suppress = cfg.ocs_suppress_ratio
+
+        eta_t_f32 = eta_temporal.float()
+        eta_r_f32 = eta_random.float()
+
+        # ── Step 1: 对 η_temporal 提取主成分方向 ──
+        # Reshape: (B, C, F, H, W) → (F, C*H*W) — 每帧一个高维向量
+        spatial_dim = C * H * W
+        eta_t_flat = eta_t_f32.reshape(B, C, F, H * W).permute(0, 2, 1, 3).reshape(B * F, spatial_dim)
+        # 取第一个 batch (B=1 通常)
+        eta_t_mat = eta_t_flat[:F, :]  # (F, spatial_dim)
+
+        # SVD: 只需要 top-k 右奇异向量
+        # 由于 spatial_dim >> F, 用 eta_t_mat^T @ eta_t_mat 的特征向量更高效
+        # 但直接用 torch.linalg.svd 的 partial 版本
+        try:
+            # 使用 randomized SVD 加速 (F 通常只有 21)
+            U, S, Vh = torch.linalg.svd(eta_t_mat, full_matrices=False)  # Vh: (F, spatial_dim)
+            V_k = Vh[:top_k, :]  # (k, spatial_dim) — top-k 主方向
+        except Exception as e:
+            logger.warning(f"  [OCS] SVD failed: {e}, falling back to normal blend")
+            alpha = cfg.alpha
+            sqrt_a = alpha ** 0.5
+            sqrt_1ma = (1.0 - alpha) ** 0.5
+            return (sqrt_a * eta_temporal + sqrt_1ma * eta_random)
+
+        logger.info(
+            f"  [OCS] SVD singular values (top-{top_k}): {S[:top_k].tolist()}, "
+            f"energy ratio: {(S[:top_k]**2).sum() / (S**2).sum():.4f}"
+        )
+
+        # ── Step 2: 对 η_random 做投影分解 ──
+        eta_r_flat = eta_r_f32.reshape(B, C, F, H * W).permute(0, 2, 1, 3).reshape(B * F, spatial_dim)
+        eta_r_mat = eta_r_flat[:F, :]  # (F, spatial_dim)
+
+        # 投影到 V_k 子空间: proj = (η_r @ V_k^T) @ V_k
+        proj_coeffs = eta_r_mat @ V_k.T  # (F, k)
+        proj = proj_coeffs @ V_k          # (F, spatial_dim)
+        orth = eta_r_mat - proj           # (F, spatial_dim) — 正交补
+
+        # ── Step 3: 抑制正交补 ──
+        eta_out_flat = proj + (1.0 - suppress) * orth  # (F, spatial_dim)
+
+        # ── Step 4: Reshape 回原始形状 + renorm ──
+        # (F, C*H*W) → (1, C, F, H, W)
+        eta_out = eta_out_flat.reshape(F, C, H, W).unsqueeze(0).permute(0, 1, 2, 3, 4)
+        # 实际上需要: (F, C*H*W) → (F, C, H, W) → permute 为 (1, C, F, H, W)
+        eta_out = eta_out_flat.reshape(F, C, H, W).permute(1, 0, 2, 3).unsqueeze(0)
+        # 现在是 (1, C, F, H, W) ✓
+
+        # Renorm
+        eta_out = (eta_out - eta_out.mean()) / (eta_out.std() + 1e-8)
+        eta_out = eta_out.to(eta_temporal.dtype)
+
+        # ── 诊断 ──
+        direction_shift = (eta_out - eta_random).norm().item() / eta_random.norm().item()
+        cos_m_r = torch.nn.functional.cosine_similarity(
+            eta_out.flatten().unsqueeze(0),
+            eta_random.flatten().unsqueeze(0).float()
+        ).item()
+        cos_m_t = torch.nn.functional.cosine_similarity(
+            eta_out.flatten().unsqueeze(0),
+            eta_temporal.flatten().unsqueeze(0).float()
+        ).item()
+
+        logger.info(
+            f"  [OCS] top_k={top_k}, suppress_ratio={suppress:.2f}"
+        )
+        logger.info(
+            f"  [OCS Blend Diag] direction_shift={direction_shift:.6f}, "
+            f"cos(mixed, random)={cos_m_r:.4f}, cos(mixed, temporal)={cos_m_t:.4f}"
+        )
+        logger.info(f"  [OCS Blend] η_out: mean={eta_out.mean():.4f}, std={eta_out.std():.4f}")
+
+        return eta_out
 
     def _podi_decompose(
         self,
