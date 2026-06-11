@@ -404,6 +404,8 @@ class PFlowPipeline:
                             f"参考视频运动混乱，跳过轨迹锚定，退化为标准生成"
                         )
                         ref_trajectory = None
+                        # 同时丢弃 η_temporal，确保完全回归 baseline（纯随机噪声）
+                        eta_temporal = None
                 else:
                     logger.warning(
                         f"  [Trajectory Anchor] η_temporal 帧数不足 ({num_frames_gate})，跳过门控检查"
