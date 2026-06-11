@@ -187,8 +187,8 @@ def parse_args():
                    help="inversion 轨迹缓存间隔 (1=全缓存; 2=隔一步; 用于节省显存)")
     p.add_argument("--no_anchor_quality_gate", action="store_true",
                    help="禁用轨迹质量门控 (默认启用)")
-    p.add_argument("--anchor_quality_threshold", type=float, default=0.3,
-                   help="轨迹一致性阈值: 相邻点余弦相似度均值低于此值则跳过 anchor (默认 0.3)")
+    p.add_argument("--anchor_quality_threshold", type=float, default=0.05,
+                   help="η_temporal 帧间 cos 阈值: mean_cos < 此值则跳过 anchor (默认 0.05; S7=0.19通过, S21=-0.14拒绝)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
