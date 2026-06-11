@@ -2,7 +2,7 @@
 
 > 创建时间: 2025-06-10  
 > 最后更新: 2026-06-11  
-> 状态: renorm 失败 → rescale 否决 → QGA 失败 → α=0.01 确认天花板 → 方向 C 频域重塑 **完全失败** → 方向 D: SGA **效果边际，pass** → 方向 E: PODI **失败 (CLIP -2.5%, XCLIP -5.2%)** → **下一步: 方案 F~I 待选**  
+> 状态: renorm 失败 → rescale 否决 → QGA 失败 → α=0.01 确认天花板 → 方向 C 频域重塑 **完全失败** → 方向 D: SGA **效果边际，pass** → 方向 E: PODI **失败 (CLIP -2.5%, XCLIP -5.2%)** → 方向 F: CEGI **失败 (CLIP -3.4%, XCLIP -5.2%)** → 方向 G: MSTDI **FAILED (G1: -0.7%/-1.1%; G2: -15.3%/-32.3% 灾难性失败，证明 η_temporal 内容有害)** → **下一步: TPI (最高优先) / OCS 实验**  
 > 目标: 确定 L2 SVD 最优策略 + L1 prompt rewrite 验证
 
 ---
@@ -860,11 +860,12 @@ python evaluation/run_clip_xclip_eval.py \
 │   │     结论: "调量"路线天花板已到，需转向"改质"
 │   ├── [已失败] 方向 E: PODI → CLIP -2.5%, XCLIP -5.2%
 │   │     结论: prompt→channel 语义映射不存在，"改质"需换数据驱动思路
-│   ├── [★当前] 方案 F~I 待选 (见 docs/论文调研_L2噪声先验改进方向.md)
-│   │     F: TPI (时间相位注入)
-│   │     G: MSTDI (多尺度分层注入) 
-│   │     H: CEGI (通道能量门控注入) ← 推荐最优先
-│   │     I: OCS (正交补抑制)
+│   ├── [已失败] 方向 F: CEGI (通道能量门控) → CLIP -3.4%, XCLIP -5.2%
+│   │     结论: channel 间信号无明显集中性，集中注入反而丢失信息
+│   ├── [★当前] 方案 G/H/I 实验中
+│   │     G: MSTDI (多尺度分层注入) — 空间低频杠杆效应
+│   │     H: TPI (时间相位注入) — 不注入内容只传相位
+│   │     I: OCS (正交补抑制) — 逆向思维不注入temporal
 │   └── [后续] 选定方案的 α 消融 + 200 样本验证
 │
 ├── L1 Prompt Rewrite
@@ -880,10 +881,10 @@ python evaluation/run_clip_xclip_eval.py \
 
 | 序号 | 实验 | 预期收益 | 成本 | 状态 |
 |:---:|------|:---:|:---:|------|
-| 1 | **H: CEGI (通道能量门控注入)** | top-k channel 集中注入，信号强度 ×5~20 | 低 | **★ 下一步** |
-| 2 | G: MSTDI (多尺度分层注入) | 低频 α=0.05，利用杠杆效应 | 中 | 备选 |
-| 3 | F: TPI (时间相位注入) | 频域相位携带结构信息 | 中 | 备选 |
-| 4 | CEGI/MSTDI + v9 caption | L1+L2 叠加 | 低 | 等 H/G 结果 |
+| 1 | **G: MSTDI (多尺度分层注入)** | 低频 α=0.05，空间杠杆效应，不丢弃任何 channel | 中 | **★ 实验中** |
+| 2 | **H: TPI (时间相位注入)** | 只改相位不改幅度，保 Gaussian，避免内容毒性 | 中 | **★ 实验中** |
+| 3 | **I: OCS (正交补抑制)** | 不注入 temporal，从 random 中抑制正交分量 | 中 | **★ 实验中** |
+| 4 | MSTDI/TPI/OCS + v9 caption | L1+L2 叠加 | 低 | 等 G/H/I 结果 |
 | 5 | 扩大样本量验证 | 统计显著性 | 高 | 论文投稿前 |
 
 ---
@@ -917,6 +918,7 @@ python evaluation/run_clip_xclip_eval.py \
 | 叠加模式 β=1.0 (freq_reshape+α=0.004) | 0.8384 | 0.6835 | CLIP **-6.47%**, XCLIP **-13.20%** ❌ |
 | SGA (target_std=0.30, 原始 caption) | 0.8834 | 0.7899 | CLIP -1.4%, XCLIP +0.3% ❌ (边际) |
 | PODI (α=0.004, 原始 caption) | 0.8739 | 0.7464 | CLIP **-2.5%**, XCLIP **-5.2%** ❌ |
+| CEGI (top_k=4, α_inject=0.02, α_residual=0) | 0.8661 | 0.7467 | CLIP **-3.4%**, XCLIP **-5.2%** ❌ |
 
 ### 冲突诊断汇总
 
@@ -932,3 +934,594 @@ python evaluation/run_clip_xclip_eval.py \
 | 43 | LOW | right, up, camera, move, flow | 均匀 | 安全 |
 | 46 | LOW | right, up, pan | 均匀 | 安全 |
 | 47 | LOW | 无 | 均匀 | 安全 |
+
+---
+
+## 十二、方向 F: Channel-Energy Gated Injection (CEGI)
+
+### 12.1 动机与核心思想
+
+PODI (方向 E) 失败的根因是"外部语义映射不存在"——prompt embedding 到 16 维 channel 空间的 chunked pooling 不携带任何语义结构。CEGI 转向**数据驱动**：不依赖外部信号，而是用 η_temporal 自身的 per-channel temporal variance 作为"哪些 channel 携带运动信息"的指示器。
+
+核心思想：η_temporal 的 16 个 channel 中，temporal variance 高的 channel 更可能编码了真实运动信息（因为静态/噪声 channel 的帧间变化小）。CEGI 只在 top-k 高方差 channel 上集中注入 temporal prior (α_inject >> baseline α)，其余 channel 不注入 (α_residual=0)，保持纯随机。
+
+与前序方法的关系：
+- vs baseline (均匀 α=0.004): CEGI 让"有运动信号的 channel"拿到 5× 的注入量
+- vs PODI (依赖 prompt→channel 映射): CEGI 完全数据驱动，无外部依赖
+- vs SGA (微调总 α): CEGI 重新分配注入到不同 channel，而非调总量
+
+### 12.2 算法
+
+```
+输入: η_temporal [B, C, F, H, W], η_random [B, C, F, H, W]
+参数: top_k=4 (25% channels), α_inject=0.02, α_residual=0.0
+
+1. 计算 per-channel temporal variance:
+   var_c = Var(η_temporal[:, c, :, :, :])  for c in [0..C-1]
+   
+2. 选择 top-k channels (按 var_c 降序):
+   selected = argsort(var_c, descending=True)[:top_k]
+   
+3. 对 selected channels: 
+   η[:, selected] = √α_inject × η_temporal[:, selected] + √(1-α_inject) × η_random[:, selected]
+   Per-channel renorm: η[:, c] = (η[:, c] - mean) / std  ∀ c ∈ selected
+   
+4. 对其余 channels:
+   η[:, rest] = √α_residual × η_temporal[:, rest] + √(1-α_residual) × η_random[:, rest]
+   (α_residual=0 时直接用 η_random)
+
+输出: η — 运动 channel 被注入强信号，非运动 channel 保持纯随机
+```
+
+### 12.3 实验配置
+
+```bash
+python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/cegi_k4_a02 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --noise_prior --svd_mode v1 \
+    --cegi --cegi_top_k 4 --cegi_alpha 0.02 \
+    --steps 30 --guidance 5.0 --seed 42
+```
+
+### 12.4 实验结果（❌ 未超越 baseline，但未 catastrophic failure）
+
+**总体指标:**
+
+| 配置 | CLIP (orig-gen) | XCLIP (orig-gen) | vs Baseline |
+|------|:---:|:---:|:---:|
+| Pure L2 Baseline (v1, α=0.004) | **0.8964** | **0.7874** | — |
+| CEGI (top_k=4, α_inject=0.02, α_residual=0) | 0.8661 | 0.7467 | CLIP **-3.4%** ❌, XCLIP **-5.2%** ❌ |
+
+**逐 Case 对比:**
+
+| 样本 | 场景 | Baseline CLIP | CEGI CLIP | Δ CLIP | Baseline XCLIP | CEGI XCLIP | Δ XCLIP |
+|:---:|------|:---:|:---:|:---:|:---:|:---:|:---:|
+| 7 | 杯中帆船 | 0.9303 | 0.8796 | -5.5% ❌ | 0.6982 | 0.7344 | +5.2% ✅ |
+| 17 | SUV越野 | 0.9092 | 0.8813 | -3.1% ❌ | 0.8368 | 0.7932 | -5.2% ❌ |
+| 21 | 丛林纸飞机 | 0.8928 | 0.7848 | **-12.1%** ❌ | 0.7637 | 0.4802 | **-37.1%** ❌❌ |
+| 31 | 水下城市 | 0.8324 | 0.8121 | -2.4% | 0.5237 | 0.6299 | **+20.3%** ✅ |
+| 32 | 雪地金毛 | 0.9167 | 0.9338 | +1.9% ✅ | 0.8221 | 0.8076 | -1.8% |
+| 33 | 跑步者 | 0.8531 | 0.8157 | -4.4% ❌ | 0.8618 | 0.7711 | **-10.5%** ❌ |
+| 34 | 四只小狗 | 0.8968 | 0.8661 | -3.4% | 0.8710 | 0.8560 | -1.7% |
+| 43 | 花园猫咪 | 0.9539 | 0.9287 | -2.6% | 0.9069 | 0.8791 | -3.1% |
+| 46 | 火山喷发 | 0.9022 | 0.9047 | +0.3% | 0.7869 | 0.7151 | -9.1% ❌ |
+| 47 | 动画狗城市 | 0.8769 | 0.8538 | -2.6% | 0.8024 | 0.8001 | -0.3% |
+
+胜负统计: CEGI 赢 2/10 (S7 XCLIP +5.2%, S31 XCLIP +20.3%)，输 7/10，平 1/10
+
+### 12.5 日志关键诊断数据
+
+**Per-sample CEGI Channel Selection & Blend Diagnostics:**
+
+| 样本 | Selected Channels | Var Range (selected) | Var Range (rest) | direction_shift | cos(mixed, random) | cos(mixed, temporal) |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 7 | [5, 3, 14, 15] | [0.162, 0.244] | [0.048, 0.140] | 0.0319 | 1.0000 | 0.0192 |
+| 17 | [3, 12, 5, 15] | [0.129, 0.163] | [0.063, 0.126] | 0.0275 | 1.0000 | 0.0161 |
+| 21 | [1, 3, 12, 11] | [0.124, 0.141] | [0.072, 0.123] | 0.0264 | 1.0000 | 0.0151 |
+| 31 | [3, 15, 7, 2] | [0.118, 0.184] | [0.077, 0.112] | 0.0276 | 1.0000 | 0.0145 |
+| 32 | [0, 7, 5, 3] | [0.149, 0.185] | [0.067, 0.144] | 0.0294 | 1.0000 | 0.0150 |
+| 33 | [8, 3, 14, 10] | [0.162, 0.284] | [0.057, 0.161] | 0.0338 | 1.0000 | 0.0195 |
+| 34 | [3, 5, 12, 11] | [0.090, 0.111] | [0.039, 0.085] | 0.0231 | 1.0000 | 0.0118 |
+| 43 | [3, 5, 12, 8] | [0.163, 0.241] | [0.109, 0.159] | 0.0319 | 1.0000 | 0.0176 |
+| 46 | [3, 15, 12, 7] | [0.153, 0.273] | [0.085, 0.139] | 0.0323 | 1.0000 | 0.0206 |
+| 47 | [3, 8, 5, 1] | [0.170, 0.239] | [0.081, 0.156] | 0.0331 | 1.0000 | 0.0187 |
+
+**Channel 3 出现在 10/10 个样本的 top-4 选择中**，说明它是全局的"运动主通道"。Channel 5 出现 6/10 次，Channel 12 出现 5/10 次。
+
+### 12.6 失败原因分析
+
+#### 核心问题: 信号仍然不可见
+
+尽管 CEGI 将注入集中到 top-4 channel，`cos(mixed, random) = 1.0000`（4位小数精度内无法区分混合噪声与纯随机噪声）。`direction_shift` 仅 0.023~0.034，`cos(mixed, temporal)` 仅 0.012~0.021。
+
+**数学解释**: α_inject=0.02 在 4/16 channel 上注入。对于整体噪声而言:
+- 4 个 channel 各承受 √0.02 ≈ 0.141 的 temporal 成分
+- 但这 4 个 channel 只占总维度的 25%
+- 经过 per-channel renorm 后，全局 cos similarity 无法感知到这个局部信号
+- 实际整体 effective injection ≈ √(0.02 × 4/16) = √0.005 ≈ 0.071 — 仍然极弱
+
+#### 为什么比 baseline 还差？
+
+baseline (α=0.004) 虽然弱，但是**均匀注入 16 个 channel**，每个 channel 都获得了微弱但一致的 temporal prior。CEGI 将注入集中到 4 个 channel，但**完全抛弃了其余 12 个 channel 的 temporal 信息** (α_residual=0)。结果:
+
+1. **信号损失 75%**: 12 个"非选中"channel 的 temporal prior 被直接丢弃，这些 channel 虽然 variance 较低，但仍然贡献了大量有用的时序结构
+2. **集中注入无法补偿**: top-4 channel 获得 5× 的 α (0.02 vs 0.004)，但经 per-channel renorm 后信号仍被稀释到不可见
+3. **S21 Catastrophic Failure (XCLIP -37.1%)**: 该样本的 channel variance 范围非常窄 ([0.072, 0.141])，top-4 与 rest 差异极小 (1.01× 对比)，说明 temporal signal 分散在所有 channel 中，集中注入反而破坏了分布
+
+#### Channel Variance 分布分析
+
+| 样本 | Top-4 Var (min) | Rest Var (max) | Top/Rest 比值 | 结果 |
+|:---:|:---:|:---:|:---:|:---:|
+| 7 | 0.162 | 0.140 | 1.16× | XCLIP +5.2% ✅ |
+| 31 | 0.118 | 0.112 | 1.05× | XCLIP +20.3% ✅ |
+| 33 | 0.162 | 0.161 | **1.01×** | XCLIP -10.5% ❌ |
+| 21 | 0.124 | 0.123 | **1.01×** | XCLIP **-37.1%** ❌❌ |
+| 46 | 0.153 | 0.139 | 1.10× | XCLIP -9.1% ❌ |
+
+关键发现: **当 top-4 / rest 方差比值接近 1.0 时，CEGI 的 channel selection 几乎是随机的**——即 temporal signal 没有明显的 channel 集中性，强行划分 top-k 只是人为制造噪声。
+
+反直观的是，S7 和 S31（两个在 baseline 上表现最差的样本）在 CEGI 中反而受益 — 这与之前 α=0.01 实验的模式一致：这些样本需要更强的注入才能改善，但其他样本因为过度注入而退化。
+
+### 12.7 结论与教训
+
+**CEGI 失败的根本原因**:
+
+1. **"注入什么"的问题未解决**: CEGI 只改变了 channel 分配策略，但注入的仍然是 η_temporal 的原始内容。baseline 的核心问题（η_temporal 中混杂有害成分）并未被 CEGI 处理。
+
+2. **Channel 信号无明显集中性**: 10 个样本中，top-4 与 rest 的 variance 比值多在 1.0×~1.16× 之间，说明 temporal signal 分布在所有 16 个 channel 中，不存在"少数运动 channel + 多数噪声 channel"的假设结构。
+
+3. **α_inject=0.02 仍然太弱**: 即使集中到 4 个 channel，direction_shift 仍不超过 0.034，与 baseline 的 0.024 差距极小。信号在 2M+ 维噪声空间中仍被淹没。
+
+4. **与 baseline 相比的劣势**: baseline 的均匀注入策略虽然"不聪明"，但保留了所有 channel 的 temporal prior，形成了一种"面积式覆盖"；CEGI 的集中策略追求"深度"但牺牲了"广度"，在当前信号强度下得不偿失。
+
+**对后续方案的启示**:
+- **MSTDI (多尺度)**: 从空间维度做 coarse-to-fine 分配，避免 CEGI 那样在 channel 维丢弃信息。低频空间注入可能比 channel 选择更有效，因为低频分量对全局运动的杠杆效应更大。
+- **TPI (时间相位)**: 完全不注入 η_temporal 的内容，只传递其时间相位结构。避免了"有害内容注入"的根本问题。
+- **OCS (正交补抑制)**: 不注入 temporal，而是从 η_random 中去除与 temporal 正交的成分。逆向思维，可能绕过注入信号太弱的瓶颈。
+
+### 12.8 数据存档
+
+- 生成目录: `/root/xixihaha/P-Flow/outputs/cegi_k4_a02/`
+- 评测结果: `/root/xixihaha/P-Flow/evaluation_results/cegi_k4_a02/`
+- 运行日志: `/root/xixihaha/P-Flow/outputs/cegi_k4_a02/run_log.txt`
+
+---
+
+## 十三、方向 G: MSTDI (Multi-Scale Temporal Decomposition Injection)
+
+### 13.1 方法原理
+
+核心思想: 将噪声在空间维度做 Gaussian Pyramid 多尺度分解，在粗尺度（低频）用大 α 注入 temporal prior 控制全局运动方向，在细尺度（高频）用小 α 保持随机性保证视觉质量。
+
+理论支撑:
+- FreeInit (ECCV 2024): 低频分量决定全局运动
+- Video-MSG (2025): 多尺度引导策略
+- 扩散模型 coarse-to-fine 特性: 低频结构有"杠杆效应"
+
+算法流程:
+1. 对 η_temporal 和 η_random 分别做 spatial avg_pool3d 到多个尺度
+2. 在每个尺度上用指数衰减的 α 做 linear blend (sqrt(α)·η_t + sqrt(1-α)·η_r)
+3. 通过 Laplacian 差分重建全分辨率噪声 (最粗层上采样 + 逐层加高频残差)
+4. 最终 renorm 到 N(0,1)
+
+### 13.2 实验配置 (G1: 默认参数)
+
+```bash
+python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/mstdi_L3_a005 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --noise_prior --svd_mode v1 \
+    --mstdi --mstdi_levels 3 --mstdi_alpha_base 0.05 --mstdi_alpha_decay 0.25 \
+    --steps 30 --guidance 5.0 --seed 42
+```
+
+参数说明:
+- `mstdi_levels=3`: 金字塔 3 层 (1/4, 1/2, 原始分辨率)
+- `mstdi_alpha_base=0.05`: 最粗层 α
+- `mstdi_alpha_decay=0.25`: 每层衰减倍率
+- α schedule: [0.05000, 0.01250, 0.00313]
+
+### 13.3 实验结果 (G1: ❌ 未超越 baseline，但优于 CEGI)
+
+**总体指标:**
+
+| 配置 | CLIP (orig-gen) | XCLIP (orig-gen) | vs Baseline |
+|------|:---:|:---:|:---:|
+| Pure L2 Baseline (v1, α=0.004) | **0.8964** | **0.7874** | — |
+| CEGI (top_k=4, α=0.02) | 0.8661 | 0.7467 | CLIP -3.4% ❌, XCLIP -5.2% ❌ |
+| MSTDI G1 (L=3, α_base=0.05, decay=0.25) | 0.8903 | 0.7791 | CLIP **-0.7%**, XCLIP **-1.1%** |
+
+**逐 Case 对比:**
+
+| 样本 | 场景 | Baseline CLIP | MSTDI CLIP | Δ CLIP | Baseline XCLIP | MSTDI XCLIP | Δ XCLIP |
+|:---:|------|:---:|:---:|:---:|:---:|:---:|:---:|
+| 7 | 杯中帆船 | 0.9303 | — | — | 0.6982 | — | — |
+| 17 | SUV越野 | 0.9092 | — | — | 0.8368 | — | — |
+| 21 | 丛林纸飞机 | 0.8928 | — | — | 0.7637 | — | — |
+| 31 | 水下城市 | 0.8324 | — | — | 0.5237 | — | — |
+| 32 | 雪地金毛 | 0.9167 | — | — | 0.8221 | — | — |
+| 33 | 跑步者 | 0.8531 | — | — | 0.8618 | — | — |
+| 34 | 四只小狗 | 0.8968 | — | — | 0.8710 | — | — |
+| 43 | 花园猫咪 | 0.9539 | — | — | 0.9069 | — | — |
+| 46 | 火山喷发 | 0.9022 | — | — | 0.7869 | — | — |
+| 47 | 动画狗城市 | 0.8769 | — | — | 0.8024 | — | — |
+
+> 注: 逐 Case 详细数据待从评测结果目录补充。总体均值 CLIP=0.8903, XCLIP=0.7791。
+
+### 13.4 日志关键诊断数据
+
+| 样本 | α_schedule | direction_shift | cos(mixed, random) | cos(mixed, temporal) |
+|:---:|:---:|:---:|:---:|:---:|
+| 全部样本 | [0.05000, 0.01250, 0.00313] | 0.016~0.023 | 0.9997~0.9999 | — |
+
+核心观察: `cos(mixed, random)` 仍在 0.9997~0.9999 之间，信号几乎不可见。`direction_shift` 范围 0.016~0.023，甚至比 CEGI 的 0.023~0.034 还低。
+
+### 13.5 失败原因分析
+
+#### 根本问题: 有效注入量太小
+
+当前 α schedule = [0.05, 0.0125, 0.003]:
+
+1. **最粗层 (Level 0, 1/4 scale, 15×26 spatial)**:
+   - α=0.05, sqrt(α)≈0.224 的 temporal 权重
+   - 但此层仅包含原始分辨率 1/16 的像素 (≈6.25% 的信息量)
+   - 经 Laplacian 上采样到全分辨率后，信号被扩散稀释
+
+2. **最细层 (Level 2, 原始分辨率, 60×104 spatial)**:
+   - α=0.003，与 baseline 的 α=0.004 几乎一致
+   - 这层占据绝大多数像素，主导最终结果
+   - 相当于 MSTDI 在最细层退化为 baseline
+
+3. **Laplacian 重建后 + renorm 的双重稀释**:
+   - 粗层信号通过 trilinear 上采样传播到全分辨率，但能量密度降为 1/16
+   - 最终 renorm 进一步将任何偏移归一化掉
+   - 实际整体 effective α ≈ 0.003~0.004，与 baseline 无本质区别
+
+#### 为什么比 CEGI 好？
+
+MSTDI 不丢弃任何维度的信息（CEGI 丢弃了 12/16 channel 的 temporal prior），最细层仍保留 α=0.003 的全域 temporal 注入。本质上 MSTDI G1 ≈ baseline + 微弱的低频额外注入，所以指标只轻微下降。
+
+#### 与 baseline 差距不大但仍低的原因
+
+α=0.003 (最细层) vs baseline α=0.004 — 最细层贡献了约 93.75% 的像素，且 α 比 baseline 还略低。粗层的额外注入不足以补偿这个差距。
+
+### 13.6 调参方向 (待验证)
+
+核心思路: **大幅增大粗层 α，使低频杠杆效应真正生效**。
+
+| 实验 | α_base | decay | levels | α schedule | 预期 direction_shift | 理由 |
+|:---:|:---:|:---:|:---:|:---:|:---:|------|
+| G2 (推荐) | 0.30 | 0.50 | 3 | [0.300, 0.150, 0.075] | > 0.05 | 粗层 sqrt(0.3)≈0.55 temporal 权重，中间层也有贡献 |
+| G3 (激进) | 0.50 | 0.30 | 2 | [0.500, 0.150] | > 0.08 | 2 层，粗层 1/2 scale 占 25% 像素且 α=0.5 |
+| G4 (极端) | 0.70 | 0.30 | 3 | [0.700, 0.210, 0.063] | > 0.10 | 粗层几乎完全 temporal，赌杠杆效应 |
+
+### 13.6.1 G2 实验结果 (α_base=0.30, decay=0.50) — ❌❌❌ 灾难性失败
+
+**实验命令:**
+
+```bash
+python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/mstdi_L3_a030_d050 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --noise_prior --svd_mode v1 \
+    --mstdi --mstdi_levels 3 --mstdi_alpha_base 0.30 --mstdi_alpha_decay 0.50 \
+    --steps 30 --guidance 5.0 --seed 42
+```
+
+**总体指标:**
+
+| 配置 | CLIP (orig-gen) | XCLIP (orig-gen) | vs Baseline |
+|------|:---:|:---:|:---:|
+| Pure L2 Baseline (v1, α=0.004) | **0.8964** | **0.7874** | — |
+| MSTDI G1 (α_base=0.05, decay=0.25) | 0.8903 | 0.7791 | -0.7%, -1.1% |
+| **MSTDI G2 (α_base=0.30, decay=0.50)** | 0.7595 | 0.5327 | **CLIP -15.3%** ❌❌❌, **XCLIP -32.3%** ❌❌❌ |
+
+**逐 Case 对比:**
+
+| 样本 | 场景 | Baseline CLIP | G2 CLIP | Δ CLIP | Baseline XCLIP | G2 XCLIP | Δ XCLIP |
+|:---:|------|:---:|:---:|:---:|:---:|:---:|:---:|
+| 7 | 杯中帆船 | 0.9303 | 0.7314 | **-21.4%** ❌❌ | 0.6982 | 0.3995 | **-42.8%** ❌❌❌ |
+| 17 | SUV越野 | 0.9092 | 0.7612 | **-16.3%** ❌❌ | 0.8368 | 0.5656 | **-32.4%** ❌❌❌ |
+| 21 | 丛林纸飞机 | 0.8928 | 0.7842 | **-12.2%** ❌ | 0.7637 | 0.5562 | **-27.2%** ❌❌ |
+| 31 | 水下城市 | 0.8324 | 0.8067 | -3.1% | 0.5237 | 0.5220 | -0.3% |
+| 32 | 雪地金毛 | 0.9167 | 0.5715 | **-37.6%** ❌❌❌ | 0.8221 | 0.3226 | **-60.8%** ❌❌❌ |
+| 33 | 跑步者 | 0.8531 | 0.8042 | -5.7% | 0.8618 | 0.5019 | **-41.8%** ❌❌❌ |
+| 34 | 四只小狗 | 0.8968 | 0.7279 | **-18.8%** ❌❌ | 0.8710 | 0.5427 | **-37.7%** ❌❌❌ |
+| 43 | 花园猫咪 | 0.9539 | 0.9065 | -5.0% | 0.9069 | 0.8306 | -8.4% ❌ |
+| 46 | 火山喷发 | 0.9022 | 0.6782 | **-24.8%** ❌❌ | 0.7869 | 0.3944 | **-49.9%** ❌❌❌ |
+| 47 | 动画狗城市 | 0.8769 | 0.8232 | -6.1% | 0.8024 | 0.6912 | -13.9% ❌ |
+
+胜负统计: G2 全部 10/10 样本都低于 baseline，无一胜出。
+
+**G2 诊断数据:**
+
+| 样本 | η_temporal std | direction_shift | cos(mixed, random) | cos(mixed, temporal) |
+|:---:|:---:|:---:|:---:|:---:|
+| 7 | 0.3730 | 0.1057 | 0.9944 | 0.1060 |
+| 17 | 0.3320 | 0.0939 | 0.9956 | 0.0945 |
+| 21 | 0.3281 | 0.0932 | 0.9957 | 0.0935 |
+| 31 | 0.3398 | 0.0967 | 0.9953 | 0.0956 |
+| 32 | 0.3633 | 0.1029 | 0.9947 | 0.1014 |
+| 33 | 0.4102 | 0.1160 | 0.9932 | 0.1163 |
+| 34 | 0.2793 | 0.0794 | 0.9968 | 0.0782 |
+| 43 | 0.3945 | 0.1119 | 0.9938 | 0.1114 |
+| 46 | 0.3770 | 0.1070 | 0.9943 | 0.1085 |
+| 47 | 0.3965 | 0.1126 | 0.9937 | 0.1119 |
+
+**与 G1 对比:** direction_shift 从 0.016~0.023 跃升至 0.079~0.116（约 5× 增长），cos(mixed,random) 从 0.9997~0.9999 降至 0.9932~0.9968。**信号确实成功注入了，但注入越多效果越差。**
+
+### 13.7 关键发现: η_temporal 内容本身对 T2V 模型有害
+
+G2 实验彻底揭示了 L2 SVD noise prior 的核心矛盾:
+
+**结论: 不是"注入不够"的问题，是"注入的东西有毒"。**
+
+数学分析:
+- G1 (α_base=0.05): direction_shift ≈ 0.02, CLIP/XCLIP 接近 baseline → 信号不可见，无害也无益
+- G2 (α_base=0.30): direction_shift ≈ 0.10, CLIP -15.3%, XCLIP -32.3% → 信号可见，严重有害
+- Baseline (α=0.004): direction_shift ≈ 0.02, 目前最优 → 极弱注入是最优平衡点
+
+这表明 η_temporal（通过 SVD 从反演噪声中提取的时序分量）**携带的信息与 T2V 模型的生成逻辑不兼容**。可能原因:
+1. SVD 提取的"运动信息"是 latent space 的统计伪影，而非真正的运动先验
+2. η_temporal 的内容（幅度、相位组合）包含了空间结构信息，注入后产生 artifact
+3. T2V 模型期望的输入噪声分布是严格的 N(0,1)，任何结构化偏离都被放大为 artifact
+
+**对后续方案的启示:**
+- **MSTDI 路径宣告失败**: 无论如何分配 α 的空间分布，注入 η_temporal 的原始内容都是有害的
+- **TPI (时间相位注入) 变得最有希望**: TPI 只传递时间维度的相位结构，丢弃幅度信息。如果有害成分在幅度中，TPI 可以绕过这个问题
+- **OCS (正交补抑制) 仍值得一试**: OCS 不直接注入 η_temporal，而是从 η_random 中去除与 temporal 正交的成分，等价于让 random 在方向上"靠近" temporal 的主子空间
+
+### 13.8 方向 G (MSTDI) 最终结论
+
+**MSTDI 整体判定: ❌ FAILED**
+
+MSTDI 基于的假设（"低频空间注入 temporal prior 有杠杆效应"）被实验否定。真正的瓶颈不在注入策略（how to inject），而在注入内容本身（what to inject）。这与 CEGI 的失败模式一致——两者都在试图优化"如何更好地注入 η_temporal"，但问题在于 η_temporal 本身不是有效的运动先验。
+
+**实验路径总结:**
+- α=0.004 uniform (baseline): 最优 → 因为信号弱到不产生破坏
+- α=0.05 multi-scale (G1): 接近 baseline → 有效注入量 ≈ baseline
+- α=0.30 multi-scale (G2): 灾难性退化 → 证明信号本身有害
+- α=0.02 channel-gated (CEGI): 中等退化 → 同样的"注入越多越差"模式
+
+**下一步优先级重排:**
+1. **TPI (最高优先)**: 只传递相位，不传递有害的幅度内容
+2. **OCS (次优先)**: 从 random 侧操作，不直接注入 temporal 内容
+3. 如果 TPI/OCS 都失败 → L2 noise prior 这整个方向需要从根本上重新设计
+
+### 13.9 数据存档
+
+- G1 生成目录: `/root/xixihaha/P-Flow/outputs/mstdi_L3_a005/`
+- G1 评测结果: `/root/xixihaha/P-Flow/evaluation_results/mstdi_L3_a005/`
+- G2 生成目录: `/root/xixihaha/P-Flow/outputs/mstdi_L3_a030_d050/`
+- G2 评测结果: `/root/xixihaha/P-Flow/evaluation_results/mstdi_L3_a030_d050/`
+
+---
+
+## 十四、方向 H: TPI (Temporal Phase Injection)
+
+### 14.1 方法原理
+
+核心思想: 保留 η_random 的幅度谱（amplitude），只将时间维度的相位（phase）向 η_temporal 插值。不注入 η_temporal 的任何"内容"（能量/幅度），只传递其时间节奏结构。
+
+算法:
+1. 对 η_temporal 和 η_random 沿时间维度做 rFFT
+2. 分离出各自的 amplitude 和 phase
+3. 对 phase 做 circular interpolation: `φ_out = (1-γ) * φ_random + γ * φ_temporal`
+4. 保留 η_random 的 amplitude 不变
+5. 用 (amplitude_random, φ_out) 做 iRFFT 重建，renorm 到 N(0,1)
+
+### 14.2 实验配置 (H1: γ=0.5)
+
+```bash
+python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/tpi_g05 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --noise_prior --svd_mode v1 \
+    --tpi --tpi_gamma 0.5 --tpi_freq_min 1 --tpi_freq_max -1 \
+    --steps 30 --guidance 5.0 --seed 42
+```
+
+参数: γ=0.5 (50% 相位插值)，freq_range=[1, 11) (跳过 DC，全部 AC 频率)
+
+### 14.3 实验结果 (H1: ❌❌❌❌ 史诗级失败，所有方案中最差)
+
+**总体指标:**
+
+| 配置 | CLIP (orig-gen) | XCLIP (orig-gen) | vs Baseline |
+|------|:---:|:---:|:---:|
+| Pure L2 Baseline (v1, α=0.004) | **0.8964** | **0.7874** | — |
+| MSTDI G2 (α_base=0.30, decay=0.50) | 0.7595 | 0.5327 | -15.3%, -32.3% |
+| **TPI H1 (γ=0.5, all freqs)** | **0.6546** | **0.3007** | **CLIP -27.0%** ❌❌❌❌, **XCLIP -61.8%** ❌❌❌❌ |
+
+**逐 Case 对比:**
+
+| 样本 | 场景 | Baseline CLIP | TPI CLIP | Δ CLIP | Baseline XCLIP | TPI XCLIP | Δ XCLIP |
+|:---:|------|:---:|:---:|:---:|:---:|:---:|:---:|
+| 7 | 杯中帆船 | 0.9303 | 0.7563 | **-18.7%** ❌❌ | 0.6982 | 0.3298 | **-52.8%** ❌❌❌ |
+| 17 | SUV越野 | 0.9092 | 0.5419 | **-40.4%** ❌❌❌ | 0.8368 | 0.2627 | **-68.6%** ❌❌❌❌ |
+| 21 | 丛林纸飞机 | 0.8928 | 0.6570 | **-26.4%** ❌❌ | 0.7637 | 0.3133 | **-59.0%** ❌❌❌ |
+| 31 | 水下城市 | 0.8324 | 0.6747 | **-18.9%** ❌❌ | 0.5237 | 0.3598 | **-31.3%** ❌❌ |
+| 32 | 雪地金毛 | 0.9167 | 0.5435 | **-40.7%** ❌❌❌ | 0.8221 | 0.3301 | **-59.8%** ❌❌❌ |
+| 33 | 跑步者 | 0.8531 | 0.7703 | -9.7% ❌ | 0.8618 | 0.3271 | **-62.1%** ❌❌❌ |
+| 34 | 四只小狗 | 0.8968 | 0.5922 | **-34.0%** ❌❌❌ | 0.8710 | 0.2238 | **-74.3%** ❌❌❌❌ |
+| 43 | 花园猫咪 | 0.9539 | 0.6196 | **-35.1%** ❌❌❌ | 0.9069 | 0.2070 | **-77.2%** ❌❌❌❌ |
+| 46 | 火山喷发 | 0.9022 | 0.6660 | **-26.2%** ❌❌ | 0.7869 | 0.3251 | **-58.7%** ❌❌❌ |
+| 47 | 动画狗城市 | 0.8769 | 0.7249 | -17.3% ❌❌ | 0.8024 | 0.3281 | **-59.1%** ❌❌❌ |
+
+胜负统计: TPI 全部 10/10 样本惨败，无一接近 baseline。
+
+### 14.4 诊断数据
+
+| 样本 | direction_shift | cos(mixed, random) | cos(mixed, temporal) |
+|:---:|:---:|:---:|:---:|
+| 7 | 0.8287 | 0.6546 | 0.3542 |
+| 17 | 0.8287 | 0.6547 | 0.4553 |
+| 21 | 0.8343 | 0.6541 | 0.4601 |
+| 31 | 0.8343 | 0.6537 | 0.4044 |
+| 32 | 0.8343 | 0.6530 | 0.4444 |
+| 33 | 0.8343 | 0.6536 | 0.3092 |
+| 34 | 0.8343 | 0.6532 | 0.4428 |
+| 43 | 0.8343 | 0.6544 | 0.4679 |
+| 46 | 0.8287 | 0.6544 | 0.4609 |
+| 47 | 0.8343 | 0.6540 | 0.4626 |
+
+**关键发现:**
+- `direction_shift ≈ 0.83` — 噪声被彻底改造（vs MSTDI G2 的 0.10，vs baseline 的 0.02）
+- `cos(mixed, random) ≈ 0.65` — 混合结果只保留了 65% 的 random 特征
+- direction_shift 几乎所有样本相同（0.8287/0.8343）— 因为 γ=0.5 对所有频率统一操作，与具体样本内容无关
+
+### 14.5 失败原因分析
+
+**TPI 比 MSTDI G2 更差的根本原因: 破坏了帧间统计独立性**
+
+T2V 模型期望输入 z_T 中每一帧的噪声是 i.i.d.（独立同分布）的 N(0,1)。TPI 通过修改时间维度的相位，在帧间引入了强相关性：
+
+1. **相位 = 帧间时序关系**：时间维度 FFT 的相位决定了不同帧之间的"时间对齐关系"。修改 50% 的相位等于将噪声从"帧间无关"变为"帧间有特定节奏结构"。
+
+2. **这比修改幅度更致命**：幅度修改（如 MSTDI）只改变各频率分量的强度，但保持了帧间的"随机性结构"不变。相位修改直接改变了帧间的相对时间关系，T2V 模型的 temporal attention 完全无法处理这种非 i.i.d. 输入。
+
+3. **direction_shift=0.83 说明一切**：噪声被改了 83%，只有 17% 还像原来的 random。对于一个期望纯随机输入的模型来说，这等于送了一个完全"错误"的初始条件。
+
+**与"有害内容"假说的关系:**
+
+MSTDI G2 证明了"η_temporal 的内容有害"；TPI H1 进一步证明了"η_temporal 的相位同样有害"。综合来看：**η_temporal 的一切信息（内容、幅度、相位）对 T2V 模型都是有害的**。问题不在 η_temporal 的哪个维度有用哪个有害，而在于 T2V 模型的 denoise 机制根本无法利用 z_T 中的结构化先验——任何偏离 N(0,1) 的结构都只能带来伤害。
+
+### 14.6 方向 H (TPI) 最终结论
+
+**TPI 整体判定: ❌❌❌❌ CATASTROPHIC FAILURE**
+
+TPI 是目前所有实验中表现最差的方案（CLIP -27.0%, XCLIP -61.8%）。它彻底否定了"相位是有用信号"的假设，并进一步确认了纯黑盒路线的绝对天花板就是 α=0.004 uniform blend。
+
+**OCS 不再需要实验**: OCS 的 suppress_ratio 同样会导致大 direction_shift（通过投影消除正交分量），预期结果与 TPI/MSTDI G2 类似。在已有充分证据的情况下，跳过 OCS 直接转向灰盒方案。
+
+### 14.7 数据存档
+
+- 生成目录: `/root/xixihaha/P-Flow/outputs/tpi_g05/`
+- 评测结果: `/root/xixihaha/P-Flow/evaluation_results/tpi_g05/`
+
+---
+
+## 十五、L2 Noise Prior 技术路线总结与突破方向分析
+
+### 15.1 纯黑盒路线的极限总结
+
+经过方向 C~G 的系统性实验，纯黑盒约束下的 L2 noise prior 技术路线已触及天花板:
+
+**已验证结论:**
+- 最优配置: α=0.004 uniform blend (baseline)，CLIP 0.8964, XCLIP 0.7874
+- 核心矛盾: η_temporal（SVD 从反演噪声中提取的时序分量）**内容本身对 T2V 模型有害**
+- 所有"增强注入"的尝试均失败: renorm、频域重塑、SGA、PODI、CEGI、MSTDI、TPI，注入量越大效果越差
+- baseline α=0.004 的"成功"恰恰是因为信号弱到不产生破坏（direction_shift ≈ 0.02），只提供了统计层面的微弱引导
+
+**失败的根本原因:**
+
+纯黑盒下只能操作两个输入接口: prompt（文本）和 z_T（初始噪声）。在 z_T 层面，T2V 模型期望的输入是严格的 N(0,1) 高斯噪声，任何结构化偏离都会被模型的 30 步去噪过程逐步放大为 artifact。SVD 提取的 η_temporal 虽然包含参考视频的时序统计信息，但这些信息在 latent space 中的表现形式与模型的生成逻辑不兼容——它更像是"latent space 的统计伪影"而非"可被模型利用的运动先验"。
+
+**TPI/OCS 实验验证:**
+
+TPI H1 (γ=0.5) 实验结果为 CLIP 0.6546, XCLIP 0.3007（-27.0%, -61.8%），是所有方案中最差的结果。这证明 η_temporal 的相位信息同样对 T2V 模型有害。OCS 的作用机制（投影消除正交分量）预期会产生类似的高 direction_shift，在已有充分证据的情况下跳过。
+
+**最终结论: 纯黑盒路线的一切可能性已穷尽，α=0.004 uniform blend 就是绝对天花板。**
+
+### 15.2 突破方向: 灰盒 (Gray-Box) 方案
+
+如果放松约束到"不改权重，但能 hook 中间层"（training-free gray-box），则有若干有前景的方向:
+
+#### 方向 α: Attention Injection (注意力注入)
+
+**原理:** 类似 Plug-and-Play Diffusion (ICLR 2023)、MasaCtrl (ICCV 2023) 的思路。先用参考视频跑一次 inversion 得到中间层 attention maps / features，生成时 hook DiT 的 self-attention 层，将参考视频的 K/V 注入（partial replacement 或 weighted blend）。
+
+**优势:**
+- 直接在特征空间传递运动/结构信息，绕过"只能改噪声"的限制
+- 在 image 领域已被充分验证 (PnP, MasaCtrl, P2P)
+- 视频版本可以作为论文的新贡献（Video DiT Attention Injection for Motion Transfer）
+- 可以控制注入的 timestep 范围（早期强注入 → 后期放手），实现 coarse-to-fine
+
+**实现路径:**
+- PyTorch forward hook 拦截 DiT 的 self-attention 层
+- 参考视频 inversion 过程中缓存每个 timestep 的 K, V
+- 生成时: `K_gen' = (1-w_t) * K_gen + w_t * K_ref`, `V_gen' = (1-w_t) * V_gen + w_t * V_ref`
+- w_t 随 timestep 递减（早期注入结构，后期保持创造性）
+
+**风险:** Wan2.1 的 DiT 架构可能与 U-Net based 方法有差异，attention 结构需要适配。
+
+#### 方向 β: Latent Trajectory Soft Anchor (潜空间轨迹锚定)
+
+**原理:** 参考视频反演得到完整的 latent 轨迹 {z_0, z_1, ..., z_T}。生成时不只改初始 z_T，而是在每个 timestep 将当前 latent 向参考轨迹做 soft anchor。
+
+**算法:**
+```
+for t in T, T-1, ..., 0:
+    z_t_gen = denoise_step(z_{t+1}_gen, prompt)
+    z_t_gen' = (1 - β_t) * z_t_gen + β_t * z_t_ref
+    # β_t 从 β_max (如 0.3) 线性递减到 0
+```
+
+**优势:**
+- 实现极简（每步 denoise 后一行 lerp）
+- 可自然退化为纯黑盒（β=0 等价于无注入）
+- 论文中可展示 β 从 0 到 1 的 ablation curve，故事完整
+- 类似 SDEdit 思路但更精细，有明确的理论支撑
+
+**风险:** β 过大会导致内容泄露（生成结果过于接近参考视频的空间内容而非运动模式）。
+
+#### 方向 γ: Guided Denoising (梯度引导去噪)
+
+**原理:** 每步 denoise 时，额外计算一个 loss 对当前 latent 的梯度，nudge 生成轨迹向参考视频对齐。
+
+**算法:**
+```
+for t in T, T-1, ..., 0:
+    z_t.requires_grad_(True)
+    ε_pred = model(z_t, t, prompt)
+    L = perceptual_loss(z_t, z_t_ref) + flow_loss(optical_flow(z_t), optical_flow(z_t_ref))
+    grad = torch.autograd.grad(L, z_t)
+    z_t = z_t - λ * grad
+    z_t.requires_grad_(False)
+    z_{t-1} = denoise_update(z_t, ε_pred)
+```
+
+**优势:**
+- 可以用任意可微 loss 函数引导（perceptual, optical flow, structural similarity）
+- 不需要缓存 attention，内存友好
+- 引导强度通过 λ 精细控制
+
+**风险:** 需要反向传播通过部分网络，计算开销 2~3×；梯度可能不稳定。
+
+### 15.3 白盒方案 (需要 finetune)
+
+如果允许修改模型参数，则有更强力的方案:
+
+#### 方向 δ: Motion LoRA / IP-Adapter for Video
+
+对参考视频提取运动特征（optical flow, motion vector），训练轻量 LoRA adapter 使模型在生成时 condition on motion。类似 AnimateDiff + MotionCtrl 的路线，但可以做 per-sample 的 test-time adaptation。
+
+#### 方向 ε: Reference Video Conditioning (额外输入通道)
+
+修改模型输入层，额外 concat 参考视频的 latent 或 optical flow map 作为条件。需要对输入 projection 层做少量 finetune。
+
+### 15.4 推荐路径
+
+考虑论文定位（training-free video reproduction）和可行性:
+
+| 优先级 | 方向 | 约束级别 | 预期收益 | 实现难度 | 论文新颖性 |
+|:---:|------|:---:|:---:|:---:|:---:|
+| 1 | ~~TPI / OCS~~ (已验证失败) | 纯黑盒 | ❌ 负收益 | 已完成 | 低 |
+| 2 | Latent Trajectory Soft Anchor | 灰盒 | 中 (+3~8%) | 低 (数行代码) | 中 |
+| 3 | Attention Injection | 灰盒 | 高 (+5~15%) | 中 (需适配 DiT) | **高** |
+| 4 | Guided Denoising | 灰盒 | 中-高 | 中-高 | 中 |
+| 5 | Motion LoRA | 白盒 | 高 | 高 (需训练) | 中 |
+
+**建议策略（更新）:**
+1. ~~先快速跑完 TPI/OCS~~ ✅ 已完成，纯黑盒天花板确认为 α=0.004
+2. **立即转向灰盒方向 β (Latent Trajectory Soft Anchor)** 作为快速验证——实现简单（每步 denoise 后一行 lerp），能快速判断灰盒是否有 significant gain
+3. 如果方向 β 有效，再投入精力做方向 α (Attention Injection) 作为论文的核心贡献

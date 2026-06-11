@@ -93,6 +93,78 @@ class FlowMatchingInverter:
         return x_t
 
     @torch.no_grad()
+    def invert_with_trajectory(
+        self,
+        video_latents: torch.Tensor,
+        prompt_embeds: torch.Tensor,
+        negative_prompt_embeds: Optional[torch.Tensor] = None,
+        cache_every_n: int = 1,
+    ) -> tuple:
+        """
+        Perform flow matching inversion with trajectory caching: x_1 → x_0.
+
+        与 invert() 相同的 Euler ODE，但额外缓存中间状态，
+        用于灰盒 Latent Trajectory Soft Anchor。
+
+        Args:
+            video_latents: Encoded video latents (B, C, F, H, W).
+            prompt_embeds: Text embeddings for conditioning.
+            negative_prompt_embeds: Negative embeddings (for CFG if scale > 1).
+            cache_every_n: 每隔 n 步缓存一次 (1=全部缓存, 用于显存优化).
+
+        Returns:
+            (x_0, trajectory):
+                x_0: Inverted noise η_inv (B, C, F, H, W).
+                trajectory: dict {t_value(float): x_t_tensor(cpu)},
+                    包含从 t=1.0 到 t=0.0 沿途的中间状态。
+        """
+        logger.info(
+            f"  [Inversion+Trajectory] Starting: steps={self.num_inversion_steps}, "
+            f"cache_every_n={cache_every_n}, "
+            f"latent_shape={list(video_latents.shape)}, "
+            f"estimated_cache_size={self.num_inversion_steps // cache_every_n + 1} points"
+        )
+
+        timesteps = torch.linspace(1.0, 0.0, self.num_inversion_steps + 1, device=self.device)
+        dt = -1.0 / self.num_inversion_steps
+
+        x_t = video_latents.clone()
+        trajectory = {}
+
+        # 缓存起点 t=1.0 (原始数据 latent)
+        trajectory[1.0] = x_t.cpu().clone()
+
+        for i in tqdm(range(self.num_inversion_steps), desc="Inversion + Trajectory", leave=False):
+            t = timesteps[i]
+            t_tensor = torch.full(
+                (x_t.shape[0],), t.item(), device=self.device, dtype=x_t.dtype
+            )
+
+            velocity = self._predict_velocity(
+                x_t, t_tensor, prompt_embeds, negative_prompt_embeds
+            )
+            x_t = x_t + dt * velocity
+
+            # 按 cache_every_n 间隔缓存（存 CPU 节省显存）
+            t_next = timesteps[i + 1].item()
+            if (i + 1) % cache_every_n == 0 or i == self.num_inversion_steps - 1:
+                trajectory[t_next] = x_t.cpu().clone()
+
+            # 每 10 步打印一次进度
+            if (i + 1) % 10 == 0:
+                logger.info(
+                    f"    [Inversion+Traj step {i+1}/{self.num_inversion_steps}] "
+                    f"t={t_next:.3f}, x_t: mean={x_t.mean().item():.4f}, "
+                    f"std={x_t.std().item():.4f}, cached={len(trajectory)} points"
+                )
+
+        logger.info(
+            f"  [Inversion+Trajectory] Done: {len(trajectory)} points cached, "
+            f"final x_0: mean={x_t.mean().item():.4f}, std={x_t.std().item():.4f}"
+        )
+        return x_t, trajectory
+
+    @torch.no_grad()
     def invert_midpoint(
         self,
         video_latents: torch.Tensor,

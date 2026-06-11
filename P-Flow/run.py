@@ -175,6 +175,17 @@ def parse_args():
     p.add_argument("--ocs_suppress_ratio", type=float, default=0.5,
                    help="正交补抑制比例 (0=不抑制, 1=完全去除; 默认 0.5; 推荐 0.3~0.7)")
 
+    # ── 灰盒: Latent Trajectory Soft Anchor ──
+    p.add_argument("--trajectory_anchor", action="store_true",
+                   help="启用灰盒轨迹锚定: 生成时每步向参考轨迹 lerp, 引导运动方向")
+    p.add_argument("--anchor_beta_max", type=float, default=0.3,
+                   help="最大锚定强度 β_max (推荐搜索 0.1~0.5; 0.3 为中等强度)")
+    p.add_argument("--anchor_schedule", type=str, default="cosine_decay",
+                   choices=["cosine_decay", "linear_decay", "constant", "warmup_decay"],
+                   help="β 退火策略: 控制锚定力度如何随去噪步骤衰减")
+    p.add_argument("--anchor_cache_every_n", type=int, default=1,
+                   help="inversion 轨迹缓存间隔 (1=全缓存; 2=隔一步; 用于节省显存)")
+
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
                    help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
@@ -281,6 +292,11 @@ def build_config(args) -> PFlowConfig:
         ocs=args.ocs,
         ocs_top_k=args.ocs_top_k,
         ocs_suppress_ratio=args.ocs_suppress_ratio,
+        # 灰盒: Trajectory Anchor
+        trajectory_anchor=args.trajectory_anchor,
+        anchor_beta_max=args.anchor_beta_max,
+        anchor_schedule=args.anchor_schedule,
+        anchor_cache_every_n=args.anchor_cache_every_n,
     )
 
 
@@ -396,6 +412,9 @@ def main():
             print(f"  rho_s={config.rho_s}, rho_m={config.rho_m}")
         else:
             print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
+    if config.trajectory_anchor:
+        print(f"  [Trajectory Anchor] β_max={config.anchor_beta_max}, "
+              f"schedule={config.anchor_schedule}, cache_every_n={config.anchor_cache_every_n}")
     if config.use_iter:
         print(f"  iterations={config.i_max}")
     print()

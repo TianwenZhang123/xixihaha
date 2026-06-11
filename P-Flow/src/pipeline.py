@@ -142,6 +142,12 @@ class PFlowConfig:
     ocs_top_k: int = 3                 # SVD 保留的主成分数
     ocs_suppress_ratio: float = 0.5    # 正交空间的抑制比例 (0=不抑制, 1=完全移除)
 
+    # ── 灰盒: Latent Trajectory Soft Anchor ──
+    trajectory_anchor: bool = False     # 是否启用轨迹锚定 (灰盒方案)
+    anchor_beta_max: float = 0.3       # 最大锚定强度 β_max (推荐搜索: 0.1 ~ 0.5)
+    anchor_schedule: str = "cosine_decay"  # β 退火调度: cosine_decay / linear_decay / constant / warmup_decay
+    anchor_cache_every_n: int = 1      # inversion 轨迹缓存间隔 (1=全部, 2=隔一步; 用于显存优化)
+
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
 
@@ -180,6 +186,8 @@ class PFlowConfig:
                 flags.append(f"blend(α={self.alpha})+freq_reshape(β={self.freq_reshape_beta})")
             else:
                 flags.append(f"blend(α={self.alpha})")
+        if self.trajectory_anchor:
+            flags.append(f"trajectory_anchor(β_max={self.anchor_beta_max}, sched={self.anchor_schedule})")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -306,6 +314,7 @@ class PFlowPipeline:
         # ── Step 3: 计算噪声先验 (如果启用) ──
         eta_temporal = None
         prompt_embeds_for_diag = None
+        ref_latents_enc = None
         if cfg.use_inversion:
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds_for_diag = \
                 self._compute_noise_prior(ref_video, caption)
@@ -316,6 +325,41 @@ class PFlowPipeline:
         if eta_temporal is not None and prompt_embeds_for_diag is not None:
             self._diagnose_prompt_noise_conflict(
                 eta_temporal, prompt_embeds_for_diag, caption, generator
+            )
+
+        # ── Step 3.6: 轨迹缓存 (灰盒 Trajectory Anchor) ──
+        ref_trajectory = None
+        if cfg.trajectory_anchor:
+            if not cfg.use_inversion:
+                logger.warning(
+                    "  [Trajectory Anchor] trajectory_anchor=True 但 use_inversion=False, "
+                    "自动启用 inversion 以获取参考轨迹"
+                )
+            # 需要参考 latent 和 prompt embedding
+            # 如果已经在 Step 3 做过 inversion，复用 ref_latents_enc 和 prompt_embeds
+            if ref_latents_enc is not None and prompt_embeds_for_diag is not None:
+                ref_lat = ref_latents_enc
+                p_emb = prompt_embeds_for_diag
+            else:
+                # 没做过 inversion，现在做一次 encode + embed
+                ref_norm = normalize_video(ref_video).unsqueeze(0)
+                ref_lat = encode_video_to_latents(self.pipe, ref_norm, self.device)
+                p_emb = self._encode_prompt(caption)
+
+            # 用 invert_with_trajectory 获取带缓存的轨迹
+            traj_inverter = FlowMatchingInverter(
+                pipe=self.pipe,
+                num_inversion_steps=cfg.inversion_steps,
+                guidance_scale=1.0,
+                device=self.device,
+            )
+            _, ref_trajectory = traj_inverter.invert_with_trajectory(
+                ref_lat, p_emb, p_emb,
+                cache_every_n=cfg.anchor_cache_every_n,
+            )
+            logger.info(
+                f"  [Trajectory Anchor] Cached {len(ref_trajectory)} trajectory points, "
+                f"t range=[{min(ref_trajectory.keys()):.3f}, {max(ref_trajectory.keys()):.3f}]"
             )
 
         # ── Step 4: 生成循环 ──
@@ -330,9 +374,16 @@ class PFlowPipeline:
             # 获取噪声
             latents = self._get_latents(eta_temporal, generator)
 
-            # 生成视频
-            gen_video = self._generate(current_prompt, latents, generator,
-                                       negative_prompt=neg_prompt)
+            # 生成视频（灰盒 or 标准）
+            if cfg.trajectory_anchor and ref_trajectory is not None:
+                gen_video = self._generate_with_anchor(
+                    current_prompt, latents, generator,
+                    ref_trajectory=ref_trajectory,
+                    negative_prompt=neg_prompt,
+                )
+            else:
+                gen_video = self._generate(current_prompt, latents, generator,
+                                           negative_prompt=neg_prompt)
             video_path_i = str(out / f"iter_{i:02d}.mp4")
             save_video_tensor(gen_video, video_path_i, fps=cfg.fps)
 
@@ -1515,6 +1566,246 @@ class PFlowPipeline:
         if video.min() < 0:
             video = denormalize_video(video)
         return video.clamp(0, 1)
+
+    @torch.no_grad()
+    def _generate_with_anchor(
+        self,
+        prompt: str,
+        latents: Optional[torch.Tensor],
+        generator: torch.Generator,
+        ref_trajectory: Dict[float, torch.Tensor],
+        negative_prompt: str = "",
+    ) -> torch.Tensor:
+        """
+        灰盒生成：Latent Trajectory Soft Anchor。
+
+        在标准 diffusers 生成流程中，通过 callback_on_step_end 在每步去噪后
+        将当前 latent 向参考轨迹做 lerp 拉回，实现轨迹级运动引导。
+
+        数学等价于在 Flow ODE 上加弹性恢复力:
+            dz/dt = v_θ(z_t, t, c) + β_t * (z_ref_t - z_t)
+
+        Args:
+            prompt: 生成 prompt
+            latents: 初始噪声 (可由 _get_latents 提供, 含 SVD prior)
+            generator: 随机数生成器
+            ref_trajectory: 参考轨迹 {t_value: z_ref_tensor(cpu)}
+            negative_prompt: 负面 prompt
+        """
+        cfg = self.config
+        num_steps = cfg.num_inference_steps
+
+        # 预计算 β 退火调度
+        beta_values = self._compute_beta_schedule(
+            num_steps, cfg.anchor_beta_max, cfg.anchor_schedule
+        )
+
+        # 将参考轨迹的 t 值排序，用于最近邻查找
+        traj_keys = sorted(ref_trajectory.keys())
+
+        # 日志
+        logger.info(
+            f"  [Trajectory Anchor] β_max={cfg.anchor_beta_max}, "
+            f"schedule={cfg.anchor_schedule}, "
+            f"trajectory points={len(traj_keys)}, "
+            f"gen steps={num_steps}"
+        )
+        logger.info(
+            f"  [Trajectory Anchor] β schedule (first 5): "
+            f"{[f'{b:.4f}' for b in beta_values[:5]]}, "
+            f"(last 5): {[f'{b:.4f}' for b in beta_values[-5:]]}"
+        )
+
+        # 锚定统计（在 callback 中累积）
+        anchor_stats = {"steps_applied": 0, "total_shift": 0.0, "per_step": []}
+
+        def trajectory_anchor_callback(pipe, step_index, timestep, callback_kwargs):
+            """每步去噪后，将 latent 向参考轨迹做 lerp。"""
+            latents_current = callback_kwargs["latents"]
+
+            # WanPipeline 的去噪从 t=1(noise) → t=0(data)
+            # step_index: 0, 1, ..., num_steps-1
+            # 去噪进度: 第 step_index 步完成后，对应 t = 1 - (step_index+1)/num_steps
+            # 即 step 0 完成后 t≈0.97, 最后一步完成后 t≈0.0
+            t_progress = 1.0 - (step_index + 1) / num_steps
+
+            # 在参考轨迹中找最近的 t 点
+            t_ref = min(traj_keys, key=lambda t: abs(t - t_progress))
+
+            # 获取当前步的 β
+            beta_t = beta_values[step_index]
+
+            if beta_t > 1e-6:
+                z_ref = ref_trajectory[t_ref].to(
+                    device=latents_current.device,
+                    dtype=latents_current.dtype,
+                )
+
+                # Lerp 锚定: z_anchored = (1-β)*z_gen + β*z_ref
+                latents_anchored = (1 - beta_t) * latents_current + beta_t * z_ref
+
+                # 计算偏移量和余弦相似度
+                shift = (latents_anchored - latents_current).norm().item()
+                cos_gen_ref = torch.nn.functional.cosine_similarity(
+                    latents_current.flatten().unsqueeze(0),
+                    z_ref.flatten().unsqueeze(0),
+                ).item()
+
+                anchor_stats["steps_applied"] += 1
+                anchor_stats["total_shift"] += shift
+                anchor_stats["per_step"].append({
+                    "step": step_index, "t": t_progress, "t_ref": t_ref,
+                    "beta": beta_t, "shift": shift, "cos_gen_ref": cos_gen_ref,
+                })
+
+                # 每步详细日志
+                logger.info(
+                    f"    [Anchor step {step_index:2d}/{num_steps}] "
+                    f"t={t_progress:.3f}→ref_t={t_ref:.3f}, "
+                    f"β={beta_t:.4f}, shift={shift:.2f}, "
+                    f"cos(gen,ref)={cos_gen_ref:.4f}, "
+                    f"latent_std={latents_current.std().item():.4f}"
+                )
+
+                callback_kwargs["latents"] = latents_anchored
+            else:
+                logger.debug(
+                    f"    [Anchor step {step_index:2d}/{num_steps}] "
+                    f"t={t_progress:.3f}, β={beta_t:.6f} < 1e-6, skipped"
+                )
+
+            return callback_kwargs
+
+        # 构建生成参数
+        kwargs = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt or NEGATIVE_PROMPT,
+            "height": cfg.height,
+            "width": cfg.width,
+            "num_frames": cfg.num_frames,
+            "guidance_scale": cfg.guidance_scale,
+            "num_inference_steps": num_steps,
+            "generator": generator,
+            "output_type": "pt",
+            "callback_on_step_end": trajectory_anchor_callback,
+            "callback_on_step_end_tensor_inputs": ["latents"],
+        }
+        if latents is not None:
+            kwargs["latents"] = latents
+
+        output = self.pipe(**kwargs)
+
+        # 日志：锚定效果总结
+        n_applied = anchor_stats["steps_applied"]
+        total_shift = anchor_stats["total_shift"]
+        avg_shift = total_shift / max(n_applied, 1)
+        logger.info("  ═══════════════════════════════════════════════")
+        logger.info(f"  [Trajectory Anchor] 生成完成总结:")
+        logger.info(
+            f"    steps_applied={n_applied}/{num_steps}, "
+            f"total_shift={total_shift:.4f}, avg_shift={avg_shift:.4f}"
+        )
+        if anchor_stats["per_step"]:
+            # 前期 vs 后期对比
+            mid = len(anchor_stats["per_step"]) // 2
+            early_steps = anchor_stats["per_step"][:mid]
+            late_steps = anchor_stats["per_step"][mid:]
+            early_avg_cos = sum(s["cos_gen_ref"] for s in early_steps) / max(len(early_steps), 1)
+            late_avg_cos = sum(s["cos_gen_ref"] for s in late_steps) / max(len(late_steps), 1)
+            early_avg_shift = sum(s["shift"] for s in early_steps) / max(len(early_steps), 1)
+            late_avg_shift = sum(s["shift"] for s in late_steps) / max(len(late_steps), 1)
+            logger.info(
+                f"    前半段 (step 0~{mid-1}): avg_cos(gen,ref)={early_avg_cos:.4f}, "
+                f"avg_shift={early_avg_shift:.2f}"
+            )
+            logger.info(
+                f"    后半段 (step {mid}~{n_applied-1}): avg_cos(gen,ref)={late_avg_cos:.4f}, "
+                f"avg_shift={late_avg_shift:.2f}"
+            )
+            logger.info(
+                f"    趋势: cos 从 {early_avg_cos:.4f}→{late_avg_cos:.4f} "
+                f"({'收敛' if late_avg_cos > early_avg_cos else '发散'}), "
+                f"shift 从 {early_avg_shift:.2f}→{late_avg_shift:.2f} "
+                f"({'衰减 ✓' if late_avg_shift < early_avg_shift else '异常 ⚠️'})"
+            )
+        logger.info("  ═══════════════════════════════════════════════")
+
+        # 处理输出格式（同 _generate）
+        if hasattr(output, "frames"):
+            video = output.frames
+            if isinstance(video, list):
+                import torchvision.transforms as T
+                frames = [T.ToTensor()(f) for f in video[0]]
+                video = torch.stack(frames, dim=1)
+            elif isinstance(video, torch.Tensor):
+                if video.dim() == 5:
+                    video = video[0]
+                    if video.shape[0] == cfg.num_frames:
+                        video = video.permute(1, 0, 2, 3)
+        else:
+            video = output[0]
+
+        if video.min() < 0:
+            video = denormalize_video(video)
+        return video.clamp(0, 1)
+
+    def _compute_beta_schedule(
+        self,
+        num_steps: int,
+        beta_max: float,
+        schedule_type: str,
+    ) -> List[float]:
+        """
+        计算每步的轨迹锚定强度 β_t。
+
+        设计原则:
+        - 前期 (接近噪声，step_index 小): 强锚定，确保运动方向正确
+        - 后期 (接近数据，step_index 大): 弱/无锚定，让模型自由生成细节
+
+        Args:
+            num_steps: 总去噪步数
+            beta_max: 最大 β 值
+            schedule_type: 调度类型
+
+        Returns:
+            List[float]: 长度为 num_steps 的 β 值列表
+        """
+        import math
+
+        if schedule_type == "cosine_decay":
+            # β_t = β_max * cos(π/2 * i/(N-1))
+            # step 0 → β_max, step N-1 → 0
+            beta = [
+                beta_max * math.cos(math.pi / 2 * i / max(num_steps - 1, 1))
+                for i in range(num_steps)
+            ]
+        elif schedule_type == "linear_decay":
+            # β_t = β_max * (1 - i/(N-1))
+            beta = [
+                beta_max * (1.0 - i / max(num_steps - 1, 1))
+                for i in range(num_steps)
+            ]
+        elif schedule_type == "constant":
+            beta = [beta_max] * num_steps
+        elif schedule_type == "warmup_decay":
+            # 前 20% warmup 到 β_max，后 80% cosine decay 到 0
+            warmup_steps = max(int(0.2 * num_steps), 1)
+            beta = []
+            for i in range(warmup_steps):
+                beta.append(beta_max * (0.5 + 0.5 * i / max(warmup_steps - 1, 1)))
+            remaining = num_steps - warmup_steps
+            for i in range(remaining):
+                beta.append(
+                    beta_max * math.cos(math.pi / 2 * i / max(remaining - 1, 1))
+                )
+        else:
+            logger.warning(
+                f"  [Trajectory Anchor] Unknown schedule '{schedule_type}', "
+                f"falling back to cosine_decay"
+            )
+            return self._compute_beta_schedule(num_steps, beta_max, "cosine_decay")
+
+        return beta
 
     def _vlm_refine(
         self,
