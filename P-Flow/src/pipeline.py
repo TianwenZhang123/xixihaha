@@ -147,6 +147,8 @@ class PFlowConfig:
     anchor_beta_max: float = 0.3       # 最大锚定强度 β_max (推荐搜索: 0.1 ~ 0.5)
     anchor_schedule: str = "cosine_decay"  # β 退火调度: cosine_decay / linear_decay / constant / warmup_decay
     anchor_cache_every_n: int = 1      # inversion 轨迹缓存间隔 (1=全部, 2=隔一步; 用于显存优化)
+    anchor_quality_gate: bool = True    # 是否启用轨迹质量门控
+    anchor_quality_threshold: float = 0.3  # 轨迹一致性阈值 (相邻点余弦相似度均值低于此值则跳过 anchor)
 
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
@@ -357,10 +359,41 @@ class PFlowPipeline:
                 ref_lat, p_emb, p_emb,
                 cache_every_n=cfg.anchor_cache_every_n,
             )
-            logger.info(
-                f"  [Trajectory Anchor] Cached {len(ref_trajectory)} trajectory points, "
-                f"t range=[{min(ref_trajectory.keys()):.3f}, {max(ref_trajectory.keys()):.3f}]"
-            )
+
+            # ── 轨迹质量门控 ──
+            # 计算相邻轨迹点之间的余弦相似度，评估轨迹一致性
+            # 一致性低 = 参考视频运动混乱，不适合做轨迹锚定
+            if cfg.anchor_quality_gate:
+                traj_keys = sorted(ref_trajectory.keys())
+                if len(traj_keys) >= 2:
+                    cos_sims = []
+                    for i in range(len(traj_keys) - 1):
+                        t1, t2 = traj_keys[i], traj_keys[i + 1]
+                        z1 = ref_trajectory[t1].flatten()
+                        z2 = ref_trajectory[t2].flatten()
+                        cos_sim = torch.nn.functional.cosine_similarity(
+                            z1.unsqueeze(0), z2.unsqueeze(0)
+                        ).item()
+                        cos_sims.append(cos_sim)
+                    avg_cos_sim = sum(cos_sims) / len(cos_sims)
+                    logger.info(
+                        f"  [Trajectory Anchor] 轨迹一致性: "
+                        f"avg_cos={avg_cos_sim:.4f} (阈值={cfg.anchor_quality_threshold}), "
+                        f"range=[{min(cos_sims):.4f}, {max(cos_sims):.4f}]"
+                    )
+                    if avg_cos_sim < cfg.anchor_quality_threshold:
+                        logger.warning(
+                            f"  [Trajectory Anchor] ⚠️ 轨迹一致性过低 (avg_cos={avg_cos_sim:.4f} "
+                            f"< {cfg.anchor_quality_threshold})，跳过该样本的轨迹锚定，"
+                            f"退化为标准生成"
+                        )
+                        ref_trajectory = None
+
+            if ref_trajectory is not None:
+                logger.info(
+                    f"  [Trajectory Anchor] Cached {len(ref_trajectory)} trajectory points, "
+                    f"t range=[{min(ref_trajectory.keys()):.3f}, {max(ref_trajectory.keys()):.3f}]"
+                )
 
         # ── Step 4: 生成循环 ──
         num_iters = cfg.i_max if cfg.use_iter else 1
