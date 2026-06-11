@@ -108,6 +108,16 @@ class PFlowConfig:
     sga_alpha_min: float = 0.001       # alpha 下界 (防止完全不注入)
     sga_alpha_max: float = 0.010       # alpha 上界 (防止过度注入)
 
+    # ── 方向 E: Prompt-Orthogonal Decomposition Injection (PODI) ──
+    podi: bool = False                  # 是否启用 PODI (只注入与 prompt 对齐的 η_temporal 分量)
+    podi_alpha: float = 0.004          # PODI 注入强度 (默认与 baseline alpha 相同, 公平对比)
+                                       # 因为注入的是安全分量, 后续可尝试更大值 (0.008~0.02)
+    podi_min_alignment: float = 0.01   # 最小对齐度阈值 (alignment < 此值则完全放弃注入)
+    podi_proj_mode: str = "mean_pool"  # prompt embedding → latent 投影方式:
+                                       #   mean_pool: 对 seq_len 维度均值池化后线性插值到 latent 维度
+                                       #   last_token: 取最后一个非 padding token
+                                       #   weighted: attention-weighted pooling
+
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
 
@@ -130,7 +140,9 @@ class PFlowConfig:
         if self.use_svd:
             flags.append("svd")
         if self.use_blend:
-            if self.adaptive_alpha:
+            if self.podi:
+                flags.append(f"blend(PODI: α={self.podi_alpha}, min_align={self.podi_min_alignment})")
+            elif self.adaptive_alpha:
                 flags.append(f"blend(SGA: base={self.alpha}, target_std={self.sga_target_std})")
             elif self.freq_reshape:
                 flags.append(f"blend(α={self.alpha})+freq_reshape(β={self.freq_reshape_beta})")
@@ -168,6 +180,7 @@ class PFlowPipeline:
 
         self._pipe = None
         self._vlm_client = None
+        self._prompt_embeds = None  # 缓存 prompt embedding (供 PODI 使用)
 
     @property
     def pipe(self):
@@ -264,6 +277,8 @@ class PFlowPipeline:
         if cfg.use_inversion:
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds_for_diag = \
                 self._compute_noise_prior(ref_video, caption)
+            # 缓存 prompt embedding 供 PODI 使用
+            self._prompt_embeds = prompt_embeds_for_diag
 
         # ── Step 3.5: Prompt-Noise 方向冲突诊断 ──
         if eta_temporal is not None and prompt_embeds_for_diag is not None:
@@ -527,6 +542,37 @@ class PFlowPipeline:
         #     eta = self._freq_reshape_noise(eta_temporal, eta_random)
         #     return eta
 
+        # ── 方向 E: Prompt-Orthogonal Decomposition Injection (PODI) ──
+        # 核心思想: η_temporal 中包含与 prompt 对齐的分量 (有益) 和正交分量 (可能有害)
+        # 只注入对齐分量，过滤掉正交/冲突的成分 → 安全提升 alpha
+        # 参考论文: ODC (Orthogonal Drift Correction), Golden Noise (ICCV 2025), InitNO (CVPR 2024)
+        if self.config.podi and self._prompt_embeds is not None:
+            eta_temporal, alpha = self._podi_decompose(eta_temporal)
+            # PODI 已确定 alpha，跳过后续 SGA 等 alpha 选择逻辑
+            sqrt_alpha = torch.sqrt(torch.tensor(alpha, device=self.device))
+            sqrt_1_minus_alpha = torch.sqrt(torch.tensor(1.0 - alpha, device=self.device))
+            eta = sqrt_alpha * eta_temporal + sqrt_1_minus_alpha * eta_random
+
+            # ── 诊断: PODI Blend 效果 ──
+            logger.info(
+                f"  [PODI Blend] α={alpha:.4f} (√α={sqrt_alpha.item():.4f}), "
+                f"η_temporal(aligned) std={eta_temporal.std():.4f}, "
+                f"η_mixed std={eta.std():.4f}, mean={eta.mean():.4f}"
+            )
+            cos_m_t = torch.nn.functional.cosine_similarity(
+                eta.flatten().unsqueeze(0),
+                eta_temporal.flatten().unsqueeze(0)
+            ).item()
+            cos_m_r = torch.nn.functional.cosine_similarity(
+                eta.flatten().unsqueeze(0),
+                eta_random.flatten().unsqueeze(0)
+            ).item()
+            logger.info(
+                f"  [PODI Blend Diag] cos(mixed, temporal_aligned)={cos_m_t:.4f}, "
+                f"cos(mixed, random)={cos_m_r:.4f}"
+            )
+            return eta
+
         # ── Linear Blend 路径 ──
         alpha = self.config.alpha
 
@@ -729,6 +775,184 @@ class PFlowPipeline:
         )
 
         return eta_out
+
+    def _podi_decompose(
+        self,
+        eta_temporal: torch.Tensor,
+    ) -> tuple:
+        """
+        方向 E 核心实现: Prompt-Orthogonal Decomposition Injection (PODI).
+
+        核心思想:
+            η_temporal 包含与 prompt 语义方向对齐的分量 (有益运动信息)
+            和正交/冲突的分量 (可能导致 XCLIP 崩塌)。
+            PODI 通过将 prompt embedding 投影到 latent 空间，
+            分解 η_temporal 为 parallel + orthogonal，只注入 parallel 部分。
+
+        算法步骤:
+            1. 从缓存的 prompt_embeds 提取方向向量 d_text (降维到 latent dim)
+            2. 将 η_temporal (flatten) 投影到 d_text 方向:
+               η_parallel = (η_temporal · d_text / ||d_text||²) × d_text
+            3. 计算 alignment score = ||η_parallel|| / ||η_temporal||
+               - alignment 高 → η_temporal 大部分与 prompt 对齐 → 安全，用大 alpha
+               - alignment 低 → η_temporal 与 prompt 正交/冲突 → 只注入 parallel 部分
+            4. 对 η_parallel 做 renorm 到 N(0,1)
+            5. 确定 effective_alpha (基于 alignment score 动态缩放)
+
+        理论基础:
+            - ODC (OpenReview 2024): text embedding 在去噪中沿正交方向漂移导致语义不对齐
+            - Golden Noise (ICCV 2025): 噪声的"好坏"取决于其与 text 的语义耦合度
+            - InitNO (CVPR 2024): cross-attention 对齐度可度量噪声质量
+
+        与 SGA 的区别:
+            - SGA 只看 std (标量)，不知道 η_temporal 的"方向"对不对
+            - PODI 看向量对齐度，直接解决 S7/S31 的方向冲突问题
+            - 两者可正交叠加: PODI 过滤方向 + SGA 调节强度
+
+        Returns:
+            (eta_aligned, alpha): 对齐后的 η_temporal 分量, 确定的 alpha 值
+        """
+        cfg = self.config
+        prompt_embeds = self._prompt_embeds  # shape: (1, seq_len, hidden_dim)
+
+        # ── Step 1: 从 prompt embedding 提取方向向量 ──
+        # prompt_embeds shape: (batch=1, seq_len, hidden_dim)
+        # 需要将其降维为一个与 eta_temporal flatten 后同维度的方向向量
+        # 策略: 先池化到 (1, hidden_dim)，再线性插值/repeat 到 latent 维度
+
+        if cfg.podi_proj_mode == "mean_pool":
+            # 对 seq_len 维度均值池化 → (1, hidden_dim)
+            d_text_raw = prompt_embeds.mean(dim=1).squeeze(0)  # (hidden_dim,)
+        elif cfg.podi_proj_mode == "last_token":
+            # 取最后一个 token → (hidden_dim,)
+            d_text_raw = prompt_embeds[0, -1, :]  # (hidden_dim,)
+        elif cfg.podi_proj_mode == "weighted":
+            # attention-weighted: 用 norm 作为 weight (高 norm 的 token 更重要)
+            norms = prompt_embeds[0].norm(dim=-1, keepdim=True)  # (seq_len, 1)
+            weights = norms / (norms.sum() + 1e-8)
+            d_text_raw = (prompt_embeds[0] * weights).sum(dim=0)  # (hidden_dim,)
+        else:
+            d_text_raw = prompt_embeds.mean(dim=1).squeeze(0)
+
+        # ── Step 2: 将 d_text 投影到 η_temporal 的 latent 空间 ──
+        # η_temporal shape: (B, C, F, H, W) — 通常 (1, 16, 21, 60, 104)
+        # d_text_raw shape: (hidden_dim,) — 通常 T5 是 4096 维
+        # 策略: 将 d_text 重复/投影到 latent 的 channel 维度方向
+        #
+        # 关键洞察: 我们不需要逐元素对齐，而是利用 d_text 作为"语义方向"
+        # 在 channel 维度上做投影 — channel 是 latent 的特征通道,
+        # 每个 channel 编码了不同的语义信息
+
+        eta_shape = eta_temporal.shape  # (B, C, F, H, W)
+        B, C, F, H, W = eta_shape
+
+        # 将 d_text 投影到 C 维空间 (通道方向)
+        # 方法: 对 d_text 做分段平均池化到 C 维
+        hidden_dim = d_text_raw.shape[0]
+        d_text_f32 = d_text_raw.float()
+
+        # 分段平均池化: hidden_dim → C
+        # 将 hidden_dim 分成 C 段，每段取平均
+        chunk_size = hidden_dim // C
+        if chunk_size > 0:
+            d_channel = d_text_f32[:chunk_size * C].reshape(C, chunk_size).mean(dim=1)  # (C,)
+        else:
+            # 如果 hidden_dim < C (极少见)，直接插值
+            d_channel = torch.nn.functional.interpolate(
+                d_text_f32.unsqueeze(0).unsqueeze(0),
+                size=C, mode='linear', align_corners=False
+            ).squeeze()  # (C,)
+
+        # 归一化方向向量
+        d_norm = d_channel.norm()
+        if d_norm < 1e-8:
+            logger.warning("  [PODI] d_text norm ≈ 0, falling back to normal blend")
+            return eta_temporal, cfg.alpha
+
+        d_unit = d_channel / d_norm  # (C,) 单位方向向量
+
+        # ── Step 3: 在 channel 维度上做正交分解 ──
+        # η_temporal: (B, C, F, H, W) — 将 channel 视为"特征方向"
+        # 对每个 (B, F, H, W) 位置，投影其 C 维向量到 d_unit 方向
+
+        eta_f32 = eta_temporal.float()
+
+        # d_unit 扩展为 (1, C, 1, 1, 1) 方便广播
+        d_expanded = d_unit.reshape(1, C, 1, 1, 1)
+
+        # 投影: proj_scalar = sum(eta * d_unit, dim=C) → (B, 1, F, H, W)
+        proj_scalar = (eta_f32 * d_expanded).sum(dim=1, keepdim=True)  # (B, 1, F, H, W)
+
+        # η_parallel = proj_scalar * d_unit → (B, C, F, H, W)
+        eta_parallel = proj_scalar * d_expanded  # (B, C, F, H, W)
+
+        # η_orthogonal = η_temporal - η_parallel
+        eta_orthogonal = eta_f32 - eta_parallel
+
+        # ── Step 4: 计算 alignment score ──
+        # alignment = ||η_parallel||₂ / ||η_temporal||₂
+        norm_parallel = eta_parallel.norm().item()
+        norm_total = eta_f32.norm().item()
+        alignment = norm_parallel / (norm_total + 1e-8)
+
+        # 各分量的能量占比
+        norm_orthogonal = eta_orthogonal.norm().item()
+
+        logger.info(
+            f"  [PODI] Decomposition: "
+            f"||η_parallel||={norm_parallel:.4f}, "
+            f"||η_orthogonal||={norm_orthogonal:.4f}, "
+            f"||η_total||={norm_total:.4f}, "
+            f"alignment={alignment:.4f}"
+        )
+
+        # ── Step 5: 根据 alignment 决定注入策略 ──
+        if alignment < cfg.podi_min_alignment:
+            # alignment 极低: η_temporal 几乎完全与 prompt 正交 → 完全放弃注入
+            logger.info(
+                f"  [PODI] ⚠️ alignment={alignment:.4f} < threshold={cfg.podi_min_alignment} "
+                f"→ η_temporal 与 prompt 严重不对齐，放弃注入 (fallback to random)"
+            )
+            # 返回 zero eta_temporal (等效于只用 eta_random)
+            return torch.zeros_like(eta_temporal), 0.0
+
+        # alignment 合格: 只注入 parallel 分量
+        # Renormalize η_parallel 到 N(0,1) (保持扩散模型假设)
+        parallel_mean = eta_parallel.mean()
+        parallel_std = eta_parallel.std()
+
+        if parallel_std < 1e-8:
+            logger.warning("  [PODI] η_parallel std ≈ 0, falling back to normal blend")
+            return eta_temporal.to(eta_temporal.dtype), cfg.alpha
+
+        eta_aligned = (eta_parallel - parallel_mean) / parallel_std
+        eta_aligned = eta_aligned.to(eta_temporal.dtype)
+
+        # Effective alpha: 直接使用 podi_alpha (不做 alignment 缩放)
+        # 设计理由: PODI 的价值在于"注入更安全的内容" (parallel 分量)
+        # 而不是"改变注入量"。alignment 只做门控 (低于 min_alignment 时拒绝注入),
+        # 注入量由 podi_alpha 直接控制，方便与 baseline alpha 做公平对比。
+        # 如果想要更激进：因为注入的是安全分量，podi_alpha 可以设得比 baseline 的 alpha 大。
+        effective_alpha = cfg.podi_alpha
+
+        logger.info(
+            f"  [PODI] alignment={alignment:.4f} → "
+            f"effective_alpha={effective_alpha:.6f} "
+            f"(podi_alpha={cfg.podi_alpha}, alignment used for gate only)"
+        )
+        logger.info(
+            f"  [PODI] η_aligned: mean={eta_aligned.mean():.4f}, std={eta_aligned.std():.4f}"
+        )
+
+        # 诊断: channel 方向的分布
+        channel_proj_mean = proj_scalar.mean().item()
+        channel_proj_std = proj_scalar.std().item()
+        logger.info(
+            f"  [PODI] Channel projection: mean={channel_proj_mean:.4f}, "
+            f"std={channel_proj_std:.4f}, d_unit top3={d_unit[:3].tolist()}"
+        )
+
+        return eta_aligned, effective_alpha
 
     @torch.no_grad()
     def _generate(

@@ -126,6 +126,17 @@ def parse_args():
     p.add_argument("--sga_alpha_max", type=float, default=0.010,
                    help="SGA alpha 上界 (防止过度注入导致 catastrophic failure)")
 
+    # ── 方向 E: Prompt-Orthogonal Decomposition Injection (PODI) ──
+    p.add_argument("--podi", action="store_true",
+                   help="启用 PODI: 只注入 η_temporal 中与 prompt 语义对齐的分量，过滤正交/冲突信号")
+    p.add_argument("--podi_alpha", type=float, default=0.004,
+                   help="PODI 注入强度 (默认与 baseline alpha 对齐做公平对比; 后续可尝试更大值 0.008~0.02)")
+    p.add_argument("--podi_min_alignment", type=float, default=0.01,
+                   help="最小对齐度阈值: alignment < 此值则放弃注入 (推荐 0.01~0.05)")
+    p.add_argument("--podi_proj_mode", type=str, default="mean_pool",
+                   choices=["mean_pool", "last_token", "weighted"],
+                   help="prompt embedding → latent 的投影方式 (mean_pool/last_token/weighted)")
+
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
                    help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
@@ -208,6 +219,11 @@ def build_config(args) -> PFlowConfig:
         sga_target_std=args.sga_target_std,
         sga_alpha_min=args.sga_alpha_min,
         sga_alpha_max=args.sga_alpha_max,
+        # 方向 E: PODI
+        podi=args.podi,
+        podi_alpha=args.podi_alpha,
+        podi_min_alignment=args.podi_min_alignment,
+        podi_proj_mode=args.podi_proj_mode,
     )
 
 
