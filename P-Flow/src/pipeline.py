@@ -147,8 +147,10 @@ class PFlowConfig:
     anchor_beta_max: float = 0.3       # 最大锚定强度 β_max (推荐搜索: 0.1 ~ 0.5)
     anchor_schedule: str = "cosine_decay"  # β 退火调度: cosine_decay / linear_decay / constant / warmup_decay
     anchor_cache_every_n: int = 1      # inversion 轨迹缓存间隔 (1=全部, 2=隔一步; 用于显存优化)
-    anchor_quality_gate: bool = True    # 是否启用轨迹质量门控
-    anchor_quality_threshold: float = 0.3  # 轨迹一致性阈值 (相邻点余弦相似度均值低于此值则跳过 anchor)
+    anchor_quality_gate: bool = True    # 是否启用轨迹质量门控 (基于 η_temporal 帧间余弦相似度)
+    anchor_quality_threshold: float = 0.05  # 帧间 cos 阈值: mean_cos < 此值则跳过 anchor
+    # 参考值: S7=0.1878 (好, 应通过), S21=-0.1381 (混乱, 应拒绝)
+    # 推荐 0.0~0.1, 负值样本运动混乱不适合锚定
 
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
@@ -360,34 +362,52 @@ class PFlowPipeline:
                 cache_every_n=cfg.anchor_cache_every_n,
             )
 
-            # ── 轨迹质量门控 ──
-            # 计算相邻轨迹点之间的余弦相似度，评估轨迹一致性
-            # 一致性低 = 参考视频运动混乱，不适合做轨迹锚定
-            if cfg.anchor_quality_gate:
-                traj_keys = sorted(ref_trajectory.keys())
-                if len(traj_keys) >= 2:
-                    cos_sims = []
-                    for i in range(len(traj_keys) - 1):
-                        t1, t2 = traj_keys[i], traj_keys[i + 1]
-                        z1 = ref_trajectory[t1].flatten()
-                        z2 = ref_trajectory[t2].flatten()
-                        cos_sim = torch.nn.functional.cosine_similarity(
-                            z1.unsqueeze(0), z2.unsqueeze(0)
+            # ── 轨迹质量门控 (V2: η_temporal 帧间余弦相似度) ──
+            # 核心思路: 用 η_temporal 的帧间 cos 评估参考视频的运动质量
+            #   - mean_cos 高 (>0.1): 参考视频有一致的运动方向 → 适合锚定
+            #   - mean_cos 低/负: 参考视频运动混乱/无规律 → 不适合锚定
+            # 注: 旧方案用相邻 ODE 轨迹点 cos，因 dt=1/50 太小导致永远≈1.0，已废弃
+            if cfg.anchor_quality_gate and eta_temporal is not None:
+                eta_gate = eta_temporal
+                if eta_gate.dim() == 5:
+                    if eta_gate.shape[2] > eta_gate.shape[1]:
+                        eta_gate = eta_gate.permute(0, 2, 1, 3, 4)
+                    num_frames_gate = eta_gate.shape[2]
+                elif eta_gate.dim() == 4:
+                    num_frames_gate = eta_gate.shape[1]
+                    eta_gate = eta_gate.unsqueeze(0)
+                else:
+                    num_frames_gate = 0
+
+                if num_frames_gate >= 2:
+                    frame_cos_sims = []
+                    for f in range(num_frames_gate - 1):
+                        f1 = eta_gate[0, :, f, :, :].flatten()
+                        f2 = eta_gate[0, :, f + 1, :, :].flatten()
+                        cos = torch.nn.functional.cosine_similarity(
+                            f1.unsqueeze(0), f2.unsqueeze(0)
                         ).item()
-                        cos_sims.append(cos_sim)
-                    avg_cos_sim = sum(cos_sims) / len(cos_sims)
+                        frame_cos_sims.append(cos)
+
+                    mean_frame_cos = sum(frame_cos_sims) / len(frame_cos_sims)
+                    std_frame_cos = (sum((c - mean_frame_cos) ** 2 for c in frame_cos_sims) / len(frame_cos_sims)) ** 0.5
                     logger.info(
-                        f"  [Trajectory Anchor] 轨迹一致性: "
-                        f"avg_cos={avg_cos_sim:.4f} (阈值={cfg.anchor_quality_threshold}), "
-                        f"range=[{min(cos_sims):.4f}, {max(cos_sims):.4f}]"
+                        f"  [Trajectory Anchor] η_temporal 帧间一致性: "
+                        f"mean_cos={mean_frame_cos:.4f}, std={std_frame_cos:.4f}, "
+                        f"range=[{min(frame_cos_sims):.4f}, {max(frame_cos_sims):.4f}] "
+                        f"(阈值={cfg.anchor_quality_threshold})"
                     )
-                    if avg_cos_sim < cfg.anchor_quality_threshold:
+                    if mean_frame_cos < cfg.anchor_quality_threshold:
                         logger.warning(
-                            f"  [Trajectory Anchor] ⚠️ 轨迹一致性过低 (avg_cos={avg_cos_sim:.4f} "
-                            f"< {cfg.anchor_quality_threshold})，跳过该样本的轨迹锚定，"
-                            f"退化为标准生成"
+                            f"  [Trajectory Anchor] ⚠️ η_temporal 帧间一致性过低 "
+                            f"(mean_cos={mean_frame_cos:.4f} < {cfg.anchor_quality_threshold})，"
+                            f"参考视频运动混乱，跳过轨迹锚定，退化为标准生成"
                         )
                         ref_trajectory = None
+                else:
+                    logger.warning(
+                        f"  [Trajectory Anchor] η_temporal 帧数不足 ({num_frames_gate})，跳过门控检查"
+                    )
 
             if ref_trajectory is not None:
                 logger.info(
