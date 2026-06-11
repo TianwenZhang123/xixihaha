@@ -102,6 +102,12 @@ class PFlowConfig:
     freq_reshape_beta: float = 1.0     # 重塑强度: 0=不重塑(纯随机), 1=完全匹配频谱形状
                                        # 推荐搜索范围: 0.3~1.0
 
+    # ── 方向 D: Std-Gated Adaptive Alpha (SGA) ──
+    adaptive_alpha: bool = False        # 是否启用 per-sample adaptive alpha
+    sga_target_std: float = 0.30       # 目标标准差 (中位数附近, 根据实测样本 std 分布设定)
+    sga_alpha_min: float = 0.001       # alpha 下界 (防止完全不注入)
+    sga_alpha_max: float = 0.010       # alpha 上界 (防止过度注入)
+
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
 
@@ -124,7 +130,9 @@ class PFlowConfig:
         if self.use_svd:
             flags.append("svd")
         if self.use_blend:
-            if self.freq_reshape:
+            if self.adaptive_alpha:
+                flags.append(f"blend(SGA: base={self.alpha}, target_std={self.sga_target_std})")
+            elif self.freq_reshape:
                 flags.append(f"blend(α={self.alpha})+freq_reshape(β={self.freq_reshape_beta})")
             else:
                 flags.append(f"blend(α={self.alpha})")
@@ -538,6 +546,25 @@ class PFlowPipeline:
         #         f"{cfg.qga_base_alpha * cfg.qga_high_mult:.6f}])"
         #     )
         #     alpha = effective_alpha
+
+        # ── 方向 D: Std-Gated Adaptive Alpha (SGA) ──
+        # 核心思想: η_temporal_std 反映信号"偏离度" (类比 SSNI ICML 2025 的 score norm)
+        #   - std 高 → 信号偏离大 / 高频强 → 降低 alpha 保护生成质量
+        #   - std 低 → 信号温和 / 低频主导 → 提高 alpha 充分利用时序先验
+        # 公式: effective_alpha = base_alpha × (target_std / actual_std)
+        #        然后 clamp 到 [alpha_min, alpha_max]
+        if self.config.adaptive_alpha:
+            actual_std = eta_temporal.std().item()
+            cfg = self.config
+            raw_alpha = cfg.alpha * (cfg.sga_target_std / max(actual_std, 1e-8))
+            effective_alpha = max(cfg.sga_alpha_min, min(cfg.sga_alpha_max, raw_alpha))
+            logger.info(
+                f"  [SGA] η_temporal_std={actual_std:.4f}, "
+                f"raw_alpha={raw_alpha:.6f} → effective_alpha={effective_alpha:.6f} "
+                f"(base={cfg.alpha}, target_std={cfg.sga_target_std}, "
+                f"range=[{cfg.sga_alpha_min}, {cfg.sga_alpha_max}])"
+            )
+            alpha = effective_alpha
 
         sqrt_alpha = torch.sqrt(torch.tensor(alpha, device=self.device))
         sqrt_1_minus_alpha = torch.sqrt(torch.tensor(1.0 - alpha, device=self.device))

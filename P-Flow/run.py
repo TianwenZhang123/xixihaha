@@ -116,6 +116,16 @@ def parse_args():
     p.add_argument("--freq_reshape_beta", type=float, default=1.0,
                    help="频域重塑强度: 0=不重塑(纯随机), 1=完全匹配频谱 (推荐0.5~1.0)")
 
+    # ── 方向 D: Std-Gated Adaptive Alpha (SGA) ──
+    p.add_argument("--adaptive_alpha", action="store_true",
+                   help="启用 per-sample adaptive alpha (根据 η_temporal std 动态调节注入量)")
+    p.add_argument("--sga_target_std", type=float, default=0.30,
+                   help="SGA 目标标准差: effective_alpha = alpha * (target_std / actual_std)")
+    p.add_argument("--sga_alpha_min", type=float, default=0.001,
+                   help="SGA alpha 下界 (防止完全不注入)")
+    p.add_argument("--sga_alpha_max", type=float, default=0.010,
+                   help="SGA alpha 上界 (防止过度注入导致 catastrophic failure)")
+
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
                    help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
@@ -193,6 +203,11 @@ def build_config(args) -> PFlowConfig:
         # 方向 C: 频域噪声重塑
         freq_reshape=args.freq_reshape,
         freq_reshape_beta=args.freq_reshape_beta,
+        # 方向 D: Std-Gated Adaptive Alpha
+        adaptive_alpha=args.adaptive_alpha,
+        sga_target_std=args.sga_target_std,
+        sga_alpha_min=args.sga_alpha_min,
+        sga_alpha_max=args.sga_alpha_max,
     )
 
 
@@ -299,7 +314,11 @@ def main():
     print(f"P-Flow | {config.experiment_name()}")
     print(f"  Flags: {flags or ['baseline (无改动)']}")
     if config.use_blend:
-        if config.freq_reshape:
+        if config.adaptive_alpha:
+            print(f"  [SGA] adaptive alpha: base={config.alpha}, target_std={config.sga_target_std}, "
+                  f"range=[{config.sga_alpha_min}, {config.sga_alpha_max}]")
+            print(f"  rho_s={config.rho_s}, rho_m={config.rho_m}")
+        elif config.freq_reshape:
             print(f"  η_random 频域重塑(β={config.freq_reshape_beta}) + alpha blend(α={config.alpha})")
             print(f"  rho_s={config.rho_s}, rho_m={config.rho_m}")
         else:

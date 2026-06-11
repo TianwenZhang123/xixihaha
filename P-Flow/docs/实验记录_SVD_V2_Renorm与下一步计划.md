@@ -1,8 +1,8 @@
 # SVD V2 实验分析 & 改进记录
 
 > 创建时间: 2025-06-10  
-> 最后更新: 2025-06-11  
-> 状态: renorm 失败 → rescale 否决 → QGA 失败 → α=0.01 确认天花板 → **方向 C 频域重塑 代码就绪**  
+> 最后更新: 2025-07-11  
+> 状态: renorm 失败 → rescale 否决 → QGA 失败 → α=0.01 确认天花板 → 方向 C 频域重塑 **完全失败** → **方向 D: Std-Gated Adaptive Alpha (SGA) — 已实现，待验证**  
 > 目标: 确定 L2 SVD 最优策略 + L1 prompt rewrite 验证
 
 ---
@@ -397,9 +397,292 @@ python evaluation/run_clip_xclip_eval.py \
 - **Effectiveness**: 对运动特征明确的样本 (43, 32, 34)，频谱形状能引导正确的运动节奏
 - **论文叙事**: "Spectrum-Aligned Noise Initialization" — 从频域视角解决 noise prior 的毒性问题
 
+### 7.7 独立 freq_reshape β=1.0 实验结果（❌ 失败）
+
+> 实验配置: 独立频域重塑模式，β=1.0，**无 alpha blend**（`eta = freq_reshape(η_temporal, η_random)` 直接 return）  
+> 命令: `--noise_prior --svd_mode v1 --freq_reshape --freq_reshape_beta 1.0`（无 `--alpha` 混合）  
+> 数据来源: 服务器评测日志（整体均值）
+
+**总体指标:**
+
+| 配置 | CLIP (orig-gen) | XCLIP (orig-gen) | vs Baseline |
+|------|:---:|:---:|:---:|
+| Pure L2 Baseline (v1, α=0.004) | **0.8964** | **0.7874** | — |
+| 独立 freq_reshape (β=1.0, 无 blend) | 0.8339 | 0.6690 | CLIP **-6.97%** ❌, XCLIP **-15.03%** ❌ |
+
+**结论: 独立频域重塑模式整体显著劣于 baseline，是目前所有 L2 改进中最差的一个。**
+
+### 7.8 失败原因分析（关键发现）
+
+生成日志显示，重塑后噪声与原始随机噪声的余弦相似度 `cos(shaped, random) ≈ 0.87 ~ 0.99`，即**频域重塑后的 η_random 与纯随机高斯噪声几乎没有区别**。
+
+根本原因:
+
+1. **β=1.0 只改频谱「幅度形状」，不改相位**。算法第 6 步 `F_out = F_r × reshape_filter` 仅调制幅度，相位仍是 η_random 的随机相位。时间频谱形状对运动节奏的引导信号非常弱，无法弥补「丢弃 η_temporal 全部空间内容」的损失。
+2. **完全抛弃了 η_temporal 的内容注入**。原 linear blend 中 `√α·η_temporal` 这一项虽小（α=0.004），但确实携带了参考视频的结构/运动信息，对生成质量有正面贡献。独立重塑把这份信息全部丢掉，只保留一个近乎无效的频谱形状，结果自然回退到「接近纯随机初始化」，且因 renorm/重塑引入额外扰动而比纯 baseline 更差。
+
+**这一负面结果反向证明了 alpha blend 注入 η_temporal 内容的正面价值——不能完全丢弃，频域重塑应作为 η_random 的「预处理」而非「替代」。**
+
+### 7.9 修正方案：频域重塑作为 η_random 预处理 + alpha blend（叠加模式）
+
+基于 7.8 的发现，将方向 C 从「独立替代」改为「叠加增强」：先用频域重塑改造 η_random 的时间频谱，再走原 SVD 的 alpha 线性混合。
+
+```
+输入: η_temporal (SVD 滤波后), η_random (标准高斯)
+
+1. η_random' = freq_reshape(η_temporal, η_random, β)   # 频域重塑作为预处理
+2. η = √α · η_temporal + √(1-α) · η_random'             # 继续走原 alpha blend
+```
+
+关键性质:
+
+- **保留 η_temporal 内容注入**（`√α·η_temporal` 项不变），不重蹈独立模式覆辙；
+- **同时让 η_random 携带参考视频的时间节奏**（频域形状），叠加增益；
+- **向下兼容**: β=0 时 `spectrum_shape^0 = 全 1`，重塑退化为恒等变换，整条路径完全等价于老方向（纯 alpha blend）。即 `--freq_reshape --freq_reshape_beta 0` ≡ 不开 freq_reshape。
+
+命令（叠加模式，需同时开 `--noise_prior`/`--alpha` 与 `--freq_reshape`）:
+
+```bash
+cd /root/xixihaha/P-Flow
+
+python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/freq_reshape_blend_b1_a004 \
+    --noise_prior \
+    --svd_mode v1 \
+    --alpha 0.004 \
+    --freq_reshape \
+    --freq_reshape_beta 1.0 \
+    --seed 42 --steps 30 --guidance 5.0 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47
+
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/freq_reshape_blend_b1_a004 \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir evaluation_results/freq_reshape_blend_b1_a004
+```
+
+### 7.10 叠加模式 β=1.0 实验结果（❌ 也失败）
+
+> 实验配置: freq_reshape 作为 η_random 预处理 + alpha=0.004 线性混合  
+> 命令: `--noise_prior --svd_mode v1 --alpha 0.004 --freq_reshape --freq_reshape_beta 1.0`  
+> 数据来源: 服务器评测结果 (evaluation_results/freq_reshape_blend_b1_a004)
+
+**总体指标:**
+
+| 配置 | CLIP (orig-gen) | XCLIP (orig-gen) | vs Baseline |
+|------|:---:|:---:|:---:|
+| Pure L2 Baseline (v1, α=0.004) | **0.8964** | **0.7874** | — |
+| 独立 freq_reshape (β=1.0, 无 blend) | 0.8339 | 0.6690 | CLIP -6.97%, XCLIP -15.03% ❌ |
+| 叠加模式 (β=1.0, α=0.004) | 0.8384 | 0.6835 | CLIP **-6.47%** ❌, XCLIP **-13.20%** ❌ |
+
+**逐 Case 对比:**
+
+| 样本 | 场景 | Baseline CLIP | 叠加 CLIP | Δ CLIP | Baseline XCLIP | 叠加 XCLIP | Δ XCLIP |
+|:---:|------|:---:|:---:|:---:|:---:|:---:|:---:|
+| 7 | 杯中帆船 | 0.9303 | 0.6954 | **-25.3%** ❌ | 0.6982 | 0.2146 | **-69.3%** ❌ |
+| 17 | SUV越野 | 0.9092 | 0.8918 | -1.9% | 0.8368 | 0.7878 | -5.9% |
+| 21 | 丛林纸飞机 | 0.8928 | 0.8379 | -6.2% | 0.7637 | 0.6919 | -9.4% |
+| 31 | 水下城市 | 0.8324 | 0.8149 | -2.1% | 0.5237 | 0.6530 | **+24.7%** ✅ |
+| 32 | 雪地金毛 | 0.9167 | 0.9064 | -1.1% | 0.8221 | 0.8182 | -0.5% |
+| 33 | 跑步者 | 0.8531 | 0.6261 | **-26.6%** ❌ | 0.8618 | 0.3223 | **-62.6%** ❌ |
+| 34 | 四只小狗 | 0.8968 | 0.8803 | -1.8% | 0.8710 | 0.8119 | -6.8% |
+| 43 | 花园猫咪 | 0.9539 | 0.9677 | +1.4% ✅ | 0.9069 | 0.9414 | +3.8% ✅ |
+| 46 | 火山喷发 | 0.9022 | 0.8965 | -0.6% | 0.7869 | 0.7832 | -0.5% |
+| 47 | 动画狗城市 | 0.8769 | 0.8674 | -1.1% | 0.8024 | 0.8108 | +1.0% |
+
+胜负统计: 叠加模式赢 2/10 (S31 XCLIP, S43)，平 4/10，输 4/10 (其中 S7/S33 catastrophic failure)
+
+### 7.11 叠加模式失败原因分析 + 方向 C 总结
+
+日志关键诊断信息:
+
+| 样本 | cos(shaped, random) | spectrum DC/high ratio | direction_shift |
+|:---:|:---:|:---:|:---:|
+| 7 | 0.8759 | 4.11 | 0.0245 |
+| 17 | 0.9982 | 1.06 | 0.0218 |
+
+**核心发现: 频域重塑本身几乎无效果。**
+
+1. **大部分样本的时间频谱形状接近平坦**（DC/high ratio ≈ 1.06），导致 reshape_filter 接近全 1，重塑后的 η_random 与原始几乎相同 (`cos ≈ 0.998`)；
+2. **少数样本 (S7) 频谱不平坦** (DC/high=4.11)，重塑确实改变了噪声 (`cos=0.876`)，但效果反而是 catastrophic failure (CLIP -25.3%, XCLIP -69.3%)——说明频谱形状调制不但不能帮助生成，反而破坏了噪声的随机性；
+3. **叠加模式 vs 独立模式**：叠加模式 (CLIP 0.8384, XCLIP 0.6835) 仅比独立模式 (0.8339, 0.6690) 微弱提升 (+0.54%, +2.17%)，说明「保留 η_temporal 内容注入」带来的正面价值在 α=0.004 这个量级上微乎其微（`direction_shift ≈ 0.024`，小到几乎感知不到）。
+
+**方向 C 结论: 频域噪声重塑路线完全失败。**
+
+- 理论上，只传递"时间频谱形状"这一信息太弱了，无法为生成提供有意义的引导;
+- 而且对于频谱不平坦的样本，强行调制反而破坏了噪声随机性，导致 catastrophic failure;
+- **建议放弃方向 C，回到纯 alpha blend 路线，专注调优 α 值和 L1 caption 联合优化。**
+
 ---
 
-## 八、实验路径规划（更新后）
+## 八、方向 D: Std-Gated Adaptive Alpha (SGA)
+
+### 8.1 动机与论文支撑
+
+前序实验揭示了一个核心矛盾：α=0.01 对 8/10 样本有正向收益 (XCLIP +1.2%)，但 S7/S31 出现 catastrophic failure (-34.5%/-22.8%)。问题在于固定 alpha 无法适应不同样本 η_temporal 的信号强度差异。
+
+调研了 6 篇相关论文，找到直接理论支撑：
+
+| 论文 | 会议 | 核心思想 | 与我们的关系 |
+|------|:---:|------|------|
+| SSNI | ICML 2025 | 用 score norm 估计样本偏离度，自适应调整噪声注入量 | **直接类比**: η_temporal_std 作为偏离度代理 |
+| MuLAN | NeurIPS 2024 Spotlight | 学习 per-pixel 自适应噪声 schedule | **理论背书**: 均匀噪声策略确实次优 |
+| PYoCo | ICCV 2023 | Video noise prior (correlated noise) | 我们 SVD prior 的直接前身 |
+| FreeInit | ECCV 2024 | 低频时空结构对生成质量关键 | 佐证 η_temporal 低频信号有价值 |
+| How I Warped Your Noise | ICLR 2024 | 保 Gaussian 的 temporally-correlated noise | 验证保分布注入相关性思路正确 |
+| FreeNoise | ICLR 2024 | Noise rescheduling 保长距离时序一致性 | 佐证噪声时序结构有效 |
+
+**关键洞察** (来自 SSNI): SSNI 用 `‖∇ log p(x)‖`（score norm）衡量每个样本离干净分布的偏离度，据此自适应调整注入量。我们类比：用 `η_temporal_std` 衡量 SVD 时序信号的强度/偏离度，据此自适应调整 alpha。
+
+### 8.2 SGA 算法
+
+```python
+# 核心公式
+actual_std = eta_temporal.std()                    # 当前样本的 η_temporal 标准差
+raw_alpha = base_alpha × (target_std / actual_std) # 线性反比缩放
+effective_alpha = clamp(raw_alpha, alpha_min, alpha_max)  # 安全区间
+
+# 默认参数
+base_alpha = 0.004      # 原始 baseline alpha
+target_std = 0.30       # 中位数附近 (实测分布: 0.28~0.41)
+alpha_min = 0.001       # 下界: 防止完全不注入
+alpha_max = 0.010       # 上界: 防止 catastrophic failure (α=0.01 S7 已证明危险)
+```
+
+逻辑直觉:
+- η_temporal_std **小** (如 S34=0.28) → 信号温和/低频主导 → alpha **提升** (0.004→0.0043) → 充分利用
+- η_temporal_std **大** (如 S33=0.41) → 信号偏离大/高频强 → alpha **降低** (0.004→0.0029) → 保护性降低
+- η_temporal_std **很大** (异常样本) → alpha 触及下界 0.001 → 几乎不注入，完全保护
+
+### 8.3 与前序方案的对比
+
+| 方案 | 自适应指标 | 失败原因 | SGA 为何不同 |
+|------|------|------|------|
+| QGA (方案 B) | direction quality score | quality 系统性≈0，无法区分 | SGA 用 std，实测差异明确 (0.28~0.41) |
+| 固定 α=0.01 | 无 (all-or-nothing) | S7/S31 catastrophic failure | SGA 对高 std 样本自动降 alpha |
+| renorm | 统一 std=1.0 | 抹杀样本差异 | SGA 利用差异而非消除差异 |
+
+### 8.4 预期效果（按样本推算）
+
+| 样本 | η_temporal std | SGA alpha | vs baseline α=0.004 | 预期影响 |
+|:---:|:---:|:---:|:---:|------|
+| 34 | 0.28 | 0.0043 | +7.5% | 温和提升，充分利用 |
+| 17 | 0.33 | 0.0036 | -10% | 轻微保护 |
+| 7 | 0.37 | 0.0032 | -20% | 显著保护 (防止 catastrophic) |
+| 33 | 0.41 | 0.0029 | -27% | 大幅保护 |
+| 43 | 0.39 | 0.0031 | -23% | 保护 (baseline已很好) |
+
+### 8.5 实现位置
+
+- CLI 参数: `run.py` 的 `--adaptive_alpha`, `--sga_target_std`, `--sga_alpha_min`, `--sga_alpha_max`
+- 配置字段: `src/pipeline.py` 的 `PFlowConfig.adaptive_alpha`, `.sga_target_std`, `.sga_alpha_min`, `.sga_alpha_max`
+- 核心逻辑: `src/pipeline.py` 的 `_get_latents()` 方法，在 alpha blend 前动态计算 effective_alpha
+
+### 8.6 实验命令
+
+```bash
+cd /root/xixihaha/P-Flow
+
+# ── 实验 D1: SGA + v9 caption (target_std=0.30, 默认参数) ──
+python run.py \
+    --data_dir data/videos \
+    --caption_dir data/captions_v9 \
+    --output_dir outputs/sga_v9_ts030 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --noise_prior \
+    --svd_mode v1 \
+    --alpha 0.004 \
+    --adaptive_alpha \
+    --sga_target_std 0.30 \
+    --sga_alpha_min 0.001 \
+    --sga_alpha_max 0.010 \
+    --steps 30 --guidance 5.0 --seed 42
+
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/sga_v9_ts030 \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir evaluation_results/sga_v9_ts030
+
+# ── 实验 D2: SGA + v9 caption (target_std=0.33, 更激进) ──
+python run.py \
+    --data_dir data/videos \
+    --caption_dir data/captions_v9 \
+    --output_dir outputs/sga_v9_ts033 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --noise_prior \
+    --svd_mode v1 \
+    --alpha 0.004 \
+    --adaptive_alpha \
+    --sga_target_std 0.33 \
+    --sga_alpha_min 0.001 \
+    --sga_alpha_max 0.010 \
+    --steps 30 --guidance 5.0 --seed 42
+
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/sga_v9_ts033 \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir evaluation_results/sga_v9_ts033
+
+# ── 实验 D3: SGA + v9 + alpha_max=0.008 (更保守上界) ──
+python run.py \
+    --data_dir data/videos \
+    --caption_dir data/captions_v9 \
+    --output_dir outputs/sga_v9_ts030_max008 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --noise_prior \
+    --svd_mode v1 \
+    --alpha 0.004 \
+    --adaptive_alpha \
+    --sga_target_std 0.30 \
+    --sga_alpha_min 0.001 \
+    --sga_alpha_max 0.008 \
+    --steps 30 --guidance 5.0 --seed 42
+
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/sga_v9_ts030_max008 \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir evaluation_results/sga_v9_ts030_max008
+
+# ── 对照: SGA + 原始 caption (无 v9, 纯看 SGA 效果) ──
+python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/sga_orig_ts030 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --noise_prior \
+    --svd_mode v1 \
+    --alpha 0.004 \
+    --adaptive_alpha \
+    --sga_target_std 0.30 \
+    --sga_alpha_min 0.001 \
+    --sga_alpha_max 0.010 \
+    --steps 30 --guidance 5.0 --seed 42
+
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/sga_orig_ts030 \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir evaluation_results/sga_orig_ts030
+```
+
+### 8.7 预期验证逻辑
+
+**成功判据**:
+1. **不退化**: 整体 CLIP/XCLIP ≥ baseline (0.8964/0.7874)
+2. **无 catastrophic failure**: S7/S31/S33 的 XCLIP 不出现 >10% 跌幅
+3. **正向收益**: 特别关注之前 α=0.01 受益的样本 (S17/S32/S33/S34/S43) 是否依然受益
+
+**论文叙事**: "Sample-Adaptive Noise Prior Injection" — 通过信号强度自适应调节注入量，同时避免 catastrophic failure 和实现 per-sample 最优注入。理论支撑: SSNI (ICML 2025) 的 score-aware 框架 + MuLAN (NeurIPS 2024) 对均匀策略次优性的证明。
+
+---
+
+## 九、实验路径规划（更新后）
 
 ```
 当前状态
@@ -408,10 +691,13 @@ python evaluation/run_clip_xclip_eval.py \
 │   ├── [已否决] rescale 模式 → 等价于调 alpha，无独立价值
 │   ├── [已失败] Quality-Gated Alpha → quality scores 系统性接近 0，无法区分样本
 │   ├── [已失败] α=0.01 → 后 9 样本正向 (+1.2%)，但 S7/S31 catastrophic failure
-│   ├── [★当前] 方向 C: 频域噪声重塑 (代码就绪，待验证)
-│   │     - 核心突破: 不注入 η_temporal 内容，只传递时间频谱形状
-│   │     - 预期解决 one-shot blend 的毒性问题
-│   └── [后续] β 参数消融 + v9 caption 联合实验
+│   ├── [已失败] 方向 C 独立频域重塑 β=1.0 → CLIP -6.97%, XCLIP -15.03%
+│   ├── [已失败] 方向 C 叠加模式 (freq_reshape+α=0.004) → CLIP -6.47%, XCLIP -13.20%
+│   │     结论: 频域形状信息太弱且有害，方向 C 完全失败
+│   ├── [★当前] 方向 D: SGA (Std-Gated Adaptive Alpha) — 已实现，待跑实验
+│   │     理论: SSNI (ICML 2025) score-aware + MuLAN (NeurIPS 2024) 自适应噪声
+│   │     核心: effective_alpha = base_alpha × (target_std / η_temporal_std)
+│   └── [后续] SGA 参数消融 (target_std, alpha_max)
 │
 ├── L1 Prompt Rewrite
 │   ├── [已完成] v8-minimal → 失败 (CLIP 0.8915 < baseline 0.8964)
@@ -426,14 +712,15 @@ python evaluation/run_clip_xclip_eval.py \
 
 | 序号 | 实验 | 预期收益 | 成本 | 状态 |
 |:---:|------|:---:|:---:|------|
-| 1 | **频域重塑 β=1.0** | 安全性提升 + XCLIP 正向 | 低 (代码已就绪) | **★ 待跑** |
-| 2 | 频域重塑 β=0.5 | 对比不同重塑强度 | 低 | 等 β=1.0 结果 |
-| 3 | v9 + freq_reshape 联合 | CLIP+XCLIP 双提升 | 低 | 等频域结果 |
-| 4 | 扩大样本量验证 | 统计显著性 | 高 | 论文投稿前 |
+| 1 | **SGA + 原始 caption (target_std=0.30)** | 验证 SGA 单独效果 | 低 | **★ 首先跑** |
+| 2 | **SGA + v9 caption (target_std=0.30)** | L1+L2 自适应叠加 | 低 | **★ 紧跟** |
+| 3 | SGA + v9 (target_std=0.33) | 激进 target_std 消融 | 低 | 等 D1/D2 结果 |
+| 4 | SGA + v9 (alpha_max=0.008) | 更保守上界消融 | 低 | 等 D1/D2 结果 |
+| 5 | 扩大样本量验证 | 统计显著性 | 高 | 论文投稿前 |
 
 ---
 
-## 九、关键数据存档
+## 十、关键数据存档
 
 ### 生成日志位置 (服务器)
 
@@ -445,6 +732,7 @@ python evaluation/run_clip_xclip_eval.py \
 - Renorm 评测: `/root/xixihaha/P-Flow/evaluation_results/svd_v2_renorm_alpha001/`
 - v9 评测: `/root/xixihaha/P-Flow/evaluation_results/v9_svd_v1/`
 - α=0.01 评测: `/root/xixihaha/P-Flow/evaluation_results/svd_v1_alpha010/`
+- 叠加模式: `/root/xixihaha/P-Flow/outputs/freq_reshape_blend_b1_a004/` (评测: `evaluation_results/freq_reshape_blend_b1_a004/`)
 
 ### 全实验对比汇总
 
@@ -455,7 +743,8 @@ python evaluation/run_clip_xclip_eval.py \
 | v9 Prompt (LLM删减+VLM补充 + v1) | 0.8947 | **0.7973** | CLIP -0.2%, XCLIP +1.3% ✅ |
 | SVD v1, α=0.01 | 0.8903 | 0.7685 | CLIP -0.7%, XCLIP -2.4% ❌ |
 | SVD v1, α=0.01 (后9, 去S7) | 0.8947 | 0.7966 | CLIP -0.2%, XCLIP +1.2% ✅ |
-| 频域重塑 β=1.0 (待验证) | ? | ? | 预期安全性↑ + XCLIP正向 |
+| 独立频域重塑 β=1.0 (无 blend) | 0.8339 | 0.6690 | CLIP **-6.97%**, XCLIP **-15.03%** ❌ |
+| 叠加模式 β=1.0 (freq_reshape+α=0.004) | 0.8384 | 0.6835 | CLIP **-6.47%**, XCLIP **-13.20%** ❌ |
 
 ### 冲突诊断汇总
 
