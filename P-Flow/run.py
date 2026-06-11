@@ -137,6 +137,16 @@ def parse_args():
                    choices=["mean_pool", "last_token", "weighted"],
                    help="prompt embedding → latent 的投影方式 (mean_pool/last_token/weighted)")
 
+    # ── 方向 F: Channel-Energy Gated Injection (CEGI) ──
+    p.add_argument("--cegi", action="store_true",
+                   help="启用 CEGI: 只在 temporal energy 最高的 top-k channel 集中注入 prior")
+    p.add_argument("--cegi_top_k", type=int, default=4,
+                   help="注入的 channel 数量 (默认 4/16=25%%; 推荐搜索 2~8)")
+    p.add_argument("--cegi_alpha", type=float, default=0.02,
+                   help="选中 channel 的注入强度 (默认 0.02, 是 baseline 的 5x; 推荐搜索 0.01~0.05)")
+    p.add_argument("--cegi_residual_alpha", type=float, default=0.0,
+                   help="未选中 channel 的注入强度 (默认 0=纯随机; 可设 0.002 保留微弱 prior)")
+
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
                    help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
@@ -224,6 +234,11 @@ def build_config(args) -> PFlowConfig:
         podi_alpha=args.podi_alpha,
         podi_min_alignment=args.podi_min_alignment,
         podi_proj_mode=args.podi_proj_mode,
+        # 方向 F: CEGI
+        cegi=args.cegi,
+        cegi_top_k=args.cegi_top_k,
+        cegi_alpha=args.cegi_alpha,
+        cegi_residual_alpha=args.cegi_residual_alpha,
     )
 
 

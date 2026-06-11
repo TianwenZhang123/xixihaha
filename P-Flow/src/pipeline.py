@@ -118,6 +118,12 @@ class PFlowConfig:
                                        #   last_token: 取最后一个非 padding token
                                        #   weighted: attention-weighted pooling
 
+    # ── 方向 F: Channel-Energy Gated Injection (CEGI) ──
+    cegi: bool = False                  # 是否启用 CEGI (通道能量门控注入)
+    cegi_top_k: int = 4                # 注入的 channel 数 (top-k temporal energy channels)
+    cegi_alpha: float = 0.02           # 被选中 channel 的注入强度 (集中注入, 比 baseline 大)
+    cegi_residual_alpha: float = 0.0   # 未选中 channel 的注入强度 (0=纯随机, >0 保留微弱 prior)
+
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
 
@@ -140,7 +146,9 @@ class PFlowConfig:
         if self.use_svd:
             flags.append("svd")
         if self.use_blend:
-            if self.podi:
+            if self.cegi:
+                flags.append(f"blend(CEGI: top_k={self.cegi_top_k}, α_inject={self.cegi_alpha}, α_residual={self.cegi_residual_alpha})")
+            elif self.podi:
                 flags.append(f"blend(PODI: α={self.podi_alpha}, min_align={self.podi_min_alignment})")
             elif self.adaptive_alpha:
                 flags.append(f"blend(SGA: base={self.alpha}, target_std={self.sga_target_std})")
@@ -542,6 +550,13 @@ class PFlowPipeline:
         #     eta = self._freq_reshape_noise(eta_temporal, eta_random)
         #     return eta
 
+        # ── 方向 F: Channel-Energy Gated Injection (CEGI) ──
+        # 核心思想: 不同 channel 的时序能量不同，只在时序能量高的 channel 集中注入 temporal prior
+        # 优势: 信号集中 → 有效 direction_shift 大幅提升; 未选中 channel 保持随机 → 安全缓冲
+        if self.config.cegi:
+            eta = self._cegi_blend(eta_temporal, eta_random)
+            return eta
+
         # ── 方向 E: Prompt-Orthogonal Decomposition Injection (PODI) ──
         # 核心思想: η_temporal 中包含与 prompt 对齐的分量 (有益) 和正交分量 (可能有害)
         # 只注入对齐分量，过滤掉正交/冲突的成分 → 安全提升 alpha
@@ -775,6 +790,129 @@ class PFlowPipeline:
         )
 
         return eta_out
+
+    def _cegi_blend(
+        self,
+        eta_temporal: torch.Tensor,
+        eta_random: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        方向 F 核心实现: Channel-Energy Gated Injection (CEGI).
+
+        核心思想:
+            η_temporal 的 16 个 channel 时序能量(temporal variance)差异显著。
+            时序能量高的 channel 集中了运动信息，能量低的 channel 主要是空间纹理/噪声。
+            CEGI 只在 top-k 高时序能量 channel 集中注入 temporal prior (用更大的 α),
+            其余 channel 保持纯随机 (或极小 α)。
+
+        优势:
+            - 信号集中: 不在全 16 channel 稀释 α=0.004，而是在 4 channel 上用 α=0.02
+              → 有效 direction_shift 提升 ~5x
+            - 数据驱动: 不依赖任何外部映射 (vs PODI 的 prompt→channel)
+            - 安全缓冲: 12 个未注入 channel 保持随机，给模型留足空间
+            - 实现简洁: per-channel 条件 blend
+
+        参数:
+            eta_temporal: SVD 滤波后的时序噪声 (B, C, F, H, W)
+            eta_random: 标准高斯随机噪声 (B, C, F, H, W)
+
+        Returns:
+            eta: 混合后的噪声 (B, C, F, H, W)
+        """
+        cfg = self.config
+        B, C, F, H, W = eta_temporal.shape
+
+        # ── Step 1: 计算每个 channel 的时序能量 ──
+        # temporal_var[c] = Var(η_temporal[:, c, :, :, :], dim=frame).mean()
+        # 即: 在 frame 维度上的方差，再空间平均
+        eta_f32 = eta_temporal.float()
+
+        # (B, C, F, H, W) → 在 F 维度上算方差 → (B, C, H, W) → 空间平均 → (B, C)
+        temporal_var = eta_f32.var(dim=2).mean(dim=(0, 2, 3))  # (C,)
+
+        # ── Step 2: 排序选择 top-k channels ──
+        top_k = min(cfg.cegi_top_k, C)
+        sorted_indices = torch.argsort(temporal_var, descending=True)
+        selected = sorted_indices[:top_k]
+        not_selected = sorted_indices[top_k:]
+
+        # 诊断日志
+        logger.info(
+            f"  [CEGI] Channel temporal variance (sorted desc): "
+            f"{temporal_var[sorted_indices].tolist()[:8]}"
+        )
+        logger.info(
+            f"  [CEGI] Selected top-{top_k} channels: {selected.tolist()}, "
+            f"var range: [{temporal_var[selected[-1]]:.4f}, {temporal_var[selected[0]]:.4f}]"
+        )
+        logger.info(
+            f"  [CEGI] Not selected channels var range: "
+            f"[{temporal_var[not_selected[-1]]:.4f}, {temporal_var[not_selected[0]]:.4f}]"
+            if len(not_selected) > 0 else "  [CEGI] All channels selected"
+        )
+
+        # ── Step 3: 选择性注入 ──
+        eta = eta_random.clone()
+
+        alpha_inject = cfg.cegi_alpha
+        alpha_residual = cfg.cegi_residual_alpha
+
+        sqrt_a_inject = (alpha_inject ** 0.5)
+        sqrt_1ma_inject = ((1.0 - alpha_inject) ** 0.5)
+        sqrt_a_residual = (alpha_residual ** 0.5)
+        sqrt_1ma_residual = ((1.0 - alpha_residual) ** 0.5)
+
+        # 注入选中的 channel
+        for c in selected:
+            c_idx = c.item()
+            eta[:, c_idx, :, :, :] = (
+                sqrt_a_inject * eta_temporal[:, c_idx, :, :, :]
+                + sqrt_1ma_inject * eta_random[:, c_idx, :, :, :]
+            )
+
+        # 未选中的 channel: 保持随机或微弱注入
+        if alpha_residual > 0:
+            for c in not_selected:
+                c_idx = c.item()
+                eta[:, c_idx, :, :, :] = (
+                    sqrt_a_residual * eta_temporal[:, c_idx, :, :, :]
+                    + sqrt_1ma_residual * eta_random[:, c_idx, :, :, :]
+                )
+        # else: 未选中 channel 已经是 eta_random (clone 时保留)
+
+        # ── Step 4: Per-channel renorm (保证每个 channel 是 N(0,1)) ──
+        for c_idx in range(C):
+            ch = eta[:, c_idx, :, :, :]
+            ch_mean = ch.mean()
+            ch_std = ch.std()
+            if ch_std > 1e-8:
+                eta[:, c_idx, :, :, :] = (ch - ch_mean) / ch_std
+
+        # ── 诊断: 整体统计 ──
+        direction_shift = (eta - eta_random).norm().item() / eta_random.norm().item()
+        cos_m_r = torch.nn.functional.cosine_similarity(
+            eta.flatten().unsqueeze(0),
+            eta_random.flatten().unsqueeze(0)
+        ).item()
+        cos_m_t = torch.nn.functional.cosine_similarity(
+            eta.flatten().unsqueeze(0),
+            eta_temporal.flatten().unsqueeze(0)
+        ).item()
+
+        logger.info(
+            f"  [CEGI Blend] α_inject={alpha_inject:.4f} (top-{top_k}), "
+            f"α_residual={alpha_residual:.4f} (rest-{C - top_k})"
+        )
+        logger.info(
+            f"  [CEGI Blend Diag] direction_shift={direction_shift:.6f}, "
+            f"cos(mixed, random)={cos_m_r:.4f}, "
+            f"cos(mixed, temporal)={cos_m_t:.4f}"
+        )
+        logger.info(
+            f"  [CEGI Blend] η_out: mean={eta.mean():.4f}, std={eta.std():.4f}"
+        )
+
+        return eta
 
     def _podi_decompose(
         self,

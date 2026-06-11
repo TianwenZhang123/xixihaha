@@ -1,8 +1,8 @@
 # SVD V2 实验分析 & 改进记录
 
 > 创建时间: 2025-06-10  
-> 最后更新: 2025-07-11  
-> 状态: renorm 失败 → rescale 否决 → QGA 失败 → α=0.01 确认天花板 → 方向 C 频域重塑 **完全失败** → **方向 D: Std-Gated Adaptive Alpha (SGA) — 已实现，待验证**  
+> 最后更新: 2026-06-11  
+> 状态: renorm 失败 → rescale 否决 → QGA 失败 → α=0.01 确认天花板 → 方向 C 频域重塑 **完全失败** → 方向 D: SGA **效果边际，pass** → 方向 E: PODI **失败 (CLIP -2.5%, XCLIP -5.2%)** → **下一步: 方案 F~I 待选**  
 > 目标: 确定 L2 SVD 最优策略 + L1 prompt rewrite 验证
 
 ---
@@ -680,9 +680,171 @@ python evaluation/run_clip_xclip_eval.py \
 
 **论文叙事**: "Sample-Adaptive Noise Prior Injection" — 通过信号强度自适应调节注入量，同时避免 catastrophic failure 和实现 per-sample 最优注入。理论支撑: SSNI (ICML 2025) 的 score-aware 框架 + MuLAN (NeurIPS 2024) 对均匀策略次优性的证明。
 
+### 8.8 SGA 实验结果（❌ 效果边际，pass）
+
+> 实验配置: SGA + 原始 caption, target_std=0.30, alpha_min=0.001, alpha_max=0.010  
+> 命令: `--noise_prior --svd_mode v1 --alpha 0.004 --adaptive_alpha --sga_target_std 0.30`  
+> 数据来源: 服务器评测结果
+
+**总体指标:**
+
+| 配置 | CLIP (orig-gen) | XCLIP (orig-gen) | vs Baseline |
+|------|:---:|:---:|:---:|
+| Pure L2 Baseline (v1, α=0.004) | **0.8964** | 0.7874 | — |
+| SGA (target_std=0.30, 原始 caption) | 0.8834 | 0.7899 | CLIP **-1.4%** ❌, XCLIP +0.3% |
+
+**结论: SGA 整体效果边际，XCLIP 仅提升 0.3%（统计不显著），但 CLIP 下降了 1.4%，权衡后收益不足以 justify 额外复杂度。**
+
+### 8.9 SGA 失败原因分析
+
+SGA 的核心假设是"η_temporal_std 大的样本需要降低 alpha 以保护"。但实验暴露了根本问题：
+
+1. **样本间 std 差异太小 (0.28~0.41)**：SGA 对 alpha 的调节范围实际只有 0.0029~0.0043，与 baseline 固定 0.004 差距极小，无法产生有意义的效果差异。这种级别的微调被生成模型的内在随机性淹没。
+
+2. **CLIP 下降的根因**：SGA 对高 std 样本（S33, S43 等 baseline 已经很好的样本）系统性降低了 alpha，相当于削弱了原本有效的 temporal prior 注入，导致 CLIP 退化。
+
+3. **与 α=0.01 实验的矛盾**：α=0.01 实验表明，对大部分样本来说提高 alpha 是正向的（8/10 样本受益），SGA 却系统性地降低了这些样本的 alpha，方向可能反了。
+
+**核心教训**: 在 one-shot linear blend 框架下，α=0.004 附近的微调无法突破天花板。需要范式级的改变——不是"注入多少"的问题，而是"注入什么"的问题。这为方向 E (PODI) 提供了动机：与其调注入量，不如改善注入内容的质量（只注入与 prompt 语义对齐的部分）。
+
 ---
 
-## 九、实验路径规划（更新后）
+## 九、方向 E: Prompt-Orthogonal Decomposition Injection (PODI)
+
+### 9.1 动机
+
+SGA (方向 D) 证明了"调注入量"路线的天花板：在 α∈[0.001, 0.01] 范围内微调无法突破 baseline。回顾之前所有失败的方向，核心问题始终是：η_temporal 中混杂了与 prompt 语义无关甚至矛盾的成分，直接注入会引入"噪声污染"。
+
+PODI 的思路是：**不调量，改质**——将 η_temporal 分解为"与 prompt 语义对齐"和"与 prompt 正交"两个分量，只注入对齐的部分。
+
+### 9.2 论文支撑
+
+| 论文 | 会议 | 核心思想 | 与 PODI 的关系 |
+|------|:---:|------|------|
+| Golden Noise | ICCV 2025 | 优化初始噪声使其对齐 text embedding | **直接灵感**: 对齐方向的噪声对生成有益 |
+| InitNO | CVPR 2024 | 梯度优化初始噪声对齐 prompt | 验证"对齐"方向的价值 |
+| ODC (Optimal Denoising Control) | — | 最优去噪方向应与条件对齐 | 理论支撑: 正交分量对生成无用 |
+| Not All Noises Are Created Equally | NeurIPS 2024 | 分析噪声不同分量对生成的差异化影响 | 支持"分解+选择性注入" |
+| Noise PPO | — | 用 RL 优化噪声分布 | 另一种噪声质量改善路线 |
+
+### 9.3 算法
+
+```
+输入: η_temporal (SVD 滤波后), η_random (标准高斯), prompt_embeds (text encoder 输出)
+参数: podi_alpha (注入强度, 默认 0.004 与 baseline 一致), podi_min_alignment (最低对齐阈值)
+
+1. 将 prompt_embeds 映射到 latent channel 空间:
+   - prompt_embeds: [seq_len, hidden_dim] → mean pool → [hidden_dim]
+   - 通过 chunked average pooling 压缩到 [C] (C=latent channels, 通常 16)
+   - 得到 prompt_dir (归一化到单位向量)
+
+2. 对 η_temporal 做 channel 维度的正交分解:
+   - η_temporal: [F, C, H, W] → 在 channel 维 (dim=1) 上投影
+   - parallel = (η_temporal · prompt_dir) × prompt_dir  (沿 prompt 方向的分量)
+   - orthogonal = η_temporal - parallel                  (与 prompt 正交的分量)
+
+3. 计算对齐度:
+   - alignment = |cos(η_temporal_mean_channel, prompt_dir)|
+   - 若 alignment < podi_min_alignment: 说明 η_temporal 与 prompt 几乎无关，
+     fallback 到普通 alpha blend (退化为 baseline)
+
+4. 只注入 parallel 分量:
+   - parallel_renorm = parallel × (1 / parallel.std())  (renorm to N(0,1))
+   - η = √(podi_alpha) × parallel_renorm + √(1-podi_alpha) × η_random
+
+输出: η — 只携带了与 prompt 语义对齐的时序信息
+```
+
+### 9.4 关键设计选择
+
+**为什么 podi_alpha 默认 0.004 (与 baseline 一致)**:
+- 公平对比的前提是控制变量——注入总量 (α) 相同，唯一区别是注入内容的"质量"
+- Baseline: 注入完整 η_temporal (含对齐+正交部分)
+- PODI: 只注入对齐部分 (parallel_renorm)，期望同等注入量下生成质量更高
+- 如果 PODI 有效，后续可以尝试更大的 podi_alpha (因为对齐内容更安全)
+
+**对齐度门控 (alignment gating)**:
+- 对于随机 η_temporal，理论对齐度 ≈ 1/√C = 1/√16 ≈ 0.25
+- podi_min_alignment 默认 0.01，极低阈值，仅过滤完全无对齐的极端情况
+- alignment 不参与 alpha 缩放（SGA 的教训：微调注入量无效），只做 accept/reject gate
+
+### 9.5 实现位置
+
+- 配置字段: `PFlowConfig.podi`, `.podi_alpha`, `.podi_min_alignment`, `.podi_proj_mode`
+- CLI 参数: `--podi`, `--podi_alpha` (默认 0.004), `--podi_min_alignment`, `--podi_proj_mode`
+- 核心方法: `PFlowPipeline._podi_decompose()` — 正交分解 + 对齐计算
+- 路径分支: `_get_latents()` 中 PODI 路径 (早期 return，不影响其他路径)
+
+### 9.6 实验命令
+
+```bash
+cd /root/xixihaha/P-Flow
+
+# ── PODI α=0.004 (与 baseline 公平对比) ──
+python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/podi_alpha004 \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --noise_prior \
+    --svd_mode v1 \
+    --podi --podi_alpha 0.004 \
+    --steps 30 --guidance 5.0 --seed 42
+
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/podi_alpha004 \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir evaluation_results/podi_alpha004
+```
+
+### 9.7 PODI 实验结果（❌ 失败）
+
+> 实验配置: PODI α=0.004, 原始 caption  
+> 命令: `--noise_prior --svd_mode v1 --podi --podi_alpha 0.004`  
+> 数据来源: 服务器评测结果
+
+**总体指标:**
+
+| 配置 | CLIP (orig-gen) | XCLIP (orig-gen) | vs Baseline |
+|------|:---:|:---:|:---:|
+| Pure L2 Baseline (v1, α=0.004) | **0.8964** | **0.7874** | — |
+| PODI (α=0.004, 原始 caption) | 0.8739 | 0.7464 | CLIP **-2.5%** ❌, XCLIP **-5.2%** ❌ |
+
+**逐 Case 对比:**
+
+| 样本 | 场景 | alignment | parallel_std | CLIP | XCLIP | Δ CLIP | Δ XCLIP |
+|:---:|------|:---:|:---:|:---:|:---:|:---:|:---:|
+| 7 | 杯中帆船 | 0.1943 | 0.0703 | 0.9147 | 0.6717 | -1.7% | -3.8% |
+| 17 | SUV越野 | 0.3548 | 0.1116 | 0.8803 | 0.7769 | -3.2% | -7.2% ❌ |
+| 21 | 丛林纸飞机 | 0.2293 | 0.0759 | 0.8896 | 0.7485 | -0.4% | -2.0% |
+| 31 | 水下城市 | 0.2547 | 0.0835 | 0.8406 | 0.5932 | +1.0% | +13.3% ✅ |
+| 32 | 雪地金毛 | 0.2100 | 0.0743 | 0.9065 | 0.8099 | -1.1% | -1.5% |
+| 33 | 跑步者 | 0.2139 | 0.0826 | 0.8399 | 0.8165 | -1.5% | -5.3% |
+| 34 | 四只小狗 | 0.2070 | 0.0580 | 0.8892 | 0.8187 | -0.8% | -6.0% ❌ |
+| 43 | 花园猫咪 | 0.2297 | 0.0862 | 0.9413 | 0.8860 | -1.3% | -2.3% |
+| 46 | 火山喷发 | 0.2061 | 0.0739 | 0.8775 | 0.7476 | -2.7% | -5.0% |
+| 47 | 动画狗城市 | 0.2250 | 0.0831 | 0.7591 | 0.5952 | **-13.4%** ❌ | **-25.8%** ❌❌ |
+
+胜负统计: PODI 赢 1/10 (S31 XCLIP +13.3%)，输 8/10，平 1/10
+
+### 9.8 PODI 失败原因分析
+
+1. **对齐度系统性极低** (alignment ≈ 0.19~0.35)：理论随机对齐度 = 1/√16 ≈ 0.25，实测未超过这个水平。说明 text embedding → latent channel 之间**不存在有意义的语义映射关系**，PODI 的核心假设不成立。
+
+2. **parallel 分量能量极低** (parallel_std ≈ 0.06~0.11)：η_temporal 被分解后，"对齐"分量只保留了原始信号的 7%~11% 标准差。renorm 后方向信息严重扭曲，本质上注入的是近随机方向噪声。
+
+3. **最终信号不可见** (cos(mixed, random) ≈ 1.0000)：α=0.004 本身 direction_shift ≈ 0.025 已很弱，PODI 再削去 80%~90% 后剩余信号几乎为零，在最终噪声中完全不可感知。
+
+4. **核心矛盾**: PODI 假设 prompt embedding 的 chunked pooling → 16 维 channel 空间存在语义结构。但 4096→16 的粗糙映射无法保留任何语义信息。
+
+**结论: PODI 路线失败。"改质"思路的正确方向不应依赖外部语义映射（prompt→channel），而应利用数据本身的结构特征（如 channel temporal variance、空间多尺度等）。**
+
+**详细调研与后续方案见**: `docs/论文调研_L2噪声先验改进方向.md`
+
+---
+
+## 十、实验路径规划（更新后）
 
 ```
 当前状态
@@ -694,10 +856,16 @@ python evaluation/run_clip_xclip_eval.py \
 │   ├── [已失败] 方向 C 独立频域重塑 β=1.0 → CLIP -6.97%, XCLIP -15.03%
 │   ├── [已失败] 方向 C 叠加模式 (freq_reshape+α=0.004) → CLIP -6.47%, XCLIP -13.20%
 │   │     结论: 频域形状信息太弱且有害，方向 C 完全失败
-│   ├── [★当前] 方向 D: SGA (Std-Gated Adaptive Alpha) — 已实现，待跑实验
-│   │     理论: SSNI (ICML 2025) score-aware + MuLAN (NeurIPS 2024) 自适应噪声
-│   │     核心: effective_alpha = base_alpha × (target_std / η_temporal_std)
-│   └── [后续] SGA 参数消融 (target_std, alpha_max)
+│   ├── [已失败] 方向 D: SGA → CLIP -1.4%, XCLIP +0.3% (边际，pass)
+│   │     结论: "调量"路线天花板已到，需转向"改质"
+│   ├── [已失败] 方向 E: PODI → CLIP -2.5%, XCLIP -5.2%
+│   │     结论: prompt→channel 语义映射不存在，"改质"需换数据驱动思路
+│   ├── [★当前] 方案 F~I 待选 (见 docs/论文调研_L2噪声先验改进方向.md)
+│   │     F: TPI (时间相位注入)
+│   │     G: MSTDI (多尺度分层注入) 
+│   │     H: CEGI (通道能量门控注入) ← 推荐最优先
+│   │     I: OCS (正交补抑制)
+│   └── [后续] 选定方案的 α 消融 + 200 样本验证
 │
 ├── L1 Prompt Rewrite
 │   ├── [已完成] v8-minimal → 失败 (CLIP 0.8915 < baseline 0.8964)
@@ -712,15 +880,15 @@ python evaluation/run_clip_xclip_eval.py \
 
 | 序号 | 实验 | 预期收益 | 成本 | 状态 |
 |:---:|------|:---:|:---:|------|
-| 1 | **SGA + 原始 caption (target_std=0.30)** | 验证 SGA 单独效果 | 低 | **★ 首先跑** |
-| 2 | **SGA + v9 caption (target_std=0.30)** | L1+L2 自适应叠加 | 低 | **★ 紧跟** |
-| 3 | SGA + v9 (target_std=0.33) | 激进 target_std 消融 | 低 | 等 D1/D2 结果 |
-| 4 | SGA + v9 (alpha_max=0.008) | 更保守上界消融 | 低 | 等 D1/D2 结果 |
+| 1 | **H: CEGI (通道能量门控注入)** | top-k channel 集中注入，信号强度 ×5~20 | 低 | **★ 下一步** |
+| 2 | G: MSTDI (多尺度分层注入) | 低频 α=0.05，利用杠杆效应 | 中 | 备选 |
+| 3 | F: TPI (时间相位注入) | 频域相位携带结构信息 | 中 | 备选 |
+| 4 | CEGI/MSTDI + v9 caption | L1+L2 叠加 | 低 | 等 H/G 结果 |
 | 5 | 扩大样本量验证 | 统计显著性 | 高 | 论文投稿前 |
 
 ---
 
-## 十、关键数据存档
+## 十一、关键数据存档
 
 ### 生成日志位置 (服务器)
 
@@ -733,6 +901,8 @@ python evaluation/run_clip_xclip_eval.py \
 - v9 评测: `/root/xixihaha/P-Flow/evaluation_results/v9_svd_v1/`
 - α=0.01 评测: `/root/xixihaha/P-Flow/evaluation_results/svd_v1_alpha010/`
 - 叠加模式: `/root/xixihaha/P-Flow/outputs/freq_reshape_blend_b1_a004/` (评测: `evaluation_results/freq_reshape_blend_b1_a004/`)
+- SGA: `/root/xixihaha/P-Flow/outputs/sga_orig_ts030/` (评测: `evaluation_results/sga_orig_ts030/`)
+- PODI: `/root/xixihaha/P-Flow/outputs/podi_alpha004/` (评测: `evaluation_results/podi_alpha004/`) [已完成, 失败]
 
 ### 全实验对比汇总
 
@@ -745,6 +915,8 @@ python evaluation/run_clip_xclip_eval.py \
 | SVD v1, α=0.01 (后9, 去S7) | 0.8947 | 0.7966 | CLIP -0.2%, XCLIP +1.2% ✅ |
 | 独立频域重塑 β=1.0 (无 blend) | 0.8339 | 0.6690 | CLIP **-6.97%**, XCLIP **-15.03%** ❌ |
 | 叠加模式 β=1.0 (freq_reshape+α=0.004) | 0.8384 | 0.6835 | CLIP **-6.47%**, XCLIP **-13.20%** ❌ |
+| SGA (target_std=0.30, 原始 caption) | 0.8834 | 0.7899 | CLIP -1.4%, XCLIP +0.3% ❌ (边际) |
+| PODI (α=0.004, 原始 caption) | 0.8739 | 0.7464 | CLIP **-2.5%**, XCLIP **-5.2%** ❌ |
 
 ### 冲突诊断汇总
 
