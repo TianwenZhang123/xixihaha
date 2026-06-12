@@ -367,6 +367,11 @@ class PFlowPipeline:
             #   - mean_cos 高 (>0.1): 参考视频有一致的运动方向 → 适合锚定
             #   - mean_cos 低/负: 参考视频运动混乱/无规律 → 不适合锚定
             # 注: 旧方案用相邻 ODE 轨迹点 cos，因 dt=1/50 太小导致永远≈1.0，已废弃
+            #
+            # 门控拒绝策略 (V3):
+            #   拒绝后完全回退到 baseline（纯随机噪声生成），等价于从未做过 inversion。
+            #   关键: 重置 generator seed，使生成阶段的随机状态与 baseline 完全一致。
+            #   时间开销: 只多花 inversion 的时间（~1.5min），生成阶段不重复。
             if cfg.anchor_quality_gate and eta_temporal is not None:
                 eta_gate = eta_temporal
                 if eta_gate.dim() == 5:
@@ -401,11 +406,22 @@ class PFlowPipeline:
                         logger.warning(
                             f"  [Trajectory Anchor] ⚠️ η_temporal 帧间一致性过低 "
                             f"(mean_cos={mean_frame_cos:.4f} < {cfg.anchor_quality_threshold})，"
-                            f"参考视频运动混乱，跳过轨迹锚定，退化为标准生成"
+                            f"参考视频运动混乱，跳过轨迹锚定，完全回退到 baseline"
                         )
                         ref_trajectory = None
-                        # 同时丢弃 η_temporal，确保完全回归 baseline（纯随机噪声）
+                        # 丢弃所有 inversion 产物，确保不使用有毒噪声
                         eta_temporal = None
+                        # ★ 关键: 重置 generator 到原始 seed
+                        # inversion 阶段消耗了 generator 的随机状态，
+                        # 如果不重置，后续 diffusers 内部采样的"随机"噪声
+                        # 与真正的 baseline (从未做过 inversion) 不同。
+                        # 重置后，生成阶段的 z_T 与纯 baseline 完全一致。
+                        generator = torch.Generator(device=self.device).manual_seed(seed)
+                        torch.manual_seed(seed)
+                        logger.info(
+                            f"  [Trajectory Anchor] Generator 已重置 (seed={seed})，"
+                            f"生成将使用与 baseline 完全相同的纯随机噪声"
+                        )
                 else:
                     logger.warning(
                         f"  [Trajectory Anchor] η_temporal 帧数不足 ({num_frames_gate})，跳过门控检查"
