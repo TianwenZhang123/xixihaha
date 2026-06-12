@@ -190,8 +190,8 @@ def parse_args():
     p.add_argument("--anchor_quality_threshold", type=float, default=0.05,
                    help="η_temporal 帧间 cos 阈值: mean_cos < 此值则跳过 anchor (默认 0.05; S7=0.19通过, S21=-0.14拒绝)")
     p.add_argument("--anchor_cos_threshold", type=float, default=0.2,
-                   help="自适应 anchor cos 阈值: 每步 cos(gen,ref) < 此值时跳过锚定 "
-                        "(解决 L2+L3 融合时 z_T 与 ref 起点不对齐问题; 纯 L3 不受影响)")
+                   help=">0 时启用 cos-proportional β 模式: effective_β = β_t × cos(gen,ref), "
+                        "力度正比于对齐度 (L2+L3 融合方案2; 纯 L3 不受影响; 设 0 禁用)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
