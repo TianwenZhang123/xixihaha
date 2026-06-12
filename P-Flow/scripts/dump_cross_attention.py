@@ -370,7 +370,7 @@ def analyze_results(record_store: dict, text_seq_len: int, output_dir: Path):
     # 建议的 position weights (基于真实数据)
     suggested_weights = (1.0 / (relative_weights + 0.1)).tolist()
     # 截断显示前20和后5
-    analysis["suggested_position_weights_for_velocity_matching"] = {
+    analysis["suggested_position_weights"] = {
         "first_20": suggested_weights[:20],
         "last_5": suggested_weights[-5:],
         "description": "Inverse of relative attention weight — high-attention positions get low regularization",

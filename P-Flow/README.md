@@ -1,6 +1,6 @@
 # P-Flow: Pipeline as Flags — 渐进式视频复现框架
 
-通过逐层叠加信息（文字 → 噪声 → 嵌入），让 T2V 模型仅凭文字和噪声重新生成与参考视频高度一致的版本。所有改动点以 CLI flag 形式组合，无需维护多个代码分支。
+通过逐层叠加信息（文字 → 噪声 → 轨迹引导），让 T2V 模型仅凭文字和噪声重新生成与参考视频高度一致的版本。所有改动点以 CLI flag 形式组合，无需维护多个代码分支。
 
 ---
 
@@ -10,9 +10,9 @@
 |----|------|---------|-------------|
 | Layer 1 | V4 Hybrid Prompt Rewrite | 语义："什么在动" | LLM 将 VLM 描述改写为指导性 prompt（一次 API 调用，非迭代） |
 | Layer 2 | SVD Noise Prior | 结构："从哪里开始动" | 参考视频 → VAE 编码 → Flow Inversion 反演噪声 → SVD 去内容保运动 → 与随机噪声按 α=0.004 混合 |
-| Layer 3 | Velocity Field Matching | 轨迹："怎么动" | 30 步 Adam 优化 Δe，使模型速度场对齐参考视频理想轨迹，生成时注入 e₀+0.02·Δe |
+| Layer 3 | Trajectory Anchor | 轨迹："怎么动" | 利用 callback 在每步去噪后将 latent 向参考轨迹 soft lerp，引导运动方向 |
 
-三层叠加效果（10 样本验证）：CLIP +3.4%，XCLIP +8.0%（相对 baseline）。
+两层叠加效果（10 样本验证）：CLIP +2.9%，XCLIP +8.1%（相对 baseline，L1+L2）。L3 实验进行中。
 
 ---
 
@@ -32,7 +32,6 @@ P-Flow/
 ├── outputs/                           #    实验输出 (自动创建)
 ├── src/
 │   ├── pipeline.py                    #    统一管线 (PFlowConfig + PFlowPipeline)
-│   ├── velocity_matching.py           #    Velocity Matcher (30步 Δe 优化)
 │   ├── flow_matching.py               #    Flow Matching Inverter
 │   ├── svd_filter.py                  #    SVD 两阶段滤波
 │   ├── vlm_client.py                  #    VLM 客户端
@@ -159,21 +158,21 @@ python run.py \
 
 ---
 
-### Step 3：+Layer 1 + Layer 2 + Layer 3（Velocity Matching）
+### Step 3：+Layer 1 + Layer 2 + Layer 3（Trajectory Anchor）
 
 ```bash
 python run.py \
     --data_dir data/videos \
     --caption_dir data/captions_hybrid \
     --output_dir outputs/step3_L1L2L3 \
-    --velocity_full --alpha 0.004 --embed_strength 0.02 \
-    --velocity_K 4 --velocity_motion_weight 1.0 \
+    --noise_prior --alpha 0.004 \
+    --trajectory_anchor --anchor_beta_max 0.3 --anchor_schedule warmup_decay \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
     --seed 42 --resume
 ```
 
-**执行内容**: 读取 hybrid caption → VAE 编码 z₀ → Flow Inversion 得 η_inv → SVD 得 η_temporal → **额外: 30步 Adam 优化 Δe（每步 K=4 分层时间点采样，运动加权 Loss），使 v_θ(x_t, t, e₀+Δe) ≈ v*（= z₀ - η_inv）** → 噪声混合 → **生成时通过 hook 注入 e_final = e₀ + 0.02·Δe** → 输出
-**预期**: CLIP ≈ 0.8998, XCLIP ≈ 0.7736 (CLIP +3.4%, XCLIP +8.0%)
+**执行内容**: 读取 hybrid caption → VAE 编码 z₀ → Flow Inversion 得 η_inv → SVD 得 η_temporal → 噪声混合 → **额外: 缓存 inversion 轨迹，生成时每步 callback 将 latent 向参考轨迹做 soft lerp（β warmup_decay 调度）** → 输出
+**预期**: 实验进行中
 
 ---
 
@@ -190,7 +189,7 @@ python evaluation/run_clip_xclip_eval.py \
     --output-dir outputs/step2_L1L2/eval_clip
 
 # 批量评测所有 step
-for step_dir in step0_baseline step1_L1 step2_L1L2 step3_L1L2L3; do
+for step_dir in step0_baseline step1_L1 step2_L1L2; do
     [ -d "outputs/$step_dir" ] || continue
     echo "====== $step_dir ======"
     python evaluation/run_clip_xclip_eval.py \
@@ -210,13 +209,13 @@ done
 | 0 | Baseline | 0.8703 | 0.7164 | — |
 | 1 | +L1 | 0.8842 | 0.7430 | +1.6%, +3.7% |
 | 2 | +L1+L2 | **0.8952** | **0.7747** | +2.9%, +8.1% |
-| 3 | +L1+L2+L3 | 0.8998 | 0.7736 | +3.4%, +8.0% |
+| 3 | +L1+L2+L3 (Trajectory Anchor) | TBD | TBD | 实验进行中 |
 
 > Step 2 实测值 (2026-06-05, A800, seed=42, alpha=0.004, 10 samples)。
 
 ---
 
-## 一键全跑（L1+L2+L3 最强配置）
+## 一键全跑（L1+L2 当前最强配置）
 
 如果不需要逐层验证，直接一步到位：
 
@@ -229,13 +228,12 @@ python scripts/rewrite_hybrid.py \
     --sample-ids 7 17 21 31 32 33 34 43 46 47 \
     --skip-existing
 
-# 跑全量 pipeline
+# 跑 L1+L2 pipeline
 python run.py \
     --data_dir data/videos \
     --caption_dir data/captions_hybrid \
-    --output_dir outputs/full_L1L2L3 \
-    --velocity_full --alpha 0.004 --embed_strength 0.02 \
-    --velocity_K 4 --velocity_motion_weight 1.0 \
+    --output_dir outputs/full_L1L2 \
+    --noise_prior --alpha 0.004 \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
     --seed 42 --resume
 ```
@@ -255,19 +253,17 @@ bash scripts/reproduce.sh
 | `--inversion` | Flow Matching Inversion | — |
 | `--svd` | SVD 两阶段滤波 | — |
 | `--blend` | 噪声混合 (α 权重) | — |
-| `--velocity` | Velocity Field Matching (Δe) | — |
 | `--noise_prior` | 噪声先验组合 | = `--inversion --svd --blend` |
-| `--velocity_full` | 全量组合 | = `--inversion --svd --blend --velocity` |
-| `--full` | 全部启用 | = 上述 + `--iter 10 --composite` |
+| `--trajectory_anchor` | 灰盒轨迹锚定 (L3) | — |
+| `--full` | 全部启用 | = `--noise_prior` + `--iter 10 --composite` |
 
 关键参数（最优值 ≠ 默认值，需显式指定）：
 
 | 参数 | 默认值 | 最优值 | 说明 |
 |------|--------|--------|------|
 | `--alpha` | 0.001 | **0.004** | 噪声混合权重 |
-| `--embed_strength` | 0.005 | **0.02** | Δe 注入强度 |
-| `--velocity_K` | 4 | 4 | 分层采样数 |
-| `--velocity_motion_weight` | 1.0 | 1.0 | 运动加权 |
+| `--anchor_beta_max` | 0.3 | 实验中 | 轨迹锚定最大 β |
+| `--anchor_schedule` | cosine_decay | warmup_decay | β 退火调度 |
 
 ---
 
@@ -280,7 +276,7 @@ bash scripts/reproduce.sh
 | 分辨率 | 480×832, 81 frames, 15fps |
 | Baseline 单样本 | ~30s |
 | +Noise Prior | ~80s (2.7×) |
-| +Velocity | ~170s (5.7×) |
+| +Trajectory Anchor | ~100s (3.3×) |
 
 ---
 

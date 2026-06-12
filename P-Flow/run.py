@@ -175,9 +175,9 @@ def parse_args():
     p.add_argument("--ocs_suppress_ratio", type=float, default=0.5,
                    help="正交补抑制比例 (0=不抑制, 1=完全去除; 默认 0.5; 推荐 0.3~0.7)")
 
-    # ── 灰盒: Latent Trajectory Soft Anchor ──
+    # ── 灰盒: Latent Trajectory Soft Anchor (旧方案) ──
     p.add_argument("--trajectory_anchor", action="store_true",
-                   help="启用灰盒轨迹锚定: 生成时每步向参考轨迹 lerp, 引导运动方向")
+                   help="启用旧方案轨迹锚定 (position lerp, 已证明失败, 保留用于对比)")
     p.add_argument("--anchor_beta_max", type=float, default=0.3,
                    help="最大锚定强度 β_max (推荐搜索 0.1~0.5; 0.3 为中等强度)")
     p.add_argument("--anchor_schedule", type=str, default="cosine_decay",
@@ -188,10 +188,32 @@ def parse_args():
     p.add_argument("--no_anchor_quality_gate", action="store_true",
                    help="禁用轨迹质量门控 (默认启用)")
     p.add_argument("--anchor_quality_threshold", type=float, default=0.05,
-                   help="η_temporal 帧间 cos 阈值: mean_cos < 此值则跳过 anchor (默认 0.05; S7=0.19通过, S21=-0.14拒绝)")
+                   help="η_temporal 帧间 cos 阈值: mean_cos < 此值则跳过 anchor (默认 0.05)")
     p.add_argument("--anchor_cos_threshold", type=float, default=0.2,
-                   help=">0 时启用 cos-proportional β 模式: effective_β = β_t × cos(gen,ref), "
-                        "力度正比于对齐度 (L2+L3 融合方案2; 纯 L3 不受影响; 设 0 禁用)")
+                   help=">0 时启用 cos-proportional β 模式 (旧方案2; 设 0 禁用)")
+
+    # ── L3 V2: Velocity Direction Anchor (VDA) ──
+    p.add_argument("--velocity_anchor", action="store_true",
+                   help="启用 VDA (Velocity Direction Anchor): 用参考轨迹速度方向微调去噪过程, 不要求起点对齐")
+    p.add_argument("--vda_gamma", type=float, default=0.03,
+                   help="VDA 方向引导强度 γ (推荐搜索 0.01~0.10; 越大参考速度影响越强)")
+    p.add_argument("--vda_schedule", type=str, default="middle_peak",
+                   choices=["constant", "middle_peak", "warmup_decay", "cosine_decay"],
+                   help="γ 调度策略: middle_peak=中间最强 (推荐), constant=恒定, cosine_decay=前强后弱")
+    p.add_argument("--vda_no_perp_only", action="store_true",
+                   help="禁用'只注入正交分量'模式, 改为混合注入 (正交+微弱平行分量)")
+    p.add_argument("--vda_parallel_weight", type=float, default=0.1,
+                   help="vda_no_perp_only 时平行分量权重 (默认 0.1=微弱; 推荐 0.05~0.2)")
+    p.add_argument("--vda_no_quality_gate", action="store_true",
+                   help="禁用 VDA 质量门控")
+    p.add_argument("--vda_hard_gate", action="store_true",
+                   help="VDA 使用硬门控 (低于阈值完全跳过), 默认为软门控 (sigmoid 缩放)")
+    p.add_argument("--vda_norm_clamp", type=float, default=0.0,
+                   help="每步 Δz 范数上限 = clamp * ‖z‖ (推荐 0.05~0.10; 0=不限制)")
+    p.add_argument("--vda_start_step", type=int, default=1,
+                   help="VDA 起始步 (默认 1=跳过第一步; 0=从第一步开始)")
+    p.add_argument("--vda_end_step", type=int, default=-1,
+                   help="VDA 结束步 (默认 -1=到最后一步)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
@@ -307,6 +329,17 @@ def build_config(args) -> PFlowConfig:
         anchor_quality_gate=not args.no_anchor_quality_gate,
         anchor_quality_threshold=args.anchor_quality_threshold,
         anchor_cos_threshold=args.anchor_cos_threshold,
+        # L3 V2: Velocity Direction Anchor
+        velocity_anchor=args.velocity_anchor,
+        vda_gamma=args.vda_gamma,
+        vda_schedule=args.vda_schedule,
+        vda_use_perp_only=not args.vda_no_perp_only,
+        vda_parallel_weight=args.vda_parallel_weight,
+        vda_quality_gate=not args.vda_no_quality_gate,
+        vda_quality_scale=not args.vda_hard_gate,
+        vda_norm_clamp=args.vda_norm_clamp,
+        vda_start_step=args.vda_start_step,
+        vda_end_step=args.vda_end_step,
     )
 
 

@@ -90,26 +90,15 @@ python run.py \
     --sample_ids $SAMPLE_IDS \
     --seed $SEED --resume
 
-# ── Step 3a: L1 + L2 + L3v1 (Velocity) ──
+# ── Step 3: L1 + L2 + L3 (Trajectory Anchor) ──
 echo ""
-echo "[Step 3a] Layer 1 + Layer 2 + Layer 3v1: Velocity Matching..."
+echo "[Step 3] Layer 1 + Layer 2 + Layer 3: Trajectory Anchor..."
 python run.py \
     --data_dir $DATA_DIR \
     --caption_dir $CAPTION_HYBRID \
-    --output_dir $OUTPUT_BASE/step3_L1L2L3v1 \
-    --velocity_full --alpha 0.004 --embed_strength 0.02 \
-    --sample_ids $SAMPLE_IDS \
-    --seed $SEED --resume
-
-# ── Step 3b: L1 + L2 + L3v2 (Best Config) ──
-echo ""
-echo "[Step 3b] Layer 1 + Layer 2 + Layer 3v2: Best Config..."
-python run.py \
-    --data_dir $DATA_DIR \
-    --caption_dir $CAPTION_HYBRID \
-    --output_dir $OUTPUT_BASE/step3_L1L2L3v2_best \
-    --velocity_full --alpha 0.004 --embed_strength 0.02 \
-    --velocity_K 4 --velocity_motion_weight 1.0 \
+    --output_dir $OUTPUT_BASE/step3_L1L2L3_anchor \
+    --noise_prior --alpha 0.004 \
+    --trajectory_anchor --anchor_beta_max 0.3 --anchor_schedule warmup_decay \
     --sample_ids $SAMPLE_IDS \
     --seed $SEED --resume
 
@@ -119,7 +108,7 @@ echo "============================================"
 echo " 开始评估..."
 echo "============================================"
 
-for step_dir in step0_baseline step1_L1_hybrid step2_L1L2_noise_prior step3_L1L2L3v1 step3_L1L2L3v2_best; do
+for step_dir in step0_baseline step1_L1_hybrid step2_L1L2_noise_prior step3_L1L2L3_anchor; do
     echo ""
     echo ">>> 评估: $step_dir"
     python evaluation/run_clip_xclip_eval.py \

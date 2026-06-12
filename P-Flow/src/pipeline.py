@@ -142,20 +142,46 @@ class PFlowConfig:
     ocs_top_k: int = 3                 # SVD 保留的主成分数
     ocs_suppress_ratio: float = 0.5    # 正交空间的抑制比例 (0=不抑制, 1=完全移除)
 
-    # ── 灰盒: Latent Trajectory Soft Anchor ──
-    trajectory_anchor: bool = False     # 是否启用轨迹锚定 (灰盒方案)
+    # ── 灰盒: Latent Trajectory Soft Anchor (旧方案，已废弃) ──
+    trajectory_anchor: bool = False     # 是否启用轨迹锚定 (旧方案: position lerp，已证明失败)
     anchor_beta_max: float = 0.3       # 最大锚定强度 β_max (推荐搜索: 0.1 ~ 0.5)
     anchor_schedule: str = "cosine_decay"  # β 退火调度: cosine_decay / linear_decay / constant / warmup_decay
     anchor_cache_every_n: int = 1      # inversion 轨迹缓存间隔 (1=全部, 2=隔一步; 用于显存优化)
     anchor_quality_gate: bool = True    # 是否启用轨迹质量门控 (基于 η_temporal 帧间余弦相似度)
     anchor_quality_threshold: float = 0.05  # 帧间 cos 阈值: mean_cos < 此值则跳过 anchor
-    # 参考值: S7=0.1878 (好, 应通过), S21=-0.1381 (混乱, 应拒绝)
-    # 推荐 0.0~0.1, 负值样本运动混乱不适合锚定
-    anchor_cos_threshold: float = 0.2   # >0 时启用 cos-proportional β 模式 (方案2)
-    # 方案2: effective_β = β_t × max(0, cos(gen,ref))，力度正比于对齐度
-    # 设为 >0 且 latents 非 None 时激活 (即 L2+L3 联合模式)
-    # 纯 L3 (latents=None) 不受影响，保持原始 β_t
-    # 设为 0 或负数则禁用 cos-proportional，所有模式使用固定 β_t
+    anchor_cos_threshold: float = 0.2   # >0 时启用 cos-proportional β 模式 (旧方案2)
+
+    # ── L3 V2: Velocity Direction Anchor (VDA) ──
+    # 核心思想: 不做位置 lerp (已证明失败), 改做速度方向微调
+    # 数学: 在 Flow ODE 每步去噪后, 用参考轨迹的速度方向信息微调当前 latent
+    #   v_ref = (z_ref[t-dt] - z_ref[t]) / dt  (反演速度, 取反=生成方向)
+    #   v_gen ≈ (z_gen[t+dt] - z_gen[t]) / dt   (差分估计的生成速度)
+    #   v_ref_⊥ = v_ref - (v_ref·v_gen/‖v_gen‖²)·v_gen  (参考速度的正交分量)
+    #   Δz = γ · v_ref_⊥ · dt  (方向修正冲量)
+    #   z_adjusted = z_current + Δz
+    #
+    # 与 L2 的关系:
+    #   L2 提供起点偏置 (SVD-blended z_T), L3 提供过程方向引导
+    #   两者语义正交互补, 不要求起点对齐
+    velocity_anchor: bool = False          # 是否启用 VDA (Velocity Direction Anchor)
+    vda_gamma: float = 0.03               # VDA 方向引导强度 γ (推荐搜索: 0.01 ~ 0.10)
+    # γ 越大, 参考速度方向的影响越强; 太大会偏离 ODE 流形
+    vda_schedule: str = "middle_peak"      # γ 调度策略:
+    #   constant: γ 恒定
+    #   middle_peak: 中间阶段最强, 两端弱 (推荐; 前后期轨迹收敛不需要强引导)
+    #   warmup_decay: 先升后降
+    #   cosine_decay: 从 γ 递减到 0
+    vda_use_perp_only: bool = True         # True: 只注入正交分量 (不改变速度大小); False: 混合投影+正交
+    vda_parallel_weight: float = 0.1      # vda_use_perp_only=False 时, 平行分量注入权重 (0.1=微弱)
+    vda_quality_gate: bool = True         # 是否启用质量门控 (基于 motion_strength)
+    vda_quality_scale: bool = True        # True: 门控值映射为 γ 缩放因子 (不硬跳过); False: 硬跳过
+    # 软门控: motion_strength 低 → γ 缩小但不为零 (保留微弱引导)
+    vda_norm_clamp: float = 0.0           # >0 时, 每步 Δz 的范数不超过 clamp * ‖z_current‖
+    # 防止单步偏移过大导致生成崩溃 (推荐: 0.05~0.10; 0=不限制)
+    vda_start_step: int = 1               # VDA 起始步 (step_index >= 此值才启用; 0=第一步就启用)
+    # 设为 1 可以跳过第一步 (第一步速度估计不准确)
+    vda_end_step: int = -1                # VDA 结束步 (step_index < 此值才启用; -1=到最后一步)
+    # 后期步数 cos 自然高, VDA 作用减弱, 可以提前结束节省计算
 
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
@@ -197,6 +223,8 @@ class PFlowConfig:
                 flags.append(f"blend(α={self.alpha})")
         if self.trajectory_anchor:
             flags.append(f"trajectory_anchor(β_max={self.anchor_beta_max}, sched={self.anchor_schedule})")
+        if self.velocity_anchor:
+            flags.append(f"velocity_anchor(γ={self.vda_gamma}, sched={self.vda_schedule}, perp_only={self.vda_use_perp_only})")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -336,9 +364,9 @@ class PFlowPipeline:
                 eta_temporal, prompt_embeds_for_diag, caption, generator
             )
 
-        # ── Step 3.6: 轨迹缓存 (灰盒 Trajectory Anchor) ──
+        # ── Step 3.6: 轨迹缓存 (灰盒 Trajectory Anchor / VDA) ──
         ref_trajectory = None
-        if cfg.trajectory_anchor:
+        if cfg.trajectory_anchor or cfg.velocity_anchor:
             if not cfg.use_inversion:
                 logger.warning(
                     "  [Trajectory Anchor] trajectory_anchor=True 但 use_inversion=False, "
@@ -377,7 +405,8 @@ class PFlowPipeline:
             #   拒绝后完全回退到 baseline（纯随机噪声生成），等价于从未做过 inversion。
             #   关键: 重置 generator seed，使生成阶段的随机状态与 baseline 完全一致。
             #   时间开销: 只多花 inversion 的时间（~1.5min），生成阶段不重复。
-            if cfg.anchor_quality_gate and eta_temporal is not None:
+            # 注意: VDA 模式下跳过此硬门控, VDA 有自己的软门控 (vda_quality_scale)
+            if cfg.anchor_quality_gate and eta_temporal is not None and not cfg.velocity_anchor:
                 eta_gate = eta_temporal
                 if eta_gate.dim() == 5:
                     if eta_gate.shape[2] > eta_gate.shape[1]:
@@ -494,8 +523,21 @@ class PFlowPipeline:
             # 获取噪声
             latents = self._get_latents(eta_temporal, generator)
 
-            # 生成视频（灰盒 or 标准）
-            if cfg.trajectory_anchor and ref_trajectory is not None:
+            # 生成视频（VDA / 旧轨迹锚定 / 标准）
+            # 两种 L3 方案:
+            #   --velocity_anchor  (VDA): 速度方向引导, 不要求起点对齐, 与 L2 正交互补
+            #   --trajectory_anchor (旧): position lerp, 纯 L3 有增益, 但与 L2(SVD blend) 组合会崩塌
+            #     根因: z_T(SVD-blended) 与 ref_traj 起点几乎正交(cos~0.06),
+            #     position lerp 把 z_gen 拉向与 L2 起始偏置冲突的方向
+            # 两者互斥: velocity_anchor 优先级高于 trajectory_anchor
+            if cfg.velocity_anchor and ref_trajectory is not None:
+                gen_video = self._generate_with_vda(
+                    current_prompt, latents, generator,
+                    ref_trajectory=ref_trajectory,
+                    eta_temporal=eta_temporal,
+                    negative_prompt=neg_prompt,
+                )
+            elif cfg.trajectory_anchor and ref_trajectory is not None:
                 gen_video = self._generate_with_anchor(
                     current_prompt, latents, generator,
                     ref_trajectory=ref_trajectory,
@@ -2016,6 +2058,499 @@ class PFlowPipeline:
             return self._compute_beta_schedule(num_steps, beta_max, "cosine_decay")
 
         return beta
+
+    def _compute_gamma_schedule(
+        self,
+        num_steps: int,
+        gamma_max: float,
+        schedule_type: str,
+    ) -> List[float]:
+        """
+        计算每步的 VDA 方向引导强度 γ_t。
+
+        设计原则 (与 position lerp 的 β 调度不同):
+        - 前期 (接近噪声, step_index 小): 弱引导 (轨迹还在收敛, 方向不确定)
+        - 中期 (中间阶段): 强引导 (这是最需要方向修正的时候, 位置 lerp 在此失败)
+        - 后期 (接近数据, step_index 大): 弱引导 (轨迹自然收敛, ODE 流形约束强)
+
+        Args:
+            num_steps: 总去噪步数
+            gamma_max: 最大 γ 值
+            schedule_type: 调度类型
+
+        Returns:
+            List[float]: 长度为 num_steps 的 γ 值列表
+        """
+        import math
+
+        if schedule_type == "constant":
+            gamma = [gamma_max] * num_steps
+        elif schedule_type == "middle_peak":
+            # 中间峰: γ_t = γ_max * sin(π * i / (N-1))
+            # step 0 → 0, step N/2 → γ_max, step N-1 → 0
+            gamma = [
+                gamma_max * math.sin(math.pi * i / max(num_steps - 1, 1))
+                for i in range(num_steps)
+            ]
+        elif schedule_type == "warmup_decay":
+            # 前 20% warmup, 后 80% cosine decay
+            warmup_steps = max(int(0.2 * num_steps), 1)
+            gamma = []
+            for i in range(warmup_steps):
+                gamma.append(gamma_max * (0.5 + 0.5 * i / max(warmup_steps - 1, 1)))
+            remaining = num_steps - warmup_steps
+            for i in range(remaining):
+                gamma.append(
+                    gamma_max * math.cos(math.pi / 2 * i / max(remaining - 1, 1))
+                )
+        elif schedule_type == "cosine_decay":
+            # 从 γ_max 递减到 0 (与 position lerp 类似)
+            gamma = [
+                gamma_max * math.cos(math.pi / 2 * i / max(num_steps - 1, 1))
+                for i in range(num_steps)
+            ]
+        else:
+            logger.warning(
+                f"  [VDA] Unknown schedule '{schedule_type}', "
+                f"falling back to middle_peak"
+            )
+            return self._compute_gamma_schedule(num_steps, gamma_max, "middle_peak")
+
+        return gamma
+
+    def _compute_vda_quality_scale(
+        self,
+        eta_temporal: Optional[torch.Tensor],
+    ) -> float:
+        """
+        计算VDA质量缩放因子 (替代旧方案的质量门控)。
+
+        核心思路: 基于 η_temporal 的帧间余弦相似度 (motion coherence)
+        和 motion_strength (时序能量占比) 计算一个 0~1 的缩放因子。
+
+        软门控策略 (vda_quality_scale=True):
+            - motion_coherence 高 → scale → 1.0 (完整引导)
+            - motion_coherence 低 → scale → 0.1~0.3 (保留微弱引导, 不硬跳过)
+            - 这样即使样本运动混乱, 也能获得"微弱的方向暗示"
+
+        硬门控策略 (vda_quality_scale=False):
+            - motion_coherence < threshold → scale = 0 (完全跳过, 退回旧方案)
+
+        Args:
+            eta_temporal: SVD 滤波后的噪声
+
+        Returns:
+            scale: 0~1 的缩放因子, 用于 effective_γ = γ_t * scale
+        """
+        cfg = self.config
+
+        if eta_temporal is None:
+            return 1.0
+
+        # ── 计算 motion coherence (帧间余弦相似度) ──
+        eta_gate = eta_temporal
+        if eta_gate.dim() == 5:
+            if eta_gate.shape[2] > eta_gate.shape[1]:
+                eta_gate = eta_gate.permute(0, 2, 1, 3, 4)
+            num_frames_gate = eta_gate.shape[2]
+        elif eta_gate.dim() == 4:
+            num_frames_gate = eta_gate.shape[1]
+            eta_gate = eta_gate.unsqueeze(0)
+        else:
+            return 1.0
+
+        if num_frames_gate < 2:
+            return 1.0
+
+        frame_cos_sims = []
+        for f in range(num_frames_gate - 1):
+            f1 = eta_gate[0, :, f, :, :].flatten()
+            f2 = eta_gate[0, :, f + 1, :, :].flatten()
+            cos = torch.nn.functional.cosine_similarity(
+                f1.unsqueeze(0), f2.unsqueeze(0)
+            ).item()
+            frame_cos_sims.append(cos)
+
+        mean_cos = sum(frame_cos_sims) / len(frame_cos_sims)
+
+        # ── 计算 motion strength (从 SVD diagnostics 中获取) ──
+        motion_strength = 0.0
+        if hasattr(self, '_svd_diagnostics') and self._svd_diagnostics is not None:
+            motion_strength = self._svd_diagnostics.get('motion_strength', 0.0)
+
+        logger.info(
+            f"  [VDA Quality] motion_coherence={mean_cos:.4f}, "
+            f"motion_strength={motion_strength:.4f}"
+        )
+
+        if not cfg.vda_quality_scale:
+            # 硬门控: 低于阈值 → 0, 高于 → 1
+            if mean_cos < cfg.anchor_quality_threshold:
+                logger.info(
+                    f"  [VDA Quality] ❌ 硬门控: mean_cos={mean_cos:.4f} < {cfg.anchor_quality_threshold}, "
+                    f"scale=0 (跳过 VDA)"
+                )
+                return 0.0
+            else:
+                logger.info(
+                    f"  [VDA Quality] ✅ 硬门控: mean_cos={mean_cos:.4f} >= {cfg.anchor_quality_threshold}, "
+                    f"scale=1.0"
+                )
+                return 1.0
+
+        # ── 软门控: sigmoid 映射 ──
+        # mean_cos 范围大约 [-0.2, 0.3]
+        # 映射到 [min_scale, 1.0]
+        min_scale = 0.1  # 即使运动混乱, 也保留 10% 引导
+        threshold = cfg.anchor_quality_threshold  # 默认 0.05
+
+        # 使用 sigmoid 平滑映射
+        # 当 mean_cos = threshold 时, scale ≈ 0.5
+        # 当 mean_cos >> threshold 时, scale → 1.0
+        # 当 mean_cos << threshold 时, scale → min_scale
+        k = 20.0  # sigmoid 陡度
+        sigmoid_val = 1.0 / (1.0 + math.exp(-k * (mean_cos - threshold)))
+        scale = min_scale + (1.0 - min_scale) * sigmoid_val
+
+        logger.info(
+            f"  [VDA Quality] 软门控: mean_cos={mean_cos:.4f}, "
+            f"threshold={threshold}, scale={scale:.4f} "
+            f"({'✅ 强引导' if scale > 0.7 else '⚡ 弱引导' if scale > 0.3 else '⚠️ 微弱引导'})"
+        )
+
+        return scale
+
+    @torch.no_grad()
+    def _generate_with_vda(
+        self,
+        prompt: str,
+        latents: Optional[torch.Tensor],
+        generator: torch.Generator,
+        ref_trajectory: Dict[float, torch.Tensor],
+        eta_temporal: Optional[torch.Tensor] = None,
+        negative_prompt: str = "",
+    ) -> torch.Tensor:
+        """
+        L3 V2: Velocity Direction Anchor (VDA) 生成。
+
+        与旧方案 (position lerp) 的核心区别:
+            - 旧方案: z_anchored = (1-β)*z_gen + β*z_ref (直接在位置空间拉)
+              问题: z_gen 和 z_ref 从几乎正交的起点出发, 位置 lerp 无物理意义
+            - 新方案: z_adjusted = z_current + γ * v_ref_⊥ * dt (在速度方向空间微调)
+              优势: 不要求起点对齐, 只关心"下一步往哪走"
+
+        数学:
+            1. 从 ref_trajectory 中取相邻两点, 计算参考速度方向:
+               v_ref = (z_ref[t_prev] - z_ref[t_curr]) / dt_ref
+               (反演过程从 t=1→0, 所以取反后得到生成方向的速度)
+            2. 在当前 latent 位置, 计算参考速度的正交分量:
+               v_ref_⊥ = v_ref - (v_ref · v_gen / ‖v_gen‖²) * v_gen
+            3. 将正交分量作为方向修正冲量加到当前 latent 上:
+               Δz = γ * v_ref_⊥ * dt
+               z_adjusted = z_current + Δz
+
+        Args:
+            prompt: 生成 prompt
+            latents: 初始噪声 (可由 _get_latents 提供, 含 SVD prior)
+            generator: 随机数生成器
+            ref_trajectory: 参考轨迹 {t_value: z_ref_tensor(cpu)}
+            eta_temporal: SVD 滤波后的噪声 (用于质量门控)
+            negative_prompt: 负面 prompt
+        """
+        import math as _math
+        cfg = self.config
+        num_steps = cfg.num_inference_steps
+
+        # ── 预计算 γ 调度 ──
+        gamma_values = self._compute_gamma_schedule(
+            num_steps, cfg.vda_gamma, cfg.vda_schedule
+        )
+
+        # ── 质量门控缩放 ──
+        quality_scale = 1.0
+        if cfg.vda_quality_gate:
+            quality_scale = self._compute_vda_quality_scale(eta_temporal)
+            if quality_scale < 1e-6:
+                # 完全跳过, 走标准生成
+                logger.info(
+                    f"  [VDA] 质量门控 scale≈0, 跳过 VDA, 走标准生成"
+                )
+                return self._generate(prompt, latents, generator, negative_prompt)
+
+        # ── 参考轨迹的 t 值排序 ──
+        traj_keys = sorted(ref_trajectory.keys())
+        dt_ref = 1.0 / max(len(traj_keys) - 1, 1)  # ref 轨迹的时间步长
+        dt_gen = 1.0 / num_steps  # 生成轨迹的时间步长
+
+        # ── 诊断: 起点对齐度 ──
+        t_max = max(traj_keys)
+        z_ref_start = ref_trajectory[t_max]
+        if latents is not None:
+            cos_start = torch.nn.functional.cosine_similarity(
+                latents.flatten().unsqueeze(0),
+                z_ref_start.flatten().to(latents.device).unsqueeze(0),
+            ).item()
+            logger.info(
+                f"  [VDA] 起点对齐诊断: "
+                f"cos(z_T, ref_traj[t={t_max:.3f}])={cos_start:.4f} "
+                f"({'⚠️ 严重偏移' if cos_start < 0.1 else '⚡ 轻度偏移' if cos_start < 0.5 else '✅ 对齐良好'})"
+            )
+            logger.info(
+                f"  [VDA] 注意: VDA 不要求起点对齐, 只使用参考轨迹的速度方向"
+            )
+
+        # ── 日志: 配置总结 ──
+        logger.info(
+            f"  [VDA] γ_max={cfg.vda_gamma}, schedule={cfg.vda_schedule}, "
+            f"quality_scale={quality_scale:.4f}, "
+            f"perp_only={cfg.vda_use_perp_only}, "
+            f"norm_clamp={cfg.vda_norm_clamp}, "
+            f"steps=[{cfg.vda_start_step}, {cfg.vda_end_step if cfg.vda_end_step >= 0 else num_steps}]"
+        )
+        logger.info(
+            f"  [VDA] γ schedule (first 5): "
+            f"{[f'{g:.4f}' for g in gamma_values[:5]]}, "
+            f"(last 5): {[f'{g:.4f}' for g in gamma_values[-5:]]}"
+        )
+
+        # ── VDA 统计 ──
+        vda_stats = {
+            "steps_applied": 0,
+            "steps_skipped": 0,
+            "total_shift": 0.0,
+            "per_step": [],
+            "first_vda_step": None,
+            "avg_ref_speed_norm": 0.0,
+            "avg_perp_ratio": 0.0,  # 正交分量占比
+        }
+
+        # 保存前一步的 latent (用于差分估计生成速度)
+        prev_latent_holder = [None]
+
+        def vda_callback(pipe, step_index, timestep, callback_kwargs):
+            """VDA callback: 速度方向引导。"""
+            latents_current = callback_kwargs["latents"]
+
+            # ── 步数范围检查 ──
+            end_step = cfg.vda_end_step if cfg.vda_end_step >= 0 else num_steps
+            if step_index < cfg.vda_start_step or step_index >= end_step:
+                prev_latent_holder[0] = latents_current.clone()
+                vda_stats["steps_skipped"] += 1
+                return callback_kwargs
+
+            # ── 当前 t 进度 ──
+            # WanPipeline: step_index 完成后, t 从 ~1.0 降到 1-(step_index+1)/N
+            t_progress = 1.0 - (step_index + 1) / num_steps
+
+            # ── Step 1: 获取参考速度方向 ──
+            # 在 ref_trajectory 中找当前 t 和前一步 t 的最近点
+            t_curr_ref = min(traj_keys, key=lambda t: abs(t - t_progress))
+            t_prev_ref = min(traj_keys, key=lambda t: abs(t - (t_progress + dt_gen)))
+
+            if t_curr_ref == t_prev_ref:
+                # 找不到两个不同的参考点 (边界情况), 跳过
+                prev_latent_holder[0] = latents_current.clone()
+                vda_stats["steps_skipped"] += 1
+                return callback_kwargs
+
+            z_ref_curr = ref_trajectory[t_curr_ref].to(
+                device=latents_current.device, dtype=latents_current.dtype
+            )
+            z_ref_prev = ref_trajectory[t_prev_ref].to(
+                device=latents_current.device, dtype=latents_current.dtype
+            )
+
+            # 参考速度: 反演方向 (t 大 → t 小), 取差后得到反演方向的速度
+            # 反演方向: dz/dt|inv = -v_θ(z_t, t, c)
+            # 生成方向: dz/dt|gen = v_θ(z_t, t, c)
+            # v_ref = (z_ref[t_prev] - z_ref[t_curr]) / (t_prev - t_curr)
+            # 如果 t_prev > t_curr (正常情况): 分母为正
+            # 反演过程 t 从大→小, z_ref[t_prev] 比 z_ref[t_curr] 更接近数据
+            # v_ref 方向是从噪声到数据 (生成方向)
+            dt_actual = t_prev_ref - t_curr_ref
+            if abs(dt_actual) < 1e-10:
+                prev_latent_holder[0] = latents_current.clone()
+                vda_stats["steps_skipped"] += 1
+                return callback_kwargs
+
+            v_ref = (z_ref_prev - z_ref_curr) / abs(dt_actual)
+
+            # ── Step 2: 估计生成速度 (差分) ──
+            if prev_latent_holder[0] is None:
+                # 第一步没有速度信息, 跳过
+                prev_latent_holder[0] = latents_current.clone()
+                vda_stats["steps_skipped"] += 1
+                return callback_kwargs
+
+            v_gen = (latents_current - prev_latent_holder[0]) / dt_gen
+
+            # ── Step 3: 速度方向分解 ──
+            v_ref_flat = v_ref.flatten()
+            v_gen_flat = v_gen.flatten()
+
+            v_gen_norm_sq = v_gen_flat.dot(v_gen_flat)
+            if v_gen_norm_sq < 1e-12:
+                # 生成速度几乎为零, 无法做投影分解
+                prev_latent_holder[0] = latents_current.clone()
+                vda_stats["steps_skipped"] += 1
+                return callback_kwargs
+
+            # v_ref 在 v_gen 方向的投影 (平行分量)
+            proj_scalar = v_ref_flat.dot(v_gen_flat) / v_gen_norm_sq
+            v_ref_parallel = proj_scalar * v_gen_flat
+            v_ref_perp = v_ref_flat - v_ref_parallel
+
+            # 正交分量占比
+            v_ref_norm = v_ref_flat.norm().item()
+            perp_ratio = v_ref_perp.norm().item() / max(v_ref_norm, 1e-8)
+
+            # ── Step 4: 计算方向修正冲量 ──
+            gamma_t = gamma_values[step_index] * quality_scale
+
+            if cfg.vda_use_perp_only:
+                # 只注入正交分量 (不改变速度大小, 最安全)
+                delta_z = gamma_t * v_ref_perp * dt_gen
+            else:
+                # 混合注入: 正交分量 + 微弱平行分量
+                delta_z = gamma_t * (
+                    v_ref_perp + cfg.vda_parallel_weight * v_ref_parallel
+                ) * dt_gen
+
+            # 恢复形状
+            delta_z = delta_z.reshape(latents_current.shape)
+
+            # ── Step 5: 范数钳制 (安全阀) ──
+            if cfg.vda_norm_clamp > 0:
+                delta_norm = delta_z.norm().item()
+                latent_norm = latents_current.norm().item()
+                max_delta = cfg.vda_norm_clamp * latent_norm
+                if delta_norm > max_delta:
+                    delta_z = delta_z * (max_delta / delta_norm)
+                    logger.debug(
+                        f"    [VDA step {step_index:2d}] Δz clamped: "
+                        f"{delta_norm:.2f} → {max_delta:.2f}"
+                    )
+
+            # ── Step 6: 应用修正 ──
+            latents_adjusted = latents_current + delta_z
+
+            # 计算偏移量 (用于统计)
+            shift = delta_z.norm().item()
+
+            vda_stats["steps_applied"] += 1
+            vda_stats["total_shift"] += shift
+            vda_stats["avg_ref_speed_norm"] += v_ref_norm
+            vda_stats["avg_perp_ratio"] += perp_ratio
+            vda_stats["per_step"].append({
+                "step": step_index,
+                "t": t_progress,
+                "t_curr_ref": t_curr_ref,
+                "t_prev_ref": t_prev_ref,
+                "gamma_t": gamma_t,
+                "shift": shift,
+                "v_ref_norm": v_ref_norm,
+                "perp_ratio": perp_ratio,
+                "proj_scalar": proj_scalar.item(),
+            })
+
+            if vda_stats["first_vda_step"] is None:
+                vda_stats["first_vda_step"] = step_index
+
+            # 每 5 步详细日志
+            if step_index % 5 == 0 or step_index == num_steps - 1:
+                logger.info(
+                    f"    [VDA step {step_index:2d}/{num_steps}] "
+                    f"t={t_progress:.3f}, γ={gamma_t:.4f}, "
+                    f"shift={shift:.2f}, v_ref_norm={v_ref_norm:.2f}, "
+                    f"perp_ratio={perp_ratio:.4f}, proj={proj_scalar.item():.4f}"
+                )
+
+            callback_kwargs["latents"] = latents_adjusted
+            prev_latent_holder[0] = latents_adjusted.clone()
+
+            return callback_kwargs
+
+        # ── 构建生成参数 ──
+        kwargs = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt or NEGATIVE_PROMPT,
+            "height": cfg.height,
+            "width": cfg.width,
+            "num_frames": cfg.num_frames,
+            "guidance_scale": cfg.guidance_scale,
+            "num_inference_steps": num_steps,
+            "generator": generator,
+            "output_type": "pt",
+            "callback_on_step_end": vda_callback,
+            "callback_on_step_end_tensor_inputs": ["latents"],
+        }
+        if latents is not None:
+            kwargs["latents"] = latents
+
+        output = self.pipe(**kwargs)
+
+        # ── VDA 统计总结 ──
+        n_applied = vda_stats["steps_applied"]
+        n_skipped = vda_stats["steps_skipped"]
+        total_shift = vda_stats["total_shift"]
+        avg_shift = total_shift / max(n_applied, 1)
+        avg_ref_speed = vda_stats["avg_ref_speed_norm"] / max(n_applied, 1)
+        avg_perp_ratio = vda_stats["avg_perp_ratio"] / max(n_applied, 1)
+
+        logger.info("  ═══════════════════════════════════════════════")
+        logger.info(f"  [VDA] 生成完成总结:")
+        logger.info(
+            f"    applied={n_applied}, skipped={n_skipped}, "
+            f"total={n_applied+n_skipped}/{num_steps}"
+        )
+        logger.info(
+            f"    first_vda_step={vda_stats['first_vda_step'] if vda_stats['first_vda_step'] is not None else 'NEVER'}, "
+            f"total_shift={total_shift:.4f}, avg_shift={avg_shift:.4f}"
+        )
+        logger.info(
+            f"    avg_ref_speed_norm={avg_ref_speed:.2f}, "
+            f"avg_perp_ratio={avg_perp_ratio:.4f}"
+        )
+        if vda_stats["per_step"]:
+            mid = len(vda_stats["per_step"]) // 2
+            early = vda_stats["per_step"][:mid]
+            late = vda_stats["per_step"][mid:]
+            early_avg_perp = sum(s["perp_ratio"] for s in early) / max(len(early), 1)
+            late_avg_perp = sum(s["perp_ratio"] for s in late) / max(len(late), 1)
+            early_avg_shift = sum(s["shift"] for s in early) / max(len(early), 1)
+            late_avg_shift = sum(s["shift"] for s in late) / max(len(late), 1)
+            logger.info(
+                f"    前半段: avg_perp_ratio={early_avg_perp:.4f}, avg_shift={early_avg_shift:.2f}"
+            )
+            logger.info(
+                f"    后半段: avg_perp_ratio={late_avg_perp:.4f}, avg_shift={late_avg_shift:.2f}"
+            )
+            logger.info(
+                f"    趋势: perp_ratio {early_avg_perp:.4f}→{late_avg_perp:.4f} "
+                f"({'正交性减弱' if late_avg_perp < early_avg_perp else '正交性增强'}), "
+                f"shift {early_avg_shift:.2f}→{late_avg_shift:.2f} "
+                f"({'衰减 ✓' if late_avg_shift < early_avg_shift else '增强 ⚠️'})"
+            )
+        logger.info("  ═══════════════════════════════════════════════")
+
+        # 处理输出格式（同 _generate）
+        if hasattr(output, "frames"):
+            video = output.frames
+            if isinstance(video, list):
+                import torchvision.transforms as T
+                frames = [T.ToTensor()(f) for f in video[0]]
+                video = torch.stack(frames, dim=1)
+            elif isinstance(video, torch.Tensor):
+                if video.dim() == 5:
+                    video = video[0]
+                    if video.shape[0] == cfg.num_frames:
+                        video = video.permute(1, 0, 2, 3)
+        else:
+            video = output[0]
+
+        if video.min() < 0:
+            video = denormalize_video(video)
+        return video.clamp(0, 1)
 
     def _vlm_refine(
         self,
