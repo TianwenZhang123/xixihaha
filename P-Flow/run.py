@@ -189,6 +189,9 @@ def parse_args():
                    help="禁用轨迹质量门控 (默认启用)")
     p.add_argument("--anchor_quality_threshold", type=float, default=0.05,
                    help="η_temporal 帧间 cos 阈值: mean_cos < 此值则跳过 anchor (默认 0.05; S7=0.19通过, S21=-0.14拒绝)")
+    p.add_argument("--anchor_cos_threshold", type=float, default=0.2,
+                   help="自适应 anchor cos 阈值: 每步 cos(gen,ref) < 此值时跳过锚定 "
+                        "(解决 L2+L3 融合时 z_T 与 ref 起点不对齐问题; 纯 L3 不受影响)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
@@ -303,6 +306,7 @@ def build_config(args) -> PFlowConfig:
         anchor_cache_every_n=args.anchor_cache_every_n,
         anchor_quality_gate=not args.no_anchor_quality_gate,
         anchor_quality_threshold=args.anchor_quality_threshold,
+        anchor_cos_threshold=args.anchor_cos_threshold,
     )
 
 

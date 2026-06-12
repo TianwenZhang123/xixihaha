@@ -151,6 +151,10 @@ class PFlowConfig:
     anchor_quality_threshold: float = 0.05  # 帧间 cos 阈值: mean_cos < 此值则跳过 anchor
     # 参考值: S7=0.1878 (好, 应通过), S21=-0.1381 (混乱, 应拒绝)
     # 推荐 0.0~0.1, 负值样本运动混乱不适合锚定
+    anchor_cos_threshold: float = 0.2   # 自适应 anchor 阈值: 每步 cos(gen, ref) < 此值时跳过
+    # 解决 L2+L3 融合问题: SVD blend 改变了 z_T 起点，导致前几步与 ref 不对齐
+    # 纯 L3 起步 cos≈0.99 (z_T=eta_inv, 天然对齐), 不受影响
+    # L2+L3 起步 cos≈0.09 (z_T 被 random 稀释), 前几步自动跳过，等对齐后再 anchor
 
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
@@ -1736,8 +1740,53 @@ class PFlowPipeline:
             f"(last 5): {[f'{b:.4f}' for b in beta_values[-5:]]}"
         )
 
+        # 自适应 cos 阈值 (方案 B: L2+L3 融合)
+        # 只在 latents 非 None (即经过 SVD blend) 时才启用 cos 门控
+        # 纯 L3 (latents=None, diffusers 自采样) 不受此逻辑影响
+        use_adaptive_gate = (latents is not None) and cfg.anchor_cos_threshold > 0
+        cos_threshold = cfg.anchor_cos_threshold if use_adaptive_gate else -1.0
+        if use_adaptive_gate:
+            logger.info(
+                f"  [Trajectory Anchor] 自适应对齐门控已启用: cos_threshold={cos_threshold:.2f} "
+                f"(检测到 SVD-blended latents, 前几步 cos 低于阈值时跳过 anchor)"
+            )
+        else:
+            logger.info(
+                f"  [Trajectory Anchor] 自适应对齐门控未启用 "
+                f"(latents={'None→diffusers随机' if latents is None else 'provided'}, "
+                f"cos_threshold={cfg.anchor_cos_threshold:.2f})"
+            )
+
+        # ── 诊断: z_T 与 ref_trajectory 起点的对齐度 ──
+        # ref_trajectory 来自 inversion(ref_latent → eta_inv)
+        # L2 模式下 z_T = SVD-blended，和 eta_inv 不同
+        # 这个 cos 值预示了前几步是否需要跳过
+        t_max = max(traj_keys)
+        z_ref_start = ref_trajectory[t_max]
+        if latents is not None:
+            cos_start = torch.nn.functional.cosine_similarity(
+                latents.flatten().unsqueeze(0),
+                z_ref_start.flatten().to(latents.device).unsqueeze(0),
+            ).item()
+            logger.info(
+                f"  [Trajectory Anchor] 起点对齐诊断: "
+                f"cos(z_T_actual, ref_traj[t={t_max:.3f}])={cos_start:.4f} "
+                f"({'⚠️ 严重偏移' if cos_start < 0.1 else '⚡ 轻度偏移' if cos_start < 0.5 else '✅ 对齐良好'})"
+            )
+            logger.info(
+                f"  [Trajectory Anchor] 源头差异说明: "
+                f"z_T = SVD-blended (α={cfg.alpha}), "
+                f"ref_traj[t=1] = raw eta_inv (无SVD无blend), "
+                f"差异来自 SVD 滤波 + α-blend 稀释"
+            )
+        else:
+            logger.info(
+                f"  [Trajectory Anchor] 起点对齐诊断: "
+                f"latents=None (diffusers 将随机采样), 预期 cos≈0"
+            )
+
         # 锚定统计（在 callback 中累积）
-        anchor_stats = {"steps_applied": 0, "total_shift": 0.0, "per_step": []}
+        anchor_stats = {"steps_applied": 0, "skipped": 0, "total_shift": 0.0, "per_step": [], "first_anchor_step": None}
 
         def trajectory_anchor_callback(pipe, step_index, timestep, callback_kwargs):
             """每步去噪后，将 latent 向参考轨迹做 lerp。"""
@@ -1761,15 +1810,38 @@ class PFlowPipeline:
                     dtype=latents_current.dtype,
                 )
 
-                # Lerp 锚定: z_anchored = (1-β)*z_gen + β*z_ref
-                latents_anchored = (1 - beta_t) * latents_current + beta_t * z_ref
-
-                # 计算偏移量和余弦相似度
-                shift = (latents_anchored - latents_current).norm().item()
+                # 先计算余弦相似度（判断是否对齐）
                 cos_gen_ref = torch.nn.functional.cosine_similarity(
                     latents_current.flatten().unsqueeze(0),
                     z_ref.flatten().unsqueeze(0),
                 ).item()
+
+                # ── 方案 B: 自适应 Anchor ──
+                # cos < threshold 说明生成 latent 和参考轨迹还差太远
+                # 强行拉拽只会把生成方向搞乱，不如放手让模型自己去噪
+                if cos_gen_ref < cos_threshold:
+                    anchor_stats["skipped"] += 1
+                    logger.info(
+                        f"    [Anchor step {step_index:2d}/{num_steps}] "
+                        f"t={t_progress:.3f}→ref_t={t_ref:.3f}, "
+                        f"cos(gen,ref)={cos_gen_ref:.4f} < {cos_threshold} → SKIP "
+                        f"(对齐度不足，等待自然收敛)"
+                    )
+                    return callback_kwargs
+
+                # cos >= threshold: 对齐度足够，施加 anchor
+                if anchor_stats["first_anchor_step"] is None:
+                    anchor_stats["first_anchor_step"] = step_index
+                    logger.info(
+                        f"    [Anchor step {step_index:2d}/{num_steps}] "
+                        f"🟢 首次启用 anchor (cos={cos_gen_ref:.4f} >= {cos_threshold})"
+                    )
+
+                # Lerp 锚定: z_anchored = (1-β)*z_gen + β*z_ref
+                latents_anchored = (1 - beta_t) * latents_current + beta_t * z_ref
+
+                # 计算偏移量
+                shift = (latents_anchored - latents_current).norm().item()
 
                 anchor_stats["steps_applied"] += 1
                 anchor_stats["total_shift"] += shift
@@ -1817,12 +1889,18 @@ class PFlowPipeline:
 
         # 日志：锚定效果总结
         n_applied = anchor_stats["steps_applied"]
+        n_skipped = anchor_stats["skipped"]
+        first_step = anchor_stats["first_anchor_step"]
         total_shift = anchor_stats["total_shift"]
         avg_shift = total_shift / max(n_applied, 1)
         logger.info("  ═══════════════════════════════════════════════")
         logger.info(f"  [Trajectory Anchor] 生成完成总结:")
         logger.info(
-            f"    steps_applied={n_applied}/{num_steps}, "
+            f"    applied={n_applied}, skipped={n_skipped} (cos<{cos_threshold}), "
+            f"total={n_applied+n_skipped}/{num_steps}"
+        )
+        logger.info(
+            f"    first_anchor_step={first_step if first_step is not None else 'NEVER'}, "
             f"total_shift={total_shift:.4f}, avg_shift={avg_shift:.4f}"
         )
         if anchor_stats["per_step"]:
