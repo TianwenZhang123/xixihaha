@@ -402,26 +402,46 @@ class PFlowPipeline:
                         f"range=[{min(frame_cos_sims):.4f}, {max(frame_cos_sims):.4f}] "
                         f"(阈值={cfg.anchor_quality_threshold})"
                     )
-                    if mean_frame_cos < cfg.anchor_quality_threshold:
-                        logger.warning(
-                            f"  [Trajectory Anchor] ⚠️ η_temporal 帧间一致性过低 "
-                            f"(mean_cos={mean_frame_cos:.4f} < {cfg.anchor_quality_threshold})，"
-                            f"参考视频运动混乱，跳过轨迹锚定，完全回退到 baseline"
-                        )
-                        ref_trajectory = None
-                        # 丢弃所有 inversion 产物，确保不使用有毒噪声
-                        eta_temporal = None
-                        # ★ 关键: 重置 generator 到原始 seed
-                        # inversion 阶段消耗了 generator 的随机状态，
-                        # 如果不重置，后续 diffusers 内部采样的"随机"噪声
-                        # 与真正的 baseline (从未做过 inversion) 不同。
-                        # 重置后，生成阶段的 z_T 与纯 baseline 完全一致。
-                        generator = torch.Generator(device=self.device).manual_seed(seed)
-                        torch.manual_seed(seed)
+                    if mean_frame_cos >= cfg.anchor_quality_threshold:
+                        # ── 门控通过: 保留轨迹锚定 + eta_temporal ──
                         logger.info(
-                            f"  [Trajectory Anchor] Generator 已重置 (seed={seed})，"
-                            f"生成将使用与 baseline 完全相同的纯随机噪声"
+                            f"  [Trajectory Anchor] ✅ 门控通过 "
+                            f"(mean_cos={mean_frame_cos:.4f} >= {cfg.anchor_quality_threshold})，"
+                            f"启用轨迹锚定 + {'SVD blend' if (cfg.use_blend and cfg.use_svd) else 'standard blend' if cfg.use_blend else 'no blend'}"
                         )
+                    else:
+                        # ── 门控拒绝: 跳过轨迹锚定 ──
+                        ref_trajectory = None
+
+                        if cfg.use_blend and cfg.use_svd:
+                            # SVD+Blend 已启用: 保留 eta_temporal 供 SVD blend 使用，
+                            # 只禁用轨迹锚定。生成仍用 SVD-blended 噪声（非纯随机）。
+                            logger.warning(
+                                f"  [Trajectory Anchor] ⚠️ η_temporal 帧间一致性过低 "
+                                f"(mean_cos={mean_frame_cos:.4f} < {cfg.anchor_quality_threshold})，"
+                                f"跳过轨迹锚定，但保留 SVD blend (α={cfg.alpha})"
+                            )
+                            # 重置 generator 以确保 SVD blend 中 η_random 的随机状态一致
+                            generator = torch.Generator(device=self.device).manual_seed(seed)
+                            torch.manual_seed(seed)
+                            logger.info(
+                                f"  [Trajectory Anchor] Generator 已重置 (seed={seed})，"
+                                f"生成将使用 SVD-blended 噪声（保留运动先验，无轨迹约束）"
+                            )
+                        else:
+                            # 无 SVD: 完全回退到纯 baseline（原有逻辑）
+                            logger.warning(
+                                f"  [Trajectory Anchor] ⚠️ η_temporal 帧间一致性过低 "
+                                f"(mean_cos={mean_frame_cos:.4f} < {cfg.anchor_quality_threshold})，"
+                                f"参考视频运动混乱，跳过轨迹锚定，完全回退到 baseline"
+                            )
+                            eta_temporal = None
+                            generator = torch.Generator(device=self.device).manual_seed(seed)
+                            torch.manual_seed(seed)
+                            logger.info(
+                                f"  [Trajectory Anchor] Generator 已重置 (seed={seed})，"
+                                f"生成将使用与 baseline 完全相同的纯随机噪声"
+                            )
                 else:
                     logger.warning(
                         f"  [Trajectory Anchor] η_temporal 帧数不足 ({num_frames_gate})，跳过门控检查"
@@ -438,6 +458,30 @@ class PFlowPipeline:
         current_prompt = caption
         prev_video = None
         results = []
+
+        # ── 诊断: 噪声决策状态总结 ──
+        _diag_anchor = ref_trajectory is not None
+        _diag_svd_blend = cfg.use_blend and cfg.use_svd
+        _diag_eta_available = eta_temporal is not None
+        logger.info(
+            f"  [Noise Decision Summary] "
+            f"trajectory_anchor={'ACTIVE' if _diag_anchor else 'OFF'}, "
+            f"svd_blend={'ENABLED' if _diag_svd_blend else 'DISABLED'}, "
+            f"eta_temporal={'AVAILABLE (shape={eta_temporal.shape})' if _diag_eta_available else 'NONE (will use pure random)'}, "
+            f"use_blend={cfg.use_blend}"
+        )
+        if _diag_svd_blend and _diag_eta_available:
+            logger.info(
+                f"  [Noise Decision] → 将使用 SVD-blended 噪声 (α={cfg.alpha})"
+            )
+        elif _diag_eta_available and cfg.use_blend:
+            logger.info(
+                f"  [Noise Decision] → 将使用 standard blend 噪声 (α={cfg.alpha})"
+            )
+        elif not _diag_eta_available:
+            logger.info(
+                f"  [Noise Decision] → eta_temporal=None，diffusers 将生成纯随机噪声"
+            )
 
         for i in range(1, num_iters + 1):
             logger.info(f"  iter {i}/{num_iters}: {current_prompt[:60]}...")
@@ -670,6 +714,11 @@ class PFlowPipeline:
             3. 只传递"运动节奏" → 比传递"运动方向"更通用
         """
         if eta_temporal is None or not self.config.use_blend:
+            logger.info(
+                f"  [_get_latents] 返回 None → diffusers 纯随机噪声 "
+                f"(eta_temporal={'None' if eta_temporal is None else 'EXISTS'}, "
+                f"use_blend={self.config.use_blend})"
+            )
             return None  # 让 diffusers 自己采样随机噪声
 
         eta_random = torch.randn(
