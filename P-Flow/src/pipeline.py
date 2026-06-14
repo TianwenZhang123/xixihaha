@@ -165,6 +165,9 @@ class PFlowConfig:
     #   L2 提供起点偏置 (SVD-blended z_T), L3 提供过程方向引导
     #   两者语义正交互补, 不要求起点对齐
     velocity_anchor: bool = False          # 是否启用 VDA (Velocity Direction Anchor)
+    vda_mode: str = "v1"                  # VDA 版本:
+    #   v1: 原始版本 (motion_coherence soft gate, 不使用 angle 门控)
+    #   v2: 角度自适应版本 (实时 angle(v_ref,v_gen) 门控, angle>threshold 时降权)
     vda_gamma: float = 0.03               # VDA 方向引导强度 γ (推荐搜索: 0.01 ~ 0.10)
     # γ 越大, 参考速度方向的影响越强; 太大会偏离 ODE 流形
     vda_schedule: str = "middle_peak"      # γ 调度策略:
@@ -177,6 +180,11 @@ class PFlowConfig:
     vda_quality_gate: bool = True         # 是否启用质量门控 (基于 motion_strength)
     vda_quality_scale: bool = True        # True: 门控值映射为 γ 缩放因子 (不硬跳过); False: 硬跳过
     # 软门控: motion_strength 低 → γ 缩小但不为零 (保留微弱引导)
+    vda_angle_threshold: float = 110.0    # v2 专属: 角度自适应阈值 (度)
+    # angle(v_ref,v_gen) > 此值时 VDA 降权; 推荐 100~120
+    #   - angle < 90°: v_ref 与 v_gen 同向, 完全信任 → angle_scale=1.0
+    #   - 90° < angle < threshold: 逐渐降权 → angle_scale 线性 1.0→0.5
+    #   - angle > threshold: v_ref 与 v_gen 近反向, 严重干扰 → angle_scale=0.0
     vda_norm_clamp: float = 0.0           # >0 时, 每步 Δz 的范数不超过 clamp * ‖z_current‖
     # 防止单步偏移过大导致生成崩溃 (推荐: 0.05~0.10; 0=不限制)
     vda_start_step: int = 1               # VDA 起始步 (step_index >= 此值才启用; 0=第一步就启用)
@@ -225,7 +233,7 @@ class PFlowConfig:
         if self.trajectory_anchor:
             flags.append(f"trajectory_anchor(β_max={self.anchor_beta_max}, sched={self.anchor_schedule})")
         if self.velocity_anchor:
-            flags.append(f"velocity_anchor(γ={self.vda_gamma}, sched={self.vda_schedule}, perp_only={self.vda_use_perp_only})")
+            flags.append(f"velocity_anchor({self.vda_mode}: γ={self.vda_gamma}, sched={self.vda_schedule}, perp_only={self.vda_use_perp_only}" + (f", angle_thr={self.vda_angle_threshold}°" if self.vda_mode == "v2" else "") + ")")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -2395,11 +2403,12 @@ class PFlowPipeline:
 
         # ── 日志: 配置总结 ──
         logger.info(
-            f"  [VDA] γ_max={cfg.vda_gamma}, schedule={cfg.vda_schedule}, "
+            f"  [VDA] mode={cfg.vda_mode}, γ_max={cfg.vda_gamma}, schedule={cfg.vda_schedule}, "
             f"quality_scale={quality_scale:.4f}, "
             f"perp_only={cfg.vda_use_perp_only}, "
             f"norm_clamp={cfg.vda_norm_clamp}, "
             f"steps=[{cfg.vda_start_step}, {cfg.vda_end_step if cfg.vda_end_step >= 0 else num_steps}]"
+            + (f", angle_threshold={cfg.vda_angle_threshold}°" if cfg.vda_mode == "v2" else "")
         )
         logger.info(
             f"  [VDA] γ schedule (first 5): "
@@ -2531,6 +2540,32 @@ class PFlowPipeline:
                 # ── Step 4: 计算方向修正冲量 ──
                 gamma_t = gamma_values[step_index] * quality_scale
 
+                # ── v2: 角度自适应 γ ──
+                # 核心思路: angle(v_ref, v_gen) 是 VDA 是否有指导价值的直接指标
+                #   - angle < 90°: 参考速度与生成速度同向, 完全信任
+                #   - 90° < angle < threshold: 参考速度偏离, 逐渐降权
+                #   - angle > threshold: 参考速度近反向, 严重干扰, 完全跳过
+                angle_scale = 1.0
+                if cfg.vda_mode == "v2":
+                    angle_thr = cfg.vda_angle_threshold
+                    if angle_deg < 90.0:
+                        angle_scale = 1.0
+                    elif angle_deg > angle_thr:
+                        angle_scale = 0.0
+                    else:
+                        # 线性衰减: 90° → 1.0, threshold → 0.5
+                        # (不完全归零, 保留微弱引导, 由 quality_scale 托底)
+                        angle_scale = 1.0 - 0.5 * (angle_deg - 90.0) / (angle_thr - 90.0)
+
+                    gamma_t = gamma_t * angle_scale
+
+                    if step_index % 5 == 0 or step_index == cfg.vda_start_step:
+                        logger.info(
+                            f"    [VDA v2 step {step_index:2d}] angle_scale={angle_scale:.3f} "
+                            f"(angle={angle_deg:.1f}°, thr={angle_thr:.0f}°), "
+                            f"γ_eff={gamma_t:.5f} (base={gamma_values[step_index]*quality_scale:.5f})"
+                        )
+
                 if cfg.vda_use_perp_only:
                     # 只注入正交分量 (不改变速度大小, 最安全)
                     delta_z = gamma_t * v_ref_perp * dt_gen
@@ -2576,6 +2611,7 @@ class PFlowPipeline:
                     "t_curr_ref": t_curr_ref,
                     "t_prev_ref": t_prev_ref,
                     "gamma_t": gamma_t,
+                    "angle_scale": angle_scale,
                     "shift": shift,
                     "shift_ratio": shift_ratio,
                     "v_ref_norm": v_ref_norm,
@@ -2672,6 +2708,18 @@ class PFlowPipeline:
                 f"    angle(v_ref,v_gen): avg={avg_angle:.1f}°, "
                 f"min={min_angle:.1f}°, max={max_angle:.1f}°"
             )
+
+            # ── v2: angle_scale 统计 ──
+            if cfg.vda_mode == "v2":
+                angle_scales = [s.get("angle_scale", 1.0) for s in vda_stats["per_step"]]
+                avg_angle_scale = sum(angle_scales) / len(angle_scales)
+                n_zero_scale = sum(1 for a in angle_scales if a < 1e-6)
+                n_reduced = sum(1 for a in angle_scales if 1e-6 < a < 0.99)
+                n_full = sum(1 for a in angle_scales if a >= 0.99)
+                logger.info(
+                    f"    [VDA v2] angle_scale: avg={avg_angle_scale:.3f}, "
+                    f"full={n_full}, reduced={n_reduced}, zero={n_zero_scale}/{len(angle_scales)}"
+                )
 
             # ── shift_ratio 统计 ──
             shift_ratios = [s["shift_ratio"] for s in vda_stats["per_step"]]

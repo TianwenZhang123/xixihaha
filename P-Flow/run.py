@@ -195,6 +195,9 @@ def parse_args():
     # ── L3 V2: Velocity Direction Anchor (VDA) ──
     p.add_argument("--velocity_anchor", action="store_true",
                    help="启用 VDA (Velocity Direction Anchor): 用参考轨迹速度方向微调去噪过程, 不要求起点对齐")
+    p.add_argument("--vda_mode", type=str, default="v1",
+                   choices=["v1", "v2"],
+                   help="VDA 版本: v1=原始(motion_coherence gate), v2=角度自适应(angle gate, 推荐)")
     p.add_argument("--vda_gamma", type=float, default=0.03,
                    help="VDA 方向引导强度 γ (推荐搜索 0.01~0.10; 越大参考速度影响越强)")
     p.add_argument("--vda_schedule", type=str, default="middle_peak",
@@ -208,6 +211,8 @@ def parse_args():
                    help="禁用 VDA 质量门控")
     p.add_argument("--vda_hard_gate", action="store_true",
                    help="VDA 使用硬门控 (低于阈值完全跳过), 默认为软门控 (sigmoid 缩放)")
+    p.add_argument("--vda_angle_threshold", type=float, default=110.0,
+                   help="VDA v2 角度自适应阈值 (度): angle(v_ref,v_gen)>此值时降权 (推荐 100~120)")
     p.add_argument("--vda_norm_clamp", type=float, default=0.0,
                    help="每步 Δz 范数上限 = clamp * ‖z‖ (推荐 0.05~0.10; 0=不限制)")
     p.add_argument("--vda_start_step", type=int, default=1,
@@ -331,12 +336,14 @@ def build_config(args) -> PFlowConfig:
         anchor_cos_threshold=args.anchor_cos_threshold,
         # L3 V2: Velocity Direction Anchor
         velocity_anchor=args.velocity_anchor,
+        vda_mode=args.vda_mode,
         vda_gamma=args.vda_gamma,
         vda_schedule=args.vda_schedule,
         vda_use_perp_only=not args.vda_no_perp_only,
         vda_parallel_weight=args.vda_parallel_weight,
         vda_quality_gate=not args.vda_no_quality_gate,
         vda_quality_scale=not args.vda_hard_gate,
+        vda_angle_threshold=args.vda_angle_threshold,
         vda_norm_clamp=args.vda_norm_clamp,
         vda_start_step=args.vda_start_step,
         vda_end_step=args.vda_end_step,
@@ -458,6 +465,11 @@ def main():
     if config.trajectory_anchor:
         print(f"  [Trajectory Anchor] β_max={config.anchor_beta_max}, "
               f"schedule={config.anchor_schedule}, cache_every_n={config.anchor_cache_every_n}")
+    if config.velocity_anchor:
+        vda_info = f"  [VDA {config.vda_mode}] γ={config.vda_gamma}, schedule={config.vda_schedule}"
+        if config.vda_mode == "v2":
+            vda_info += f", angle_threshold={config.vda_angle_threshold}°"
+        print(vda_info)
     if config.use_iter:
         print(f"  iterations={config.i_max}")
     print()
