@@ -19,6 +19,8 @@ P-Flow/data/videos/
 # IDE
 .vscode/
 .idea/
+.catpaw/
+log.txt
 
 # OS
 Thumbs.db

@@ -25,6 +25,7 @@ import os
 import json
 import time
 import shutil
+import math
 import logging
 from typing import Optional, Dict, List, Any
 from pathlib import Path
@@ -764,8 +765,17 @@ class PFlowPipeline:
             logger.info(
                 f"  [_get_latents] 返回 None → diffusers 纯随机噪声 "
                 f"(eta_temporal={'None' if eta_temporal is None else 'EXISTS'}, "
-                f"use_blend={self.config.use_blend})"
+                f"use_blend={self.config.use_blend}, "
+                f"velocity_anchor={self.config.velocity_anchor})"
             )
+            if self.config.velocity_anchor and eta_temporal is not None:
+                logger.info(
+                    f"  [_get_latents] VDA模式: 不使用SVD噪声混合, "
+                    f"但eta_temporal仍可用于质量门控 "
+                    f"(shape={list(eta_temporal.shape)}, "
+                    f"std={eta_temporal.std().item():.4f}, "
+                    f"mean={eta_temporal.mean().item():.4f})"
+                )
             return None  # 让 diffusers 自己采样随机噪声
 
         eta_random = torch.randn(
@@ -2081,7 +2091,6 @@ class PFlowPipeline:
         Returns:
             List[float]: 长度为 num_steps 的 γ 值列表
         """
-        import math
 
         if schedule_type == "constant":
             gamma = [gamma_max] * num_steps
@@ -2111,10 +2120,37 @@ class PFlowPipeline:
             ]
         else:
             logger.warning(
-                f"  [VDA] Unknown schedule '{schedule_type}', "
+                f"  [VDA Schedule] Unknown schedule '{schedule_type}', "
                 f"falling back to middle_peak"
             )
             return self._compute_gamma_schedule(num_steps, gamma_max, "middle_peak")
+
+        # ── 调度日志 ──
+        logger.info(
+            f"  [VDA Schedule] type={schedule_type}, gamma_max={gamma_max}, "
+            f"num_steps={num_steps}"
+        )
+        # 显示关键节点的 gamma 值
+        if num_steps <= 10:
+            logger.info(
+                f"  [VDA Schedule] all values: {[f'{g:.4f}' for g in gamma]}"
+            )
+        else:
+            peak_idx = max(range(num_steps), key=lambda i: gamma[i])
+            logger.info(
+                f"  [VDA Schedule] peak at step {peak_idx} (γ={gamma[peak_idx]:.4f}), "
+                f"first 5: {[f'{g:.4f}' for g in gamma[:5]]}, "
+                f"last 5: {[f'{g:.4f}' for g in gamma[-5:]]}"
+            )
+            # 显示中间5步
+            mid = num_steps // 2
+            logger.info(
+                f"  [VDA Schedule] middle 5: {[f'{g:.4f}' for g in gamma[mid-2:mid+3]]}"
+            )
+        logger.info(
+            f"  [VDA Schedule] sum(γ)={sum(gamma):.4f}, "
+            f"mean(γ)={sum(gamma)/len(gamma):.4f}"
+        )
 
         return gamma
 
@@ -2145,22 +2181,46 @@ class PFlowPipeline:
         cfg = self.config
 
         if eta_temporal is None:
+            logger.info("  [VDA Quality] eta_temporal=None → scale=1.0 (无门控)")
             return 1.0
+
+        logger.info(
+            f"  [VDA Quality] 输入 eta_temporal: shape={list(eta_temporal.shape)}, "
+            f"dtype={eta_temporal.dtype}, device={eta_temporal.device}"
+        )
 
         # ── 计算 motion coherence (帧间余弦相似度) ──
         eta_gate = eta_temporal
         if eta_gate.dim() == 5:
             if eta_gate.shape[2] > eta_gate.shape[1]:
                 eta_gate = eta_gate.permute(0, 2, 1, 3, 4)
+                logger.info(
+                    f"  [VDA Quality] permute: [{eta_temporal.shape}] → [{list(eta_gate.shape)}] "
+                    f"(frame>channel, swapped)"
+                )
             num_frames_gate = eta_gate.shape[2]
         elif eta_gate.dim() == 4:
             num_frames_gate = eta_gate.shape[1]
             eta_gate = eta_gate.unsqueeze(0)
+            logger.info(
+                f"  [VDA Quality] unsqueeze: [{list(eta_temporal.shape)}] → [{list(eta_gate.shape)}]"
+            )
         else:
+            logger.warning(
+                f"  [VDA Quality] 不支持的维度: dim={eta_gate.dim()}, shape={list(eta_gate.shape)} → scale=1.0"
+            )
             return 1.0
 
         if num_frames_gate < 2:
+            logger.info(
+                f"  [VDA Quality] 帧数={num_frames_gate} < 2, 无法计算帧间cos → scale=1.0"
+            )
             return 1.0
+
+        logger.info(
+            f"  [VDA Quality] 解析后: eta_gate shape={list(eta_gate.shape)}, "
+            f"num_frames={num_frames_gate}"
+        )
 
         frame_cos_sims = []
         for f in range(num_frames_gate - 1):
@@ -2172,11 +2232,35 @@ class PFlowPipeline:
             frame_cos_sims.append(cos)
 
         mean_cos = sum(frame_cos_sims) / len(frame_cos_sims)
+        min_cos = min(frame_cos_sims)
+        max_cos = max(frame_cos_sims)
+
+        logger.info(
+            f"  [VDA Quality] 逐帧cos (共{len(frame_cos_sims)}对): "
+            f"mean={mean_cos:.4f}, min={min_cos:.4f}, max={max_cos:.4f}"
+        )
+        # 显示前5帧和后5帧的cos值
+        if len(frame_cos_sims) > 10:
+            logger.info(
+                f"    前5帧: {[f'{c:.3f}' for c in frame_cos_sims[:5]]}, "
+                f"后5帧: {[f'{c:.3f}' for c in frame_cos_sims[-5:]]}"
+            )
+        else:
+            logger.info(
+                f"    所有帧: {[f'{c:.3f}' for c in frame_cos_sims]}"
+            )
 
         # ── 计算 motion strength (从 SVD diagnostics 中获取) ──
         motion_strength = 0.0
         if hasattr(self, '_svd_diagnostics') and self._svd_diagnostics is not None:
             motion_strength = self._svd_diagnostics.get('motion_strength', 0.0)
+            logger.info(
+                f"  [VDA Quality] SVD diagnostics: motion_strength={motion_strength:.4f}"
+            )
+        else:
+            logger.info(
+                f"  [VDA Quality] 无 SVD diagnostics (未使用 SVD), motion_strength=0.0"
+            )
 
         logger.info(
             f"  [VDA Quality] motion_coherence={mean_cos:.4f}, "
@@ -2209,12 +2293,19 @@ class PFlowPipeline:
         # 当 mean_cos >> threshold 时, scale → 1.0
         # 当 mean_cos << threshold 时, scale → min_scale
         k = 20.0  # sigmoid 陡度
-        sigmoid_val = 1.0 / (1.0 + math.exp(-k * (mean_cos - threshold)))
+        exp_arg = -k * (mean_cos - threshold)
+        logger.info(
+            f"  [VDA Quality] sigmoid计算: mean_cos={mean_cos:.6f}, threshold={threshold}, "
+            f"k={k}, exp_arg={exp_arg:.4f}"
+        )
+        # 数值保护: 防止 exp overflow
+        exp_arg = max(min(exp_arg, 500.0), -500.0)
+        sigmoid_val = 1.0 / (1.0 + math.exp(exp_arg))
         scale = min_scale + (1.0 - min_scale) * sigmoid_val
 
         logger.info(
             f"  [VDA Quality] 软门控: mean_cos={mean_cos:.4f}, "
-            f"threshold={threshold}, scale={scale:.4f} "
+            f"threshold={threshold}, sigmoid_val={sigmoid_val:.4f}, scale={scale:.4f} "
             f"({'✅ 强引导' if scale > 0.7 else '⚡ 弱引导' if scale > 0.3 else '⚠️ 微弱引导'})"
         )
 
@@ -2257,9 +2348,12 @@ class PFlowPipeline:
             eta_temporal: SVD 滤波后的噪声 (用于质量门控)
             negative_prompt: 负面 prompt
         """
-        import math as _math
         cfg = self.config
         num_steps = cfg.num_inference_steps
+
+        logger.info("  ═══════════════════════════════════════════════")
+        logger.info("  [VDA] 开始 Velocity Direction Anchor 生成")
+        logger.info("  ═══════════════════════════════════════════════")
 
         # ── 预计算 γ 调度 ──
         gamma_values = self._compute_gamma_schedule(
@@ -2328,147 +2422,204 @@ class PFlowPipeline:
         prev_latent_holder = [None]
 
         def vda_callback(pipe, step_index, timestep, callback_kwargs):
-            """VDA callback: 速度方向引导。"""
-            latents_current = callback_kwargs["latents"]
+            """VDA callback: 速度方向引导 (带 try-except 错误保护)。"""
+            try:
+                latents_current = callback_kwargs["latents"]
 
-            # ── 步数范围检查 ──
-            end_step = cfg.vda_end_step if cfg.vda_end_step >= 0 else num_steps
-            if step_index < cfg.vda_start_step or step_index >= end_step:
-                prev_latent_holder[0] = latents_current.clone()
-                vda_stats["steps_skipped"] += 1
-                return callback_kwargs
+                # ── 步数范围检查 ──
+                end_step = cfg.vda_end_step if cfg.vda_end_step >= 0 else num_steps
+                if step_index < cfg.vda_start_step or step_index >= end_step:
+                    prev_latent_holder[0] = latents_current.clone()
+                    vda_stats["steps_skipped"] += 1
+                    if step_index == cfg.vda_start_step - 1:
+                        logger.info(
+                            f"    [VDA] step {step_index}: 范围外, 下一步开始 VDA "
+                            f"(start_step={cfg.vda_start_step})"
+                        )
+                    return callback_kwargs
 
-            # ── 当前 t 进度 ──
-            # WanPipeline: step_index 完成后, t 从 ~1.0 降到 1-(step_index+1)/N
-            t_progress = 1.0 - (step_index + 1) / num_steps
+                # ── 当前 t 进度 ──
+                # WanPipeline: step_index 完成后, t 从 ~1.0 降到 1-(step_index+1)/N
+                t_progress = 1.0 - (step_index + 1) / num_steps
 
-            # ── Step 1: 获取参考速度方向 ──
-            # 在 ref_trajectory 中找当前 t 和前一步 t 的最近点
-            t_curr_ref = min(traj_keys, key=lambda t: abs(t - t_progress))
-            t_prev_ref = min(traj_keys, key=lambda t: abs(t - (t_progress + dt_gen)))
+                # ── Step 1: 获取参考速度方向 ──
+                # 在 ref_trajectory 中找当前 t 和前一步 t 的最近点
+                t_curr_ref = min(traj_keys, key=lambda t: abs(t - t_progress))
+                t_prev_ref = min(traj_keys, key=lambda t: abs(t - (t_progress + dt_gen)))
 
-            if t_curr_ref == t_prev_ref:
-                # 找不到两个不同的参考点 (边界情况), 跳过
-                prev_latent_holder[0] = latents_current.clone()
-                vda_stats["steps_skipped"] += 1
-                return callback_kwargs
+                if t_curr_ref == t_prev_ref:
+                    # 找不到两个不同的参考点 (边界情况), 跳过
+                    prev_latent_holder[0] = latents_current.clone()
+                    vda_stats["steps_skipped"] += 1
+                    if step_index % 10 == 0:
+                        logger.debug(
+                            f"    [VDA step {step_index:2d}] 跳过: "
+                            f"t_curr_ref==t_prev_ref={t_curr_ref:.4f}"
+                        )
+                    return callback_kwargs
 
-            z_ref_curr = ref_trajectory[t_curr_ref].to(
-                device=latents_current.device, dtype=latents_current.dtype
-            )
-            z_ref_prev = ref_trajectory[t_prev_ref].to(
-                device=latents_current.device, dtype=latents_current.dtype
-            )
-
-            # 参考速度: 反演方向 (t 大 → t 小), 取差后得到反演方向的速度
-            # 反演方向: dz/dt|inv = -v_θ(z_t, t, c)
-            # 生成方向: dz/dt|gen = v_θ(z_t, t, c)
-            # v_ref = (z_ref[t_prev] - z_ref[t_curr]) / (t_prev - t_curr)
-            # 如果 t_prev > t_curr (正常情况): 分母为正
-            # 反演过程 t 从大→小, z_ref[t_prev] 比 z_ref[t_curr] 更接近数据
-            # v_ref 方向是从噪声到数据 (生成方向)
-            dt_actual = t_prev_ref - t_curr_ref
-            if abs(dt_actual) < 1e-10:
-                prev_latent_holder[0] = latents_current.clone()
-                vda_stats["steps_skipped"] += 1
-                return callback_kwargs
-
-            v_ref = (z_ref_prev - z_ref_curr) / abs(dt_actual)
-
-            # ── Step 2: 估计生成速度 (差分) ──
-            if prev_latent_holder[0] is None:
-                # 第一步没有速度信息, 跳过
-                prev_latent_holder[0] = latents_current.clone()
-                vda_stats["steps_skipped"] += 1
-                return callback_kwargs
-
-            v_gen = (latents_current - prev_latent_holder[0]) / dt_gen
-
-            # ── Step 3: 速度方向分解 ──
-            v_ref_flat = v_ref.flatten()
-            v_gen_flat = v_gen.flatten()
-
-            v_gen_norm_sq = v_gen_flat.dot(v_gen_flat)
-            if v_gen_norm_sq < 1e-12:
-                # 生成速度几乎为零, 无法做投影分解
-                prev_latent_holder[0] = latents_current.clone()
-                vda_stats["steps_skipped"] += 1
-                return callback_kwargs
-
-            # v_ref 在 v_gen 方向的投影 (平行分量)
-            proj_scalar = v_ref_flat.dot(v_gen_flat) / v_gen_norm_sq
-            v_ref_parallel = proj_scalar * v_gen_flat
-            v_ref_perp = v_ref_flat - v_ref_parallel
-
-            # 正交分量占比
-            v_ref_norm = v_ref_flat.norm().item()
-            perp_ratio = v_ref_perp.norm().item() / max(v_ref_norm, 1e-8)
-
-            # ── Step 4: 计算方向修正冲量 ──
-            gamma_t = gamma_values[step_index] * quality_scale
-
-            if cfg.vda_use_perp_only:
-                # 只注入正交分量 (不改变速度大小, 最安全)
-                delta_z = gamma_t * v_ref_perp * dt_gen
-            else:
-                # 混合注入: 正交分量 + 微弱平行分量
-                delta_z = gamma_t * (
-                    v_ref_perp + cfg.vda_parallel_weight * v_ref_parallel
-                ) * dt_gen
-
-            # 恢复形状
-            delta_z = delta_z.reshape(latents_current.shape)
-
-            # ── Step 5: 范数钳制 (安全阀) ──
-            if cfg.vda_norm_clamp > 0:
-                delta_norm = delta_z.norm().item()
-                latent_norm = latents_current.norm().item()
-                max_delta = cfg.vda_norm_clamp * latent_norm
-                if delta_norm > max_delta:
-                    delta_z = delta_z * (max_delta / delta_norm)
-                    logger.debug(
-                        f"    [VDA step {step_index:2d}] Δz clamped: "
-                        f"{delta_norm:.2f} → {max_delta:.2f}"
-                    )
-
-            # ── Step 6: 应用修正 ──
-            latents_adjusted = latents_current + delta_z
-
-            # 计算偏移量 (用于统计)
-            shift = delta_z.norm().item()
-
-            vda_stats["steps_applied"] += 1
-            vda_stats["total_shift"] += shift
-            vda_stats["avg_ref_speed_norm"] += v_ref_norm
-            vda_stats["avg_perp_ratio"] += perp_ratio
-            vda_stats["per_step"].append({
-                "step": step_index,
-                "t": t_progress,
-                "t_curr_ref": t_curr_ref,
-                "t_prev_ref": t_prev_ref,
-                "gamma_t": gamma_t,
-                "shift": shift,
-                "v_ref_norm": v_ref_norm,
-                "perp_ratio": perp_ratio,
-                "proj_scalar": proj_scalar.item(),
-            })
-
-            if vda_stats["first_vda_step"] is None:
-                vda_stats["first_vda_step"] = step_index
-
-            # 每 5 步详细日志
-            if step_index % 5 == 0 or step_index == num_steps - 1:
-                logger.info(
-                    f"    [VDA step {step_index:2d}/{num_steps}] "
-                    f"t={t_progress:.3f}, γ={gamma_t:.4f}, "
-                    f"shift={shift:.2f}, v_ref_norm={v_ref_norm:.2f}, "
-                    f"perp_ratio={perp_ratio:.4f}, proj={proj_scalar.item():.4f}"
+                z_ref_curr = ref_trajectory[t_curr_ref].to(
+                    device=latents_current.device, dtype=latents_current.dtype
+                )
+                z_ref_prev = ref_trajectory[t_prev_ref].to(
+                    device=latents_current.device, dtype=latents_current.dtype
                 )
 
-            callback_kwargs["latents"] = latents_adjusted
-            prev_latent_holder[0] = latents_adjusted.clone()
+                # 参考速度: 反演方向 (t 大 → t 小), 取差后得到反演方向的速度
+                dt_actual = t_prev_ref - t_curr_ref
+                if abs(dt_actual) < 1e-10:
+                    prev_latent_holder[0] = latents_current.clone()
+                    vda_stats["steps_skipped"] += 1
+                    return callback_kwargs
 
-            return callback_kwargs
+                v_ref = (z_ref_prev - z_ref_curr) / abs(dt_actual)
+
+                # ── Step 2: 估计生成速度 (差分) ──
+                if prev_latent_holder[0] is None:
+                    # 第一步没有速度信息, 跳过
+                    prev_latent_holder[0] = latents_current.clone()
+                    vda_stats["steps_skipped"] += 1
+                    logger.info(
+                        f"    [VDA step {step_index:2d}] 跳过: 首步无速度信息"
+                    )
+                    return callback_kwargs
+
+                # 检查 prev_latent_holder 的 device 和 dtype
+                if prev_latent_holder[0].device != latents_current.device or \
+                   prev_latent_holder[0].dtype != latents_current.dtype:
+                    logger.warning(
+                        f"    [VDA step {step_index:2d}] device/dtype 不匹配: "
+                        f"prev=({prev_latent_holder[0].device}, {prev_latent_holder[0].dtype}) "
+                        f"vs curr=({latents_current.device}, {latents_current.dtype}), 自动修正"
+                    )
+                    prev_latent_holder[0] = prev_latent_holder[0].to(
+                        device=latents_current.device, dtype=latents_current.dtype
+                    )
+
+                v_gen = (latents_current - prev_latent_holder[0]) / dt_gen
+
+                # ── Step 3: 速度方向分解 ──
+                v_ref_flat = v_ref.flatten()
+                v_gen_flat = v_gen.flatten()
+
+                v_gen_norm_sq = v_gen_flat.dot(v_gen_flat)
+                if v_gen_norm_sq < 1e-12:
+                    # 生成速度几乎为零, 无法做投影分解
+                    prev_latent_holder[0] = latents_current.clone()
+                    vda_stats["steps_skipped"] += 1
+                    logger.debug(
+                        f"    [VDA step {step_index:2d}] 跳过: v_gen_norm_sq={v_gen_norm_sq:.2e} ≈ 0"
+                    )
+                    return callback_kwargs
+
+                # v_ref 在 v_gen 方向的投影 (平行分量)
+                proj_scalar = v_ref_flat.dot(v_gen_flat) / v_gen_norm_sq
+                v_ref_parallel = proj_scalar * v_gen_flat
+                v_ref_perp = v_ref_flat - v_ref_parallel
+
+                # 正交分量占比
+                v_ref_norm = v_ref_flat.norm().item()
+                v_gen_norm = math.sqrt(v_gen_norm_sq.item())
+                v_ref_perp_norm = v_ref_perp.norm().item()
+                perp_ratio = v_ref_perp_norm / max(v_ref_norm, 1e-8)
+
+                # v_ref 与 v_gen 的夹角 (关键诊断指标)
+                cos_v_ref_v_gen = (v_ref_flat.dot(v_gen_flat) / (v_ref_norm * v_gen_norm)).item()
+                cos_v_ref_v_gen = max(min(cos_v_ref_v_gen, 1.0), -1.0)  # clamp to [-1, 1]
+                angle_deg = math.degrees(math.acos(cos_v_ref_v_gen))
+
+                # ── Step 4: 计算方向修正冲量 ──
+                gamma_t = gamma_values[step_index] * quality_scale
+
+                if cfg.vda_use_perp_only:
+                    # 只注入正交分量 (不改变速度大小, 最安全)
+                    delta_z = gamma_t * v_ref_perp * dt_gen
+                else:
+                    # 混合注入: 正交分量 + 微弱平行分量
+                    delta_z = gamma_t * (
+                        v_ref_perp + cfg.vda_parallel_weight * v_ref_parallel
+                    ) * dt_gen
+
+                # 恢复形状
+                delta_z = delta_z.reshape(latents_current.shape)
+
+                # ── Step 5: 范数钳制 (安全阀) ──
+                latent_norm = latents_current.norm().item()
+                delta_norm_before_clamp = delta_z.norm().item()
+                clamped = False
+                if cfg.vda_norm_clamp > 0:
+                    max_delta = cfg.vda_norm_clamp * latent_norm
+                    if delta_norm_before_clamp > max_delta:
+                        delta_z = delta_z * (max_delta / delta_norm_before_clamp)
+                        clamped = True
+                        logger.info(
+                            f"    [VDA step {step_index:2d}] ⚠️ Δz clamped: "
+                            f"{delta_norm_before_clamp:.4f} → {max_delta:.4f} "
+                            f"(ratio was {delta_norm_before_clamp/latent_norm:.4f}, "
+                            f"limit={cfg.vda_norm_clamp})"
+                        )
+
+                # ── Step 6: 应用修正 ──
+                latents_adjusted = latents_current + delta_z
+
+                # 计算偏移量 (用于统计)
+                shift = delta_z.norm().item()
+                shift_ratio = shift / max(latent_norm, 1e-8)  # Δz / ‖z‖
+
+                vda_stats["steps_applied"] += 1
+                vda_stats["total_shift"] += shift
+                vda_stats["avg_ref_speed_norm"] += v_ref_norm
+                vda_stats["avg_perp_ratio"] += perp_ratio
+                vda_stats["per_step"].append({
+                    "step": step_index,
+                    "t": t_progress,
+                    "t_curr_ref": t_curr_ref,
+                    "t_prev_ref": t_prev_ref,
+                    "gamma_t": gamma_t,
+                    "shift": shift,
+                    "shift_ratio": shift_ratio,
+                    "v_ref_norm": v_ref_norm,
+                    "v_gen_norm": v_gen_norm,
+                    "perp_ratio": perp_ratio,
+                    "proj_scalar": proj_scalar.item(),
+                    "angle_deg": angle_deg,
+                    "cos_v_ref_v_gen": cos_v_ref_v_gen,
+                    "clamped": clamped,
+                })
+
+                if vda_stats["first_vda_step"] is None:
+                    vda_stats["first_vda_step"] = step_index
+
+                # 每 5 步详细日志 + 最后一步
+                if step_index % 5 == 0 or step_index == num_steps - 1 or step_index == cfg.vda_start_step:
+                    logger.info(
+                        f"    [VDA step {step_index:2d}/{num_steps}] "
+                        f"t={t_progress:.3f}, γ_eff={gamma_t:.4f}, "
+                        f"shift={shift:.4f} ({shift_ratio:.4f}·‖z‖), "
+                        f"angle(v_ref,v_gen)={angle_deg:.1f}°, "
+                        f"v_ref={v_ref_norm:.2f}, v_gen={v_gen_norm:.2f}, "
+                        f"perp_ratio={perp_ratio:.4f}, proj={proj_scalar.item():.4f}"
+                    )
+
+                callback_kwargs["latents"] = latents_adjusted
+                prev_latent_holder[0] = latents_adjusted.clone()
+
+                return callback_kwargs
+
+            except Exception as e:
+                # 错误保护: 任何异常都不应中断生成流程
+                logger.error(
+                    f"    [VDA step {step_index:2d}] ❌ 异常: {type(e).__name__}: {e}"
+                )
+                import traceback
+                logger.error(traceback.format_exc())
+                logger.warning(
+                    f"    [VDA step {step_index:2d}] 跳过本步 VDA, 继续标准生成"
+                )
+                # 不修改 latents, 返回原始 callback_kwargs
+                if "latents" in callback_kwargs:
+                    prev_latent_holder[0] = callback_kwargs["latents"].clone()
+                return callback_kwargs
 
         # ── 构建生成参数 ──
         kwargs = {
@@ -2512,6 +2663,47 @@ class PFlowPipeline:
             f"avg_perp_ratio={avg_perp_ratio:.4f}"
         )
         if vda_stats["per_step"]:
+            # ── 角度统计 ──
+            angles = [s["angle_deg"] for s in vda_stats["per_step"]]
+            avg_angle = sum(angles) / len(angles)
+            min_angle = min(angles)
+            max_angle = max(angles)
+            logger.info(
+                f"    angle(v_ref,v_gen): avg={avg_angle:.1f}°, "
+                f"min={min_angle:.1f}°, max={max_angle:.1f}°"
+            )
+
+            # ── shift_ratio 统计 ──
+            shift_ratios = [s["shift_ratio"] for s in vda_stats["per_step"]]
+            avg_shift_ratio = sum(shift_ratios) / len(shift_ratios)
+            max_shift_ratio = max(shift_ratios)
+            logger.info(
+                f"    shift_ratio (Δz/‖z‖): avg={avg_shift_ratio:.6f}, "
+                f"max={max_shift_ratio:.6f}"
+            )
+
+            # ── clamp 统计 ──
+            n_clamped = sum(1 for s in vda_stats["per_step"] if s.get("clamped", False))
+            if n_clamped > 0:
+                logger.info(
+                    f"    ⚠️ {n_clamped}/{n_applied} 步被 clamp "
+                    f"(norm_clamp={cfg.vda_norm_clamp})"
+                )
+            else:
+                logger.info(
+                    f"    ✅ 无 clamp 发生 (norm_clamp={cfg.vda_norm_clamp})"
+                )
+
+            # ── v_gen 统计 ──
+            v_gen_norms = [s.get("v_gen_norm", 0) for s in vda_stats["per_step"]]
+            avg_v_gen = sum(v_gen_norms) / len(v_gen_norms)
+            logger.info(
+                f"    v_gen_norm: avg={avg_v_gen:.2f}, "
+                f"v_ref_norm: avg={avg_ref_speed:.2f}, "
+                f"ratio(v_ref/v_gen)={avg_ref_speed/max(avg_v_gen, 1e-8):.4f}"
+            )
+
+            # ── 前后半段对比 ──
             mid = len(vda_stats["per_step"]) // 2
             early = vda_stats["per_step"][:mid]
             late = vda_stats["per_step"][mid:]
@@ -2519,18 +2711,36 @@ class PFlowPipeline:
             late_avg_perp = sum(s["perp_ratio"] for s in late) / max(len(late), 1)
             early_avg_shift = sum(s["shift"] for s in early) / max(len(early), 1)
             late_avg_shift = sum(s["shift"] for s in late) / max(len(late), 1)
+            early_avg_angle = sum(s.get("angle_deg", 0) for s in early) / max(len(early), 1)
+            late_avg_angle = sum(s.get("angle_deg", 0) for s in late) / max(len(late), 1)
             logger.info(
-                f"    前半段: avg_perp_ratio={early_avg_perp:.4f}, avg_shift={early_avg_shift:.2f}"
+                f"    前半段: avg_perp_ratio={early_avg_perp:.4f}, "
+                f"avg_shift={early_avg_shift:.4f}, avg_angle={early_avg_angle:.1f}°"
             )
             logger.info(
-                f"    后半段: avg_perp_ratio={late_avg_perp:.4f}, avg_shift={late_avg_shift:.2f}"
+                f"    后半段: avg_perp_ratio={late_avg_perp:.4f}, "
+                f"avg_shift={late_avg_shift:.4f}, avg_angle={late_avg_angle:.1f}°"
             )
             logger.info(
                 f"    趋势: perp_ratio {early_avg_perp:.4f}→{late_avg_perp:.4f} "
                 f"({'正交性减弱' if late_avg_perp < early_avg_perp else '正交性增强'}), "
-                f"shift {early_avg_shift:.2f}→{late_avg_shift:.2f} "
-                f"({'衰减 ✓' if late_avg_shift < early_avg_shift else '增强 ⚠️'})"
+                f"shift {early_avg_shift:.4f}→{late_avg_shift:.4f} "
+                f"({'衰减 ✓' if late_avg_shift < early_avg_shift else '增强 ⚠️'}), "
+                f"angle {early_avg_angle:.1f}°→{late_avg_angle:.1f}° "
+                f"({'收敛 ✓' if late_avg_angle < early_avg_angle else '发散 ⚠️'})"
             )
+
+            # ── 逐步 shift 曲线 (紧凑格式, 每10步一组) ──
+            if n_applied > 10:
+                shift_curve = [f"{s['shift']:.3f}" for s in vda_stats["per_step"]]
+                logger.info(
+                    f"    shift curve (所有步): [{', '.join(shift_curve)}]"
+                )
+                ratio_curve = [f"{s['shift_ratio']:.5f}" for s in vda_stats["per_step"]]
+                logger.info(
+                    f"    shift_ratio curve: [{', '.join(ratio_curve)}]"
+                )
+
         logger.info("  ═══════════════════════════════════════════════")
 
         # 处理输出格式（同 _generate）
