@@ -2779,13 +2779,16 @@ class PFlowPipeline:
                     gamma_t = gamma_t * combined_scale
 
                     if step_index % 5 == 0 or step_index == cfg.vda_start_step:
+                        _probe_info = ("done:" + str(angle_gate_state['probe_verdict']) 
+                                       if angle_gate_state['probe_complete'] 
+                                       else f"{len(angle_gate_state['probe_angles'])}/{cfg.vda_angle_probe_steps}")
                         logger.info(
                             f"    [VDA v3 step {step_index:2d}] angle={angle_deg:.1f}°, "
                             f"per_step_scale={current_angle_scale:.3f}, "
                             f"global_scale={angle_gate_state['global_angle_scale']:.3f}, "
                             f"combined={combined_scale:.3f}, "
                             f"γ_eff={gamma_t:.5f}, "
-                            f"probe={'done:' + str(angle_gate_state['probe_verdict']) if angle_gate_state['probe_complete'] else f'{len(angle_gate_state["probe_angles"])}/{cfg.vda_angle_probe_steps}'}"
+                            f"probe={_probe_info}"
                         )
 
                 if cfg.vda_use_perp_only:
@@ -3425,6 +3428,8 @@ class PFlowPipeline:
         if video.min() < 0:
             video = denormalize_video(video)
         return video.clamp(0, 1)
+
+    def _vlm_refine(
         self,
         ref_video: torch.Tensor,
         gen_video: torch.Tensor,
