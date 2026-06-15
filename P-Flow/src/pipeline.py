@@ -35,7 +35,7 @@ import torch
 
 from .distributed import setup_single_gpu, load_model_single_gpu, cleanup_gpu_memory
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
-from .svd_filter import SVDFilter, SVDFilterConfig, compute_temporal_energy_ratio, compute_svd_diagnostics
+from .svd_filter import SVDFilter, SVDFilterConfig
 from .video_utils import (
     load_video, save_video_tensor, normalize_video, denormalize_video,
     create_vertical_composite,
@@ -77,20 +77,11 @@ class PFlowConfig:
     use_composite: bool = False    # Vertical Composite for VLM
     # ── Noise Prior 参数 ──
     alpha: float = 0.003           # 混合权重 (√α·η_temporal + √(1-α)·η_random)
-                                  # P-Flow论文用 0.001, 我们V2 renorm后有效信号增强约3x
-                                  # 推荐搜索范围: 0.001 ~ 0.01
+                                  # P-Flow论文用 0.001, 推荐搜索范围: 0.001 ~ 0.01
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
-    temporal_energy_threshold: float = 0.0  # 自适应SVD跳过阈值 (0=禁用; >0时低于此值跳过SVD)
-
-    # ── V2 SVD 新增参数 ──
-    svd_mode: str = "adaptive"    # SVD 滤波模式: v1 / renorm / rescale / highfreq / adaptive
-    svd_low_freq_ratio: float = 0.3  # 低频段占比 (highfreq 模式用)
-    svd_knee_auto: bool = True    # 自动拐点检测
-    svd_motion_threshold: float = 0.15  # 运动强度阈值 (adaptive 模式)
-    svd_diagnostics: bool = True  # 是否保存 SVD 诊断信息 (诊断期间默认开启)
 
     # ── Quality-Gated Alpha (方案 B) ──
     quality_gated_alpha: bool = False   # 是否启用 per-sample adaptive alpha
@@ -155,11 +146,14 @@ class PFlowConfig:
     # ── L3 V2: Velocity Direction Anchor (VDA) ──
     # 核心思想: 不做位置 lerp (已证明失败), 改做速度方向微调
     # 数学: 在 Flow ODE 每步去噪后, 用参考轨迹的速度方向信息微调当前 latent
-    #   v_ref = (z_ref[t-dt] - z_ref[t]) / dt  (反演速度, 取反=生成方向)
-    #   v_gen ≈ (z_gen[t+dt] - z_gen[t]) / dt   (差分估计的生成速度)
+    #   v_ref = (z_ref[curr] - z_ref[prev]) / dt  (生成方向: 噪声→数据)
+    #   v_gen ≈ (z_gen[t] - z_gen[t-1]) / dt       (差分估计的生成速度)
     #   v_ref_⊥ = v_ref - (v_ref·v_gen/‖v_gen‖²)·v_gen  (参考速度的正交分量)
     #   Δz = γ · v_ref_⊥ · dt  (方向修正冲量)
     #   z_adjusted = z_current + Δz
+    #
+    # 注意: ref_trajectory 的 t 约定 (t=1=数据, t=0=噪声) 与 WanPipeline (t=1=噪声, t=0=数据) 相反
+    #       VDA callback 中用 1-t_progress 做坐标变换
     #
     # 与 L2 的关系:
     #   L2 提供起点偏置 (SVD-blended z_T), L3 提供过程方向引导
@@ -267,6 +261,7 @@ class PFlowPipeline:
         self._pipe = None
         self._vlm_client = None
         self._prompt_embeds = None  # 缓存 prompt embedding (供 PODI 使用)
+        self._eta_temporal = None   # 缓存 eta_temporal (供 VDA quality gate 使用)
 
     @property
     def pipe(self):
@@ -361,11 +356,21 @@ class PFlowPipeline:
         eta_temporal = None
         prompt_embeds_for_diag = None
         ref_latents_enc = None
+        ref_trajectory_from_inversion = None  # 合并模式：反演时同时缓存的轨迹
         if cfg.use_inversion:
-            eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds_for_diag = \
-                self._compute_noise_prior(ref_video, caption)
+            # 判断是否需要在反演时同时缓存轨迹
+            need_trajectory = cfg.trajectory_anchor or cfg.velocity_anchor
+            cache_every_n = cfg.anchor_cache_every_n if need_trajectory else 1
+            eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds_for_diag, ref_trajectory_from_inversion = \
+                self._compute_noise_prior(
+                    ref_video, caption,
+                    cache_trajectory=need_trajectory and not cfg.use_midpoint,
+                    cache_every_n=cache_every_n,
+                )
             # 缓存 prompt embedding 供 PODI 使用
             self._prompt_embeds = prompt_embeds_for_diag
+            # 缓存 eta_temporal 供 VDA quality gate 使用
+            self._eta_temporal = eta_temporal
 
         # ── Step 3.5: Prompt-Noise 方向冲突诊断 ──
         if eta_temporal is not None and prompt_embeds_for_diag is not None:
@@ -381,28 +386,43 @@ class PFlowPipeline:
                     "  [Trajectory Anchor] trajectory_anchor=True 但 use_inversion=False, "
                     "自动启用 inversion 以获取参考轨迹"
                 )
-            # 需要参考 latent 和 prompt embedding
-            # 如果已经在 Step 3 做过 inversion，复用 ref_latents_enc 和 prompt_embeds
-            if ref_latents_enc is not None and prompt_embeds_for_diag is not None:
+
+            # 优先复用反演时已缓存的轨迹（合并模式）
+            if ref_trajectory_from_inversion is not None:
+                ref_trajectory = ref_trajectory_from_inversion
+                logger.info(
+                    f"  [Trajectory Anchor] ✅ 复用反演缓存的轨迹 "
+                    f"({len(ref_trajectory)} points), 无需二次反演"
+                )
+            elif ref_latents_enc is not None and prompt_embeds_for_diag is not None:
+                # 合并模式未启用（如 midpoint 模式），需要单独做反演
                 ref_lat = ref_latents_enc
                 p_emb = prompt_embeds_for_diag
+                traj_inverter = FlowMatchingInverter(
+                    pipe=self.pipe,
+                    num_inversion_steps=cfg.inversion_steps,
+                    guidance_scale=1.0,
+                    device=self.device,
+                )
+                _, ref_trajectory = traj_inverter.invert_with_trajectory(
+                    ref_lat, p_emb, p_emb,
+                    cache_every_n=cfg.anchor_cache_every_n,
+                )
             else:
-                # 没做过 inversion，现在做一次 encode + embed
+                # 没做过 inversion，现在做一次 encode + embed + 反演
                 ref_norm = normalize_video(ref_video).unsqueeze(0)
                 ref_lat = encode_video_to_latents(self.pipe, ref_norm, self.device)
                 p_emb = self._encode_prompt(caption)
-
-            # 用 invert_with_trajectory 获取带缓存的轨迹
-            traj_inverter = FlowMatchingInverter(
-                pipe=self.pipe,
-                num_inversion_steps=cfg.inversion_steps,
-                guidance_scale=1.0,
-                device=self.device,
-            )
-            _, ref_trajectory = traj_inverter.invert_with_trajectory(
-                ref_lat, p_emb, p_emb,
-                cache_every_n=cfg.anchor_cache_every_n,
-            )
+                traj_inverter = FlowMatchingInverter(
+                    pipe=self.pipe,
+                    num_inversion_steps=cfg.inversion_steps,
+                    guidance_scale=1.0,
+                    device=self.device,
+                )
+                _, ref_trajectory = traj_inverter.invert_with_trajectory(
+                    ref_lat, p_emb, p_emb,
+                    cache_every_n=cfg.anchor_cache_every_n,
+                )
 
             # ── 轨迹质量门控 (V2: η_temporal 帧间余弦相似度) ──
             # 核心思路: 用 η_temporal 的帧间 cos 评估参考视频的运动质量
@@ -604,7 +624,8 @@ class PFlowPipeline:
     # ─────────────────────────────────────────────────────────────
 
     def _compute_noise_prior(
-        self, ref_video: torch.Tensor, prompt: str
+        self, ref_video: torch.Tensor, prompt: str,
+        cache_trajectory: bool = False, cache_every_n: int = 1,
     ) -> tuple:
         """
         改动点: Inversion + SVD → η_temporal (V2)
@@ -616,9 +637,15 @@ class PFlowPipeline:
             - 支持高频段分离 (避免与 v7e 文本运动描述冲突)
             - 自适应模式根据 motion_strength 动态选择策略
 
+        Args:
+            ref_video: 参考视频张量
+            prompt: 文本描述
+            cache_trajectory: 是否在反演时同时缓存轨迹（用于 VDA / Trajectory Anchor）
+            cache_every_n: 轨迹缓存间隔
+
         Returns:
-            (eta_temporal, eta_inv_raw, z0, prompt_embeds):
-            SVD滤波后的噪声, 原始反演噪声(保留接口), VAE编码latent, prompt embedding
+            (eta_temporal, eta_inv_raw, z0, prompt_embeds, trajectory):
+            SVD滤波后的噪声, 原始反演噪声(保留接口), VAE编码latent, prompt embedding, 轨迹字典
         """
         logger.info("  [Inversion] encoding reference → latent...")
         ref_norm = normalize_video(ref_video).unsqueeze(0)
@@ -633,10 +660,18 @@ class PFlowPipeline:
             device=self.device,
         )
 
+        trajectory = None
         if self.config.use_midpoint:
             logger.info("  [Inversion] midpoint (2nd-order)...")
             eta_inv = inverter.invert_midpoint(
                 ref_latents, prompt_embeds, prompt_embeds
+            )
+        elif cache_trajectory:
+            # 合并模式：反演 + 轨迹缓存一步完成
+            logger.info("  [Inversion] euler (1st-order) + trajectory caching...")
+            eta_inv, trajectory = inverter.invert_with_trajectory(
+                ref_latents, prompt_embeds, prompt_embeds,
+                cache_every_n=cache_every_n,
             )
         else:
             logger.info("  [Inversion] euler (1st-order)...")
@@ -672,45 +707,25 @@ class PFlowPipeline:
 
         # SVD Filtering V2
         if self.config.use_svd:
-            svd_config = SVDFilterConfig(
-                rho_s=self.config.rho_s,
-                rho_m=self.config.rho_m,
-                mode=self.config.svd_mode,
-                low_freq_ratio=self.config.svd_low_freq_ratio,
-                knee_auto=self.config.svd_knee_auto,
-                motion_strength_threshold=self.config.svd_motion_threshold,
-                use_fast_svd=self.config.use_fast_svd,
-            )
+        svd_config = SVDFilterConfig(
+            rho_s=self.config.rho_s,
+            rho_m=self.config.rho_m,
+            use_fast_svd=self.config.use_fast_svd,
+        )
             svd_filter = SVDFilter(config=svd_config)
 
             logger.info(
-                f"  [SVD-V2] mode={self.config.svd_mode}, "
-                f"ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}"
+                f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}"
             )
 
             eta_temporal = svd_filter.filter(eta_inv)
-
-            # 可选: 保存诊断信息
-            if self.config.svd_diagnostics:
-                diag = compute_svd_diagnostics(eta_inv, config=svd_config)
-                logger.info(
-                    f"  [SVD-V2 Diagnostics] "
-                    f"motion_strength={diag['motion_strength']:.4f}, "
-                    f"k_m={diag['k_m']}, k_low={diag['k_low']}, "
-                    f"raw_std={diag['temporal_raw_std']:.4f}, "
-                    f"renormed_std={diag['temporal_renormed_std']:.4f}, "
-                    f"energy: low={diag['energy_low_freq_pct']:.1f}% "
-                    f"high={diag['energy_high_freq_pct']:.1f}% "
-                    f"residual={diag['energy_residual_pct']:.1f}%"
-                )
-                self._svd_diagnostics = diag
         else:
             eta_temporal = eta_inv
 
         logger.info(
             f"  η_temporal: mean={eta_temporal.mean():.4f}, std={eta_temporal.std():.4f}"
         )
-        return eta_temporal, eta_inv_raw, ref_latents, prompt_embeds
+        return eta_temporal, eta_inv_raw, ref_latents, prompt_embeds, trajectory
 
     def _resolve_negative_prompt(self, sample_id: int) -> str:
         """
@@ -1860,8 +1875,13 @@ class PFlowPipeline:
             # 即 step 0 完成后 t≈0.97, 最后一步完成后 t≈0.0
             t_progress = 1.0 - (step_index + 1) / num_steps
 
+            # ref_trajectory 的键 t 是反演的 t 约定: t=1.0=数据, t=0.0=噪声
+            # WanPipeline 的 t 约定: t 大=噪声, t 小=数据
+            # 需要反转 t_progress 来匹配 trajectory 键
+            t_traj = 1.0 - t_progress
+
             # 在参考轨迹中找最近的 t 点
-            t_ref = min(traj_keys, key=lambda t: abs(t - t_progress))
+            t_ref = min(traj_keys, key=lambda t: abs(t - t_traj))
 
             # 获取当前步的 β
             beta_t = beta_values[step_index]
@@ -2258,16 +2278,18 @@ class PFlowPipeline:
                 f"    所有帧: {[f'{c:.3f}' for c in frame_cos_sims]}"
             )
 
-        # ── 计算 motion strength (从 SVD diagnostics 中获取) ──
+        # ── 计算 motion strength (直接从 η_temporal 能量比估算) ──
         motion_strength = 0.0
-        if hasattr(self, '_svd_diagnostics') and self._svd_diagnostics is not None:
-            motion_strength = self._svd_diagnostics.get('motion_strength', 0.0)
+        if hasattr(self, '_eta_temporal') and self._eta_temporal is not None:
+            # motion_strength ≈ η_temporal 能量 / 原始噪声能量
+            temporal_energy = self._eta_temporal.var().item()
+            motion_strength = min(temporal_energy, 1.0)  # clamp to [0, 1]
             logger.info(
-                f"  [VDA Quality] SVD diagnostics: motion_strength={motion_strength:.4f}"
+                f"  [VDA Quality] motion_strength={motion_strength:.4f} (from η_temporal variance)"
             )
         else:
             logger.info(
-                f"  [VDA Quality] 无 SVD diagnostics (未使用 SVD), motion_strength=0.0"
+                f"  [VDA Quality] 无 η_temporal, motion_strength=0.0"
             )
 
         logger.info(
@@ -2449,12 +2471,18 @@ class PFlowPipeline:
 
                 # ── 当前 t 进度 ──
                 # WanPipeline: step_index 完成后, t 从 ~1.0 降到 1-(step_index+1)/N
+                # 在 Wan 约定中, t 大=噪声端, t 小=数据端
                 t_progress = 1.0 - (step_index + 1) / num_steps
 
                 # ── Step 1: 获取参考速度方向 ──
-                # 在 ref_trajectory 中找当前 t 和前一步 t 的最近点
-                t_curr_ref = min(traj_keys, key=lambda t: abs(t - t_progress))
-                t_prev_ref = min(traj_keys, key=lambda t: abs(t - (t_progress + dt_gen)))
+                # ref_trajectory 的键 t 是反演的 t 约定: t=1.0=数据, t=0.0=噪声
+                # WanPipeline 的 t 约定: t=1.0=噪声, t=0.0=数据
+                # 所以需要反转 t_progress 来匹配 trajectory 键
+                # t_progress=0.97 (Wan: 噪声端) → 1-0.97=0.03 (反演: 噪声端) ✓
+                t_traj_curr = 1.0 - t_progress       # 生成当前状态在反演轨迹中的对应 t
+                t_traj_prev = 1.0 - (t_progress + dt_gen)  # 生成前一步在反演轨迹中的对应 t
+                t_curr_ref = min(traj_keys, key=lambda t: abs(t - t_traj_curr))
+                t_prev_ref = min(traj_keys, key=lambda t: abs(t - t_traj_prev))
 
                 if t_curr_ref == t_prev_ref:
                     # 找不到两个不同的参考点 (边界情况), 跳过
@@ -2474,14 +2502,16 @@ class PFlowPipeline:
                     device=latents_current.device, dtype=latents_current.dtype
                 )
 
-                # 参考速度: 反演方向 (t 大 → t 小), 取差后得到反演方向的速度
-                dt_actual = t_prev_ref - t_curr_ref
+                # 参考速度: 生成方向 (噪声→数据)
+                # 在反演轨迹中, t_curr_ref 更接近数据端(反演起点), t_prev_ref 更接近噪声端(反演终点)
+                # 生成方向 = 从噪声到数据 = (数据端 - 噪声端) / dt
+                dt_actual = t_curr_ref - t_prev_ref
                 if abs(dt_actual) < 1e-10:
                     prev_latent_holder[0] = latents_current.clone()
                     vda_stats["steps_skipped"] += 1
                     return callback_kwargs
 
-                v_ref = (z_ref_prev - z_ref_curr) / abs(dt_actual)
+                v_ref = (z_ref_curr - z_ref_prev) / abs(dt_actual)
 
                 # ── Step 2: 估计生成速度 (差分) ──
                 if prev_latent_holder[0] is None:
@@ -2626,11 +2656,13 @@ class PFlowPipeline:
                 if vda_stats["first_vda_step"] is None:
                     vda_stats["first_vda_step"] = step_index
 
-                # 每 5 步详细日志 + 最后一步
+                # 每 5 步详细日志 + 最后一步 + 首步
                 if step_index % 5 == 0 or step_index == num_steps - 1 or step_index == cfg.vda_start_step:
                     logger.info(
                         f"    [VDA step {step_index:2d}/{num_steps}] "
-                        f"t={t_progress:.3f}, γ_eff={gamma_t:.4f}, "
+                        f"t_progress={t_progress:.3f}, t_traj_curr={t_traj_curr:.3f}, "
+                        f"t_curr_ref={t_curr_ref:.3f}, t_prev_ref={t_prev_ref:.3f}, "
+                        f"γ_eff={gamma_t:.4f}, "
                         f"shift={shift:.4f} ({shift_ratio:.4f}·‖z‖), "
                         f"angle(v_ref,v_gen)={angle_deg:.1f}°, "
                         f"v_ref={v_ref_norm:.2f}, v_gen={v_gen_norm:.2f}, "

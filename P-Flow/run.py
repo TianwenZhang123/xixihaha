@@ -80,25 +80,10 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42, help="随机种子")
     p.add_argument("--inversion_steps", type=int, default=50, help="反演ODE步数 (30=快速, 50=标准)")
     p.add_argument("--no_fast_svd", action="store_true", help="禁用 randomized SVD (使用精确SVD)")
-    p.add_argument("--temporal_energy_threshold", type=float, default=0.0,
-                   help="自适应SVD跳过阈值 (0=禁用; 推荐0.01, 低于此值跳过SVD)")
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--width", type=int, default=832)
     p.add_argument("--num_frames", type=int, default=81)
     p.add_argument("--fps", type=int, default=15)
-
-    # ── V2 SVD 参数 ──
-    p.add_argument("--svd_mode", type=str, default="adaptive",
-                   choices=["v1", "renorm", "rescale", "highfreq", "adaptive"],
-                   help="SVD滤波模式 (v1=原始, renorm=+标准化, rescale=等比缩放保方向, highfreq=高频+标准化, adaptive=自动)")
-    p.add_argument("--svd_low_freq_ratio", type=float, default=0.3,
-                   help="低频段占比 (highfreq模式下, 前30%%奇异值视为低频)")
-    p.add_argument("--no_knee_auto", action="store_true",
-                   help="禁用自动拐点检测, 使用固定 low_freq_ratio")
-    p.add_argument("--svd_motion_threshold", type=float, default=0.15,
-                   help="adaptive模式的运动强度阈值 (低于此值跳过SVD)")
-    p.add_argument("--svd_diagnostics", action="store_true",
-                   help="保存SVD诊断信息 (分析用)")
 
     # ── Quality-Gated Alpha (方案 B) ──
     p.add_argument("--quality_gated_alpha", action="store_true",
@@ -282,13 +267,6 @@ def build_config(args) -> PFlowConfig:
         negative_prompt=args.negative_prompt,
         negative_prompt_file=args.negative_prompt_dir,
         seed=args.seed,
-        temporal_energy_threshold=args.temporal_energy_threshold,
-        # V2 SVD 参数
-        svd_mode=args.svd_mode,
-        svd_low_freq_ratio=args.svd_low_freq_ratio,
-        svd_knee_auto=not args.no_knee_auto,
-        svd_motion_threshold=args.svd_motion_threshold,
-        svd_diagnostics=args.svd_diagnostics,
         # Quality-Gated Alpha
         quality_gated_alpha=args.quality_gated_alpha,
         qga_base_alpha=args.qga_base_alpha,
