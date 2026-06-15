@@ -707,11 +707,11 @@ class PFlowPipeline:
 
         # SVD Filtering V2
         if self.config.use_svd:
-        svd_config = SVDFilterConfig(
-            rho_s=self.config.rho_s,
-            rho_m=self.config.rho_m,
-            use_fast_svd=self.config.use_fast_svd,
-        )
+            svd_config = SVDFilterConfig(
+                rho_s=self.config.rho_s,
+                rho_m=self.config.rho_m,
+                use_fast_svd=self.config.use_fast_svd,
+            )
             svd_filter = SVDFilter(config=svd_config)
 
             logger.info(
