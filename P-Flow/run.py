@@ -231,6 +231,10 @@ def parse_args():
     p.add_argument("--fi_cache_mode", type=str, default="attention",
                    choices=["attention", "hidden", "mlp"],
                    help="FI 缓存特征类型: attention=cross-attn输出(推荐), hidden=block输出, mlp=ffn输出")
+    p.add_argument("--fi_no_adaptive_gate", action="store_true",
+                   help="禁用 FI 自适应门控 (默认开启: 特征越接近参考→注入越少)")
+    p.add_argument("--fi_adaptive_temp", type=float, default=5.0,
+                   help="FI 自适应门控温度 (越大越敏感, 推荐 3~10; 默认 5.0)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
@@ -364,6 +368,8 @@ def build_config(args) -> PFlowConfig:
         fi_schedule=args.fi_schedule,
         fi_quality_gate=not args.fi_no_quality_gate,
         fi_cache_mode=args.fi_cache_mode,
+        fi_adaptive_gate=not args.fi_no_adaptive_gate,
+        fi_adaptive_temp=args.fi_adaptive_temp,
     )
 
 
@@ -490,7 +496,8 @@ def main():
             vda_info += f", angle_gate(probe={config.vda_angle_probe_steps}, thr={config.vda_angle_probe_threshold}°, decay={config.vda_angle_gate_decay})"
         print(vda_info)
     if config.feature_inject:
-        print(f"  [FI] λ={config.fi_lambda}, layers={config.fi_layers}, schedule={config.fi_schedule}, mode={config.fi_cache_mode}")
+        fi_adapt_str = f", adaptive(temp={config.fi_adaptive_temp})" if config.fi_adaptive_gate else ""
+        print(f"  [FI] λ={config.fi_lambda}, layers={config.fi_layers}, schedule={config.fi_schedule}, mode={config.fi_cache_mode}{fi_adapt_str}")
     if config.use_iter:
         print(f"  iterations={config.i_max}")
     print()

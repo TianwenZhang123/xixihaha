@@ -219,6 +219,8 @@ class PFlowConfig:
     # λ=0: 无注入, λ=1: 完全替换为参考特征
     fi_schedule: str = "middle_peak"      # λ 调度策略 (同 VDA: middle_peak / warmup_decay / cosine_decay / constant)
     fi_quality_gate: bool = True          # 是否启用质量门控 (基于 mean_cos)
+    fi_adaptive_gate: bool = True         # 是否启用特征对齐自适应门控
+    fi_adaptive_temp: float = 5.0          # 自适应门控温度 (越大越敏感, 推荐 3~10)
     fi_cache_mode: str = "attention"      # 缓存什么特征:
     #   attention: cross-attention 输出 (语义对齐, 推荐)
     #   hidden: 完整 hidden_states (信息丰富但维度大)
@@ -273,7 +275,11 @@ class PFlowConfig:
             vda_desc += ")"
             flags.append(vda_desc)
         if self.feature_inject:
-            flags.append(f"feature_inject(λ={self.fi_lambda}, layers={self.fi_layers}, sched={self.fi_schedule}, mode={self.fi_cache_mode})")
+            fi_desc = f"feature_inject(λ={self.fi_lambda}, layers={self.fi_layers}, sched={self.fi_schedule}, mode={self.fi_cache_mode}"
+            if self.fi_adaptive_gate:
+                fi_desc += f", adaptive(temp={self.fi_adaptive_temp})"
+            fi_desc += ")"
+            flags.append(fi_desc)
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -3278,6 +3284,11 @@ class PFlowPipeline:
             f"quality_scale={quality_scale:.4f}, "
             f"layers={target_layers}, cache_mode={cfg.fi_cache_mode}"
         )
+        if cfg.fi_adaptive_gate:
+            logger.info(
+                f"  [FI] 自适应门控: ON, temp={cfg.fi_adaptive_temp} "
+                f"(特征越接近参考→注入越少)"
+            )
 
         # ── FI 统计 ──
         fi_stats = {
@@ -3326,8 +3337,34 @@ class PFlowPipeline:
                         )
                     return output
 
-                # 残差注入: h_injected = (1-λ)*h_current + λ*h_ref
-                h_injected = (1.0 - lam) * h_current + lam * h_ref_dev
+                # ── 自适应门控: 基于特征对齐度调节 λ ──
+                lam_eff = lam
+                if cfg.fi_adaptive_gate and lam > 1e-8:
+                    # 计算当前特征与参考特征的余弦相似度
+                    h_cur_flat = h_current.flatten()
+                    h_ref_flat = h_ref_dev.flatten()
+                    cos_sim = torch.nn.functional.cosine_similarity(
+                        h_cur_flat.unsqueeze(0), h_ref_flat.unsqueeze(0)
+                    ).item()
+                    # cos_sim 高 → 特征已对齐 → 不需要注入 → gate 小
+                    # cos_sim 低 → 特征偏离 → 需要注入 → gate 大
+                    # gate = 1 - sigmoid(temp * (cos_sim - 0.5))
+                    # 当 cos_sim=0.5 时 gate=0.5, cos_sim=1 时 gate→0, cos_sim=0 时 gate→1
+                    gate = 1.0 - torch.sigmoid(
+                        torch.tensor(cfg.fi_adaptive_temp * (cos_sim - 0.5))
+                    ).item()
+                    lam_eff = lam * gate
+
+                    # 每5步记录一次自适应门控统计
+                    if step_idx_ref[0] % 5 == 0 and layer_idx == target_layers[0]:
+                        logger.debug(
+                            f"      [FI Adaptive] step={step_idx_ref[0]}, "
+                            f"layer={layer_idx}, cos={cos_sim:.4f}, "
+                            f"gate={gate:.4f}, λ={lam:.5f}→{lam_eff:.5f}"
+                        )
+
+                # 残差注入: h_injected = (1-λ_eff)*h_current + λ_eff*h_ref
+                h_injected = (1.0 - lam_eff) * h_current + lam_eff * h_ref_dev
 
                 # 记录注入统计
                 injection_norm = (h_injected - h_current).norm().item()
