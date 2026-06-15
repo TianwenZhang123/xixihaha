@@ -3104,9 +3104,11 @@ class PFlowPipeline:
 
         if cfg.fi_layers == "all":
             target_layers = list(range(num_layers))
+        elif cfg.fi_layers == "early":
+            target_layers = list(range(0, num_layers // 3))
         elif cfg.fi_layers == "mid":
             target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
-        elif cfg.fi_layers == "last":
+        elif cfg.fi_layers in ("last", "late"):  # late 是 last 的别名
             target_layers = list(range(2 * num_layers // 3, num_layers))
         else:
             # 逗号分隔的层号
