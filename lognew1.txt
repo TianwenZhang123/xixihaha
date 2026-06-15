@@ -1,0 +1,313 @@
+root@autodl-container-027f4cad3d-4acf2c67:~/xixihaha/P-Flow# # 方向3: Feature Injection (3 samples 测试)
+cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/FI_mid_lambda01_3samples \
+    --sample_ids 7 17 21 \
+    --inversion --svd --blend --alpha 0.004 \
+    --feature_inject --fi_layers mid --fi_lambda 0.1 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
+    --seed 42 --verbose
+
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/FI_mid_lambda01_3samples \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/FI_mid_lambda01_3samples/eval_clip
+2026-06-15 15:11:41,372 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/FI_mid_lambda01_3samples/run_log.txt
+P-Flow | pflow_inversion_svd_blend_feature_inject
+  Flags: ['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.1, layers=mid, sched=middle_peak, mode=attention)']
+  alpha=0.004, rho_s=0.1, rho_m=0.9
+  [FI] λ=0.1, layers=mid, schedule=middle_peak, mode=attention
+
+2026-06-15 15:11:41,389 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 3 个样本
+实验: pflow_inversion_svd_blend_feature_inject
+Flags: ['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.1, layers=mid, sched=middle_peak, mode=attention)']
+
+  [1/3] 处理 7...
+2026-06-15 15:11:41,391 [INFO] [P-Flow] sample=7, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.1, layers=mid, sched=middle_peak, mode=attention)']
+2026-06-15 15:11:43,513 [INFO]   [Inversion] encoding reference → latent...
+2026-06-15 15:11:43,530 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-15 15:11:43,530 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+Loading checkpoint shards: 100%|███████████████████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  7.83it/s]
+Loading checkpoint shards: 100%|███████████████████████████████████████████████████████████████████████████████████| 5/5 [00:01<00:00,  3.67it/s]
+Loading pipeline components...: 100%|██████████████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  2.23it/s]
+2026-06-15 15:11:51,198 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-15 15:11:51,199 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-15 15:11:53,760 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-15 15:11:53,760 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|███████████████▎                                                                     | 9/50 [00:16<01:16,  1.85s/it]2026-06-15 15:12:12,318 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0884, std=0.5312, cached=11 points
+Inversion + Trajectory:  38%|███████████████████████████████▉                                                    | 19/50 [00:35<00:57,  1.86s/it]2026-06-15 15:12:30,946 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.1074, std=0.6562, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████████▋                                   | 29/50 [00:54<00:39,  1.87s/it]2026-06-15 15:12:49,654 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.1309, std=0.8086, cached=31 points
+Inversion + Trajectory:  78%|█████████████████████████████████████████████████████████████████▌                  | 39/50 [01:12<00:20,  1.87s/it]2026-06-15 15:13:08,393 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.1582, std=0.9883, cached=41 points
+Inversion + Trajectory:  98%|██████████████████████████████████████████████████████████████████████████████████▎ | 49/50 [01:31<00:01,  1.88s/it]2026-06-15 15:13:27,151 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.1855, std=1.1797, cached=51 points
+2026-06-15 15:13:27,151 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.1855, std=1.1797                              
+2026-06-15 15:13:27,168 [INFO]   [Inversion Quality] η_inv: std=1.1797, mean=-0.1855, range=[-3.578, 3.750], cos_sim(η_inv, random)=0.0002, cos_sim(η_inv, z0)=0.9844
+2026-06-15 15:13:27,168 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-15 15:13:27,243 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-15 15:13:27,254 [DEBUG]   [Stage2] Temporal: kept top-8/21 components
+2026-06-15 15:13:27,254 [INFO]   η_temporal: mean=0.0013, std=0.3730
+2026-06-15 15:13:27,254 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:13:27,254 [INFO]   [CONFLICT DIAG] Prompt-SVD 方向冲突诊断
+2026-06-15 15:13:27,254 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:13:27,254 [INFO]   [CONFLICT DIAG] Caption 运动关键词:
+2026-06-15 15:13:27,254 [INFO]     direction: ['up']
+2026-06-15 15:13:27,254 [INFO]     speed: ['gentle']
+2026-06-15 15:13:27,254 [INFO]     camera: ['view', 'close-up']
+2026-06-15 15:13:27,254 [INFO]     motion: ['move']
+2026-06-15 15:13:27,254 [INFO]   [CONFLICT DIAG] ⚠️ Caption 包含 5 个运动关键词 → prompt 已有明确运动指令，SVD 方向若不一致则产生冲突
+2026-06-15 15:13:27,254 [INFO]   [CONFLICT DIAG] η_temporal shape=[1, 16, 21, 60, 104], parsed frames=16
+2026-06-15 15:13:27,257 [INFO]   [CONFLICT DIAG] 帧间余弦相似度: mean=0.0567, std=0.3282, range=[-0.5977, 0.6992]
+2026-06-15 15:13:27,257 [INFO]   [CONFLICT DIAG] ✓ 低帧间相关性 (mean_cos=0.0567 ≤ 0.1) → SVD 噪声接近随机，冲突风险低
+2026-06-15 15:13:27,259 [INFO]   [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos=-0.4530 (>0.5=强方向运动, <0.1=无规律)
+2026-06-15 15:13:27,259 [INFO]   [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)=0.0393 (高值=持续单向运动)
+2026-06-15 15:13:27,260 [INFO]   [CONFLICT DIAG] SVD 空间能量分布 (%): TL=24.8% TR=20.7% BL=25.7% BR=28.7%
+2026-06-15 15:13:27,260 [INFO]   [CONFLICT DIAG] SVD 能量空间均匀分布，无明显方向偏好
+2026-06-15 15:13:27,260 [INFO]   [CONFLICT DIAG] ★ 冲突风险评估: LOW
+2026-06-15 15:13:27,260 [INFO]   [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; (3) 使用简化 prompt 无运动描述
+2026-06-15 15:13:27,260 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:13:27,260 [INFO]   [Trajectory Anchor] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-15 15:13:27,260 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:13:27,260 [INFO]   [FI] 开始缓存参考特征
+2026-06-15 15:13:27,260 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:13:27,260 [INFO]   [FI] 缓存 30 个关键步的特征 (对应 30 步生成)
+2026-06-15 15:13:27,260 [INFO]   [FI] 注入层: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19] (10/30 层)
+2026-06-15 15:13:28,768 [INFO]     [FI Cache] step 0: t_traj=0.040, cached 10 layers
+2026-06-15 15:13:41,423 [INFO]     [FI Cache] step 5: t_traj=0.200, cached 10 layers
+2026-06-15 15:13:54,112 [INFO]     [FI Cache] step 10: t_traj=0.360, cached 10 layers
+2026-06-15 15:14:06,846 [INFO]     [FI Cache] step 15: t_traj=0.540, cached 10 layers
+2026-06-15 15:14:19,360 [INFO]     [FI Cache] step 20: t_traj=0.700, cached 10 layers
+2026-06-15 15:14:31,614 [INFO]     [FI Cache] step 25: t_traj=0.860, cached 10 layers
+2026-06-15 15:14:41,346 [INFO]   [FI] 参考特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-15 15:14:41,956 [INFO]   [Trajectory Anchor] η_temporal 帧间一致性: mean_cos=0.0567, std=0.3282, range=[-0.5977, 0.6992] (阈值=0.05)
+2026-06-15 15:14:41,956 [INFO]   [Trajectory Anchor] ✅ 门控通过 (mean_cos=0.0567 >= 0.05)，启用轨迹锚定 + SVD blend
+2026-06-15 15:14:41,956 [INFO]   [Trajectory Anchor] Cached 51 trajectory points, t range=[0.000, 1.000]
+2026-06-15 15:14:41,956 [INFO]   [Noise Decision Summary] trajectory_anchor=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE (shape={eta_temporal.shape}), use_blend=True
+2026-06-15 15:14:41,956 [INFO]   [Noise Decision] → 将使用 SVD-blended 噪声 (α=0.004)
+2026-06-15 15:14:41,956 [INFO]   iter 1/1: The video depicts a close-up view of a cup filled with dark ...
+2026-06-15 15:14:41,957 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3730, η_mixed std=0.9961, mean=0.0005
+2026-06-15 15:14:41,957 [INFO]   [Blend Diag] cos(temporal, random)=0.0002, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0242
+2026-06-15 15:14:41,958 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024517 (越大越说明 temporal 有影响)
+2026-06-15 15:14:41,958 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:14:41,958 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-15 15:14:41,958 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:14:41,958 [INFO]   [VDA Schedule] type=middle_peak, gamma_max=0.1, num_steps=30
+2026-06-15 15:14:41,958 [INFO]   [VDA Schedule] peak at step 15 (γ=0.0999), first 5: ['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5: ['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-15 15:14:41,958 [INFO]   [VDA Schedule] middle 5: ['0.0987', '0.0999', '0.0999', '0.0987', '0.0964']
+2026-06-15 15:14:41,958 [INFO]   [VDA Schedule] sum(γ)=1.8444, mean(γ)=0.0615
+2026-06-15 15:14:41,958 [INFO]   [VDA Quality] 输入 eta_temporal: shape=[1, 16, 21, 60, 104], dtype=torch.bfloat16, device=cuda:0
+2026-06-15 15:14:41,958 [INFO]   [VDA Quality] permute: [torch.Size([1, 16, 21, 60, 104])] → [[1, 21, 16, 60, 104]] (frame>channel, swapped)
+2026-06-15 15:14:41,958 [INFO]   [VDA Quality] 解析后: eta_gate shape=[1, 21, 16, 60, 104], num_frames=16
+2026-06-15 15:14:41,960 [INFO]   [VDA Quality] 逐帧cos (共15对): mean=0.0567, min=-0.5977, max=0.6992
+2026-06-15 15:14:41,960 [INFO]     前5帧: ['0.229', '-0.060', '0.605', '-0.266', '-0.036'], 后5帧: ['0.031', '0.270', '0.142', '-0.153', '0.699']
+2026-06-15 15:14:41,960 [INFO]   [VDA Quality] motion_strength=0.1396 (from η_temporal variance)
+2026-06-15 15:14:41,961 [INFO]   [VDA Quality] motion_coherence=0.0567, motion_strength=0.1396
+2026-06-15 15:14:41,961 [INFO]   [VDA Quality] sigmoid计算: mean_cos=0.056706, threshold=0.05, k=20.0, exp_arg=-0.1341
+2026-06-15 15:14:41,961 [INFO]   [VDA Quality] 软门控: mean_cos=0.0567, threshold=0.05, sigmoid_val=0.5335, scale=0.5801 (⚡ 弱引导)
+2026-06-15 15:14:41,961 [INFO]   [FI] λ_max=0.1, schedule=middle_peak, quality_scale=0.5801, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:59<00:00,  3.99s/it]
+2026-06-15 15:16:45,195 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:16:45,195 [INFO]   [FI] 生成完成总结
+2026-06-15 15:16:45,195 [INFO]     λ schedule: first 5=['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5=['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-15 15:16:45,195 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-15 15:16:47,720 [INFO] [P-Flow] Done in 306.3s → outputs/FI_mid_lambda01_3samples/sample_7/7.mp4
+2026-06-15 15:16:47,721 [INFO]   [SAMPLE SUMMARY] sample_id=7
+2026-06-15 15:16:47,721 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls, and they appear to be miniature models. The liquid in the cup is smooth, with some ripples around the boats, suggesting a gentle movement. The lighting highlights the reflective surface of the liquid, creating subtle reflections of the boats. The background is slightly blurred, focusing attention on the cup and the boats. The overall scene has a serene and whimsical feel, as if the boats are sailing on a miniature sea within the cup.
+2026-06-15 15:16:47,721 [INFO]   [SAMPLE SUMMARY] caption_length=630 chars, word_count=108
+2026-06-15 15:16:47,721 [INFO]   [SAMPLE SUMMARY] elapsed=306.3s, output=outputs/FI_mid_lambda01_3samples/sample_7/7.mp4
+  [2/3] 处理 17...
+2026-06-15 15:16:49,082 [INFO] [P-Flow] sample=17, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.1, layers=mid, sched=middle_peak, mode=attention)']
+2026-06-15 15:16:51,284 [INFO]   [Inversion] encoding reference → latent...
+2026-06-15 15:16:53,609 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-15 15:16:53,609 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|███████████████▎                                                                     | 9/50 [00:16<01:16,  1.87s/it]2026-06-15 15:17:12,387 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0649, std=0.4219, cached=11 points
+Inversion + Trajectory:  38%|███████████████████████████████▉                                                    | 19/50 [00:35<00:58,  1.88s/it]2026-06-15 15:17:31,153 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0771, std=0.5195, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████████▋                                   | 29/50 [00:54<00:39,  1.88s/it]2026-06-15 15:17:49,942 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0913, std=0.6445, cached=31 points
+Inversion + Trajectory:  78%|█████████████████████████████████████████████████████████████████▌                  | 39/50 [01:13<00:20,  1.88s/it]2026-06-15 15:18:08,740 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.1089, std=0.7930, cached=41 points
+Inversion + Trajectory:  98%|██████████████████████████████████████████████████████████████████████████████████▎ | 49/50 [01:32<00:01,  1.88s/it]2026-06-15 15:18:27,544 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.1279, std=0.9727, cached=51 points
+2026-06-15 15:18:27,544 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.1279, std=0.9727                               
+2026-06-15 15:18:27,546 [INFO]   [Inversion Quality] η_inv: std=0.9727, mean=0.1279, range=[-3.500, 4.312], cos_sim(η_inv, random)=-0.0005, cos_sim(η_inv, z0)=0.9688
+2026-06-15 15:18:27,546 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-15 15:18:27,561 [DEBUG]   [Stage1] Spatial: removed top-16 components
+2026-06-15 15:18:27,565 [DEBUG]   [Stage2] Temporal: kept top-10/21 components
+2026-06-15 15:18:27,565 [INFO]   η_temporal: mean=-0.0001, std=0.3320
+2026-06-15 15:18:27,569 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:18:27,569 [INFO]   [CONFLICT DIAG] Prompt-SVD 方向冲突诊断
+2026-06-15 15:18:27,569 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:18:27,569 [INFO]   [CONFLICT DIAG] Caption 运动关键词:
+2026-06-15 15:18:27,570 [INFO]     direction: ['up', 'forward']
+2026-06-15 15:18:27,570 [INFO]     camera: ['view']
+2026-06-15 15:18:27,570 [INFO]     motion: ['move']
+2026-06-15 15:18:27,570 [INFO]   [CONFLICT DIAG] ⚠️ Caption 包含 4 个运动关键词 → prompt 已有明确运动指令，SVD 方向若不一致则产生冲突
+2026-06-15 15:18:27,570 [INFO]   [CONFLICT DIAG] η_temporal shape=[1, 16, 21, 60, 104], parsed frames=16
+2026-06-15 15:18:27,572 [INFO]   [CONFLICT DIAG] 帧间余弦相似度: mean=-0.0195, std=0.2162, range=[-0.3223, 0.4785]
+2026-06-15 15:18:27,572 [INFO]   [CONFLICT DIAG] ✓ 低帧间相关性 (mean_cos=-0.0195 ≤ 0.1) → SVD 噪声接近随机，冲突风险低
+2026-06-15 15:18:27,574 [INFO]   [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos=-0.5172 (>0.5=强方向运动, <0.1=无规律)
+2026-06-15 15:18:27,574 [INFO]   [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)=0.1299 (高值=持续单向运动)
+2026-06-15 15:18:27,575 [INFO]   [CONFLICT DIAG] SVD 空间能量分布 (%): TL=32.9% TR=24.4% BL=22.0% BR=20.8%
+2026-06-15 15:18:27,575 [INFO]   [CONFLICT DIAG] SVD 方向偏好: SVD 能量偏上
+2026-06-15 15:18:27,575 [INFO]   [CONFLICT DIAG] ⚠️ Prompt 方向: ['up', 'forward'] vs SVD: ['SVD 能量偏上'] → 请人工判断是否冲突
+2026-06-15 15:18:27,575 [INFO]   [CONFLICT DIAG] ★ 冲突风险评估: HIGH
+2026-06-15 15:18:27,575 [INFO]   [CONFLICT DIAG]   原因: prompt 和 SVD 都有方向偏好
+2026-06-15 15:18:27,575 [INFO]   [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; (3) 使用简化 prompt 无运动描述
+2026-06-15 15:18:27,575 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:18:27,575 [INFO]   [Trajectory Anchor] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-15 15:18:27,576 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:18:27,576 [INFO]   [FI] 开始缓存参考特征
+2026-06-15 15:18:27,576 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:18:27,576 [INFO]   [FI] 缓存 30 个关键步的特征 (对应 30 步生成)
+2026-06-15 15:18:27,576 [INFO]   [FI] 注入层: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19] (10/30 层)
+2026-06-15 15:18:29,482 [INFO]     [FI Cache] step 0: t_traj=0.040, cached 10 layers
+2026-06-15 15:18:41,312 [INFO]     [FI Cache] step 5: t_traj=0.200, cached 10 layers
+2026-06-15 15:18:53,897 [INFO]     [FI Cache] step 10: t_traj=0.360, cached 10 layers
+2026-06-15 15:19:06,630 [INFO]     [FI Cache] step 15: t_traj=0.540, cached 10 layers
+2026-06-15 15:19:19,337 [INFO]     [FI Cache] step 20: t_traj=0.700, cached 10 layers
+2026-06-15 15:19:32,114 [INFO]     [FI Cache] step 25: t_traj=0.860, cached 10 layers
+2026-06-15 15:19:42,342 [INFO]   [FI] 参考特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-15 15:19:42,953 [INFO]   [Trajectory Anchor] η_temporal 帧间一致性: mean_cos=-0.0195, std=0.2162, range=[-0.3223, 0.4785] (阈值=0.05)
+2026-06-15 15:19:42,953 [WARNING]   [Trajectory Anchor] ⚠️ η_temporal 帧间一致性过低 (mean_cos=-0.0195 < 0.05)，跳过轨迹锚定，但保留 SVD blend (α=0.004)
+2026-06-15 15:19:42,954 [INFO]   [Trajectory Anchor] Generator 已重置 (seed=59)，生成将使用 SVD-blended 噪声（保留运动先验，无轨迹约束）
+2026-06-15 15:19:42,954 [INFO]   [Noise Decision Summary] trajectory_anchor=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE (shape={eta_temporal.shape}), use_blend=True
+2026-06-15 15:19:42,954 [INFO]   [Noise Decision] → 将使用 SVD-blended 噪声 (α=0.004)
+2026-06-15 15:19:42,954 [INFO]   iter 1/1: The video depicts a white SUV driving on a dusty, unpaved ro...
+2026-06-15 15:19:42,954 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3320, η_mixed std=0.9961, mean=-0.0004
+2026-06-15 15:19:42,955 [INFO]   [Blend Diag] cos(temporal, random)=0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0216
+2026-06-15 15:19:42,955 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021840 (越大越说明 temporal 有影响)
+2026-06-15 15:19:42,955 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:19:42,955 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-15 15:19:42,955 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:19:42,955 [INFO]   [VDA Schedule] type=middle_peak, gamma_max=0.1, num_steps=30
+2026-06-15 15:19:42,955 [INFO]   [VDA Schedule] peak at step 15 (γ=0.0999), first 5: ['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5: ['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-15 15:19:42,955 [INFO]   [VDA Schedule] middle 5: ['0.0987', '0.0999', '0.0999', '0.0987', '0.0964']
+2026-06-15 15:19:42,955 [INFO]   [VDA Schedule] sum(γ)=1.8444, mean(γ)=0.0615
+2026-06-15 15:19:42,955 [INFO]   [VDA Quality] 输入 eta_temporal: shape=[1, 16, 21, 60, 104], dtype=torch.bfloat16, device=cuda:0
+2026-06-15 15:19:42,955 [INFO]   [VDA Quality] permute: [torch.Size([1, 16, 21, 60, 104])] → [[1, 21, 16, 60, 104]] (frame>channel, swapped)
+2026-06-15 15:19:42,956 [INFO]   [VDA Quality] 解析后: eta_gate shape=[1, 21, 16, 60, 104], num_frames=16
+2026-06-15 15:19:42,958 [INFO]   [VDA Quality] 逐帧cos (共15对): mean=-0.0195, min=-0.3223, max=0.4785
+2026-06-15 15:19:42,958 [INFO]     前5帧: ['0.072', '0.051', '0.479', '-0.057', '-0.048'], 后5帧: ['0.183', '-0.322', '-0.159', '-0.199', '0.346']
+2026-06-15 15:19:42,958 [INFO]   [VDA Quality] motion_strength=0.1099 (from η_temporal variance)
+2026-06-15 15:19:42,958 [INFO]   [VDA Quality] motion_coherence=-0.0195, motion_strength=0.1099
+2026-06-15 15:19:42,958 [INFO]   [VDA Quality] sigmoid计算: mean_cos=-0.019474, threshold=0.05, k=20.0, exp_arg=1.3895
+2026-06-15 15:19:42,958 [INFO]   [VDA Quality] 软门控: mean_cos=-0.0195, threshold=0.05, sigmoid_val=0.1995, scale=0.2795 (⚠️ 微弱引导)
+2026-06-15 15:19:42,958 [INFO]   [FI] λ_max=0.1, schedule=middle_peak, quality_scale=0.2795, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:02<00:00,  4.09s/it]
+2026-06-15 15:21:49,208 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:21:49,208 [INFO]   [FI] 生成完成总结
+2026-06-15 15:21:49,208 [INFO]     λ schedule: first 5=['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5=['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-15 15:21:49,208 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-15 15:21:51,916 [INFO] [P-Flow] Done in 302.8s → outputs/FI_mid_lambda01_3samples/sample_17/17.mp4
+2026-06-15 15:21:51,917 [INFO]   [SAMPLE SUMMARY] sample_id=17
+2026-06-15 15:21:51,917 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear, suggesting it might be on a journey or adventure. As the SUV moves forward, it kicks up a cloud of dust behind it, indicating the dryness of the terrain and the speed at which it is traveling. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure.
+2026-06-15 15:21:51,917 [INFO]   [SAMPLE SUMMARY] caption_length=539 chars, word_count=94
+2026-06-15 15:21:51,917 [INFO]   [SAMPLE SUMMARY] elapsed=302.8s, output=outputs/FI_mid_lambda01_3samples/sample_17/17.mp4
+  [3/3] 处理 21...
+2026-06-15 15:21:53,409 [INFO] [P-Flow] sample=21, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.1, layers=mid, sched=middle_peak, mode=attention)']
+2026-06-15 15:21:55,698 [INFO]   [Inversion] encoding reference → latent...
+2026-06-15 15:21:58,022 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-15 15:21:58,022 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|███████████████▎                                                                     | 9/50 [00:16<01:17,  1.88s/it]2026-06-15 15:22:16,825 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0339, std=0.4102, cached=11 points
+Inversion + Trajectory:  38%|███████████████████████████████▉                                                    | 19/50 [00:35<00:58,  1.88s/it]2026-06-15 15:22:35,620 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0400, std=0.5039, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████████▋                                   | 29/50 [00:54<00:39,  1.88s/it]2026-06-15 15:22:54,444 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0469, std=0.6172, cached=31 points
+Inversion + Trajectory:  78%|█████████████████████████████████████████████████████████████████▌                  | 39/50 [01:13<00:20,  1.89s/it]2026-06-15 15:23:13,307 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0552, std=0.7578, cached=41 points
+Inversion + Trajectory:  98%|██████████████████████████████████████████████████████████████████████████████████▎ | 49/50 [01:32<00:01,  1.89s/it]2026-06-15 15:23:32,161 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0649, std=0.9258, cached=51 points
+2026-06-15 15:23:32,162 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0649, std=0.9258                               
+2026-06-15 15:23:32,163 [INFO]   [Inversion Quality] η_inv: std=0.9258, mean=0.0649, range=[-3.797, 3.672], cos_sim(η_inv, random)=0.0008, cos_sim(η_inv, z0)=0.9688
+2026-06-15 15:23:32,163 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-15 15:23:32,176 [DEBUG]   [Stage1] Spatial: removed top-19 components
+2026-06-15 15:23:32,181 [DEBUG]   [Stage2] Temporal: kept top-14/21 components
+2026-06-15 15:23:32,181 [INFO]   η_temporal: mean=0.0001, std=0.3281
+2026-06-15 15:23:32,185 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:23:32,185 [INFO]   [CONFLICT DIAG] Prompt-SVD 方向冲突诊断
+2026-06-15 15:23:32,185 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:23:32,185 [INFO]   [CONFLICT DIAG] Caption 运动关键词:
+2026-06-15 15:23:32,185 [INFO]     motion: ['move']
+2026-06-15 15:23:32,185 [INFO]   [CONFLICT DIAG] ⚠️ Caption 包含 1 个运动关键词 → prompt 已有明确运动指令，SVD 方向若不一致则产生冲突
+2026-06-15 15:23:32,185 [INFO]   [CONFLICT DIAG] η_temporal shape=[1, 16, 21, 60, 104], parsed frames=16
+2026-06-15 15:23:32,187 [INFO]   [CONFLICT DIAG] 帧间余弦相似度: mean=0.0609, std=0.1760, range=[-0.2080, 0.3457]
+2026-06-15 15:23:32,187 [INFO]   [CONFLICT DIAG] ✓ 低帧间相关性 (mean_cos=0.0609 ≤ 0.1) → SVD 噪声接近随机，冲突风险低
+2026-06-15 15:23:32,189 [INFO]   [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos=-0.4724 (>0.5=强方向运动, <0.1=无规律)
+2026-06-15 15:23:32,190 [INFO]   [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)=0.0151 (高值=持续单向运动)
+2026-06-15 15:23:32,190 [INFO]   [CONFLICT DIAG] SVD 空间能量分布 (%): TL=25.7% TR=21.5% BL=26.4% BR=26.3%
+2026-06-15 15:23:32,190 [INFO]   [CONFLICT DIAG] SVD 能量空间均匀分布，无明显方向偏好
+2026-06-15 15:23:32,190 [INFO]   [CONFLICT DIAG] ★ 冲突风险评估: LOW
+2026-06-15 15:23:32,190 [INFO]   [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; (3) 使用简化 prompt 无运动描述
+2026-06-15 15:23:32,190 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:23:32,190 [INFO]   [Trajectory Anchor] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-15 15:23:32,190 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:23:32,190 [INFO]   [FI] 开始缓存参考特征
+2026-06-15 15:23:32,190 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:23:32,190 [INFO]   [FI] 缓存 30 个关键步的特征 (对应 30 步生成)
+2026-06-15 15:23:32,190 [INFO]   [FI] 注入层: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19] (10/30 层)
+2026-06-15 15:23:33,918 [INFO]     [FI Cache] step 0: t_traj=0.040, cached 10 layers
+2026-06-15 15:23:45,794 [INFO]     [FI Cache] step 5: t_traj=0.200, cached 10 layers
+2026-06-15 15:23:58,482 [INFO]     [FI Cache] step 10: t_traj=0.360, cached 10 layers
+2026-06-15 15:24:11,239 [INFO]     [FI Cache] step 15: t_traj=0.540, cached 10 layers
+2026-06-15 15:24:23,987 [INFO]     [FI Cache] step 20: t_traj=0.700, cached 10 layers
+2026-06-15 15:24:36,699 [INFO]     [FI Cache] step 25: t_traj=0.860, cached 10 layers
+2026-06-15 15:24:46,865 [INFO]   [FI] 参考特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-15 15:24:47,477 [INFO]   [Trajectory Anchor] η_temporal 帧间一致性: mean_cos=0.0609, std=0.1760, range=[-0.2080, 0.3457] (阈值=0.05)
+2026-06-15 15:24:47,477 [INFO]   [Trajectory Anchor] ✅ 门控通过 (mean_cos=0.0609 >= 0.05)，启用轨迹锚定 + SVD blend
+2026-06-15 15:24:47,477 [INFO]   [Trajectory Anchor] Cached 51 trajectory points, t range=[0.000, 1.000]
+2026-06-15 15:24:47,477 [INFO]   [Noise Decision Summary] trajectory_anchor=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE (shape={eta_temporal.shape}), use_blend=True
+2026-06-15 15:24:47,477 [INFO]   [Noise Decision] → 将使用 SVD-blended 噪声 (α=0.004)
+2026-06-15 15:24:47,477 [INFO]   iter 1/1: The video depicts a lush, dense jungle with tall trees and t...
+2026-06-15 15:24:47,478 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3281, η_mixed std=0.9961, mean=-0.0000
+2026-06-15 15:24:47,478 [INFO]   [Blend Diag] cos(temporal, random)=0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0214
+2026-06-15 15:24:47,479 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021668 (越大越说明 temporal 有影响)
+2026-06-15 15:24:47,479 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:24:47,479 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-15 15:24:47,479 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:24:47,479 [INFO]   [VDA Schedule] type=middle_peak, gamma_max=0.1, num_steps=30
+2026-06-15 15:24:47,479 [INFO]   [VDA Schedule] peak at step 15 (γ=0.0999), first 5: ['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5: ['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-15 15:24:47,479 [INFO]   [VDA Schedule] middle 5: ['0.0987', '0.0999', '0.0999', '0.0987', '0.0964']
+2026-06-15 15:24:47,479 [INFO]   [VDA Schedule] sum(γ)=1.8444, mean(γ)=0.0615
+2026-06-15 15:24:47,479 [INFO]   [VDA Quality] 输入 eta_temporal: shape=[1, 16, 21, 60, 104], dtype=torch.bfloat16, device=cuda:0
+2026-06-15 15:24:47,479 [INFO]   [VDA Quality] permute: [torch.Size([1, 16, 21, 60, 104])] → [[1, 21, 16, 60, 104]] (frame>channel, swapped)
+2026-06-15 15:24:47,479 [INFO]   [VDA Quality] 解析后: eta_gate shape=[1, 21, 16, 60, 104], num_frames=16
+2026-06-15 15:24:47,481 [INFO]   [VDA Quality] 逐帧cos (共15对): mean=0.0609, min=-0.2080, max=0.3457
+2026-06-15 15:24:47,481 [INFO]     前5帧: ['0.268', '0.082', '0.346', '-0.071', '-0.146'], 后5帧: ['0.174', '-0.108', '-0.208', '0.271', '0.252']
+2026-06-15 15:24:47,481 [INFO]   [VDA Quality] motion_strength=0.1079 (from η_temporal variance)
+2026-06-15 15:24:47,481 [INFO]   [VDA Quality] motion_coherence=0.0609, motion_strength=0.1079
+2026-06-15 15:24:47,481 [INFO]   [VDA Quality] sigmoid计算: mean_cos=0.060868, threshold=0.05, k=20.0, exp_arg=-0.2174
+2026-06-15 15:24:47,481 [INFO]   [VDA Quality] 软门控: mean_cos=0.0609, threshold=0.05, sigmoid_val=0.5541, scale=0.5987 (⚡ 弱引导)
+2026-06-15 15:24:47,481 [INFO]   [FI] λ_max=0.1, schedule=middle_peak, quality_scale=0.5987, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:03<00:00,  4.12s/it]
+2026-06-15 15:26:54,640 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 15:26:54,640 [INFO]   [FI] 生成完成总结
+2026-06-15 15:26:54,640 [INFO]     λ schedule: first 5=['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5=['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-15 15:26:54,640 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-15 15:26:57,405 [INFO] [P-Flow] Done in 304.0s → outputs/FI_mid_lambda01_3samples/sample_21/21.mp4
+2026-06-15 15:26:57,405 [INFO]   [SAMPLE SUMMARY] sample_id=21
+2026-06-15 15:26:57,405 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a lush, dense jungle with tall trees and thick foliage. The scene is vibrant with various shades of green from the leaves and plants. Throughout the video, numerous paper airplanes are seen flying through the air, appearing to be tossed or released into the environment. These airplanes come in different colors, including white, pink, purple, and yellow, adding a playful and whimsical element to the natural setting. The movement of the airplanes contrasts with the stillness of the surrounding jungle, creating a dynamic visual experience. The lighting suggests it might be daytime, as sunlight filters through the canopy above, casting dappled shadows on the ground below.
+2026-06-15 15:26:57,405 [INFO]   [SAMPLE SUMMARY] caption_length=694 chars, word_count=109
+2026-06-15 15:26:57,405 [INFO]   [SAMPLE SUMMARY] elapsed=304.0s, output=outputs/FI_mid_lambda01_3samples/sample_21/21.mp4
+
+批量完成! 输出: outputs/FI_mid_lambda01_3samples
+Found 3 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/3] 7 CLIP(o-t=0.3816, g-t=0.4044, o-g=0.9039) XCLIP(o-t=0.2661, g-t=0.2671, o-g=0.7572)
+[2/3] 17 CLIP(o-t=0.3528, g-t=0.3548, o-g=0.8838) XCLIP(o-t=0.2493, g-t=0.2782, o-g=0.8345)
+[3/3] 21 CLIP(o-t=0.3840, g-t=0.3291, o-g=0.7426) XCLIP(o-t=0.2848, g-t=0.2305, o-g=0.5370)
+
+Evaluation complete!
+  Samples: 3
+  orig_gen_clip mean:  0.843423
+  orig_gen_xclip mean: 0.709563
+  CSV: outputs/FI_mid_lambda01_3samples/eval_clip/clip_xclip_results.csv
+  Summary: outputs/FI_mid_lambda01_3samples/eval_clip/eval_summary.md
+root@autodl-container-027f4cad3d-4acf2c67:~/xixihaha/P-Flow# 

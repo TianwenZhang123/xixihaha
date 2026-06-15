@@ -1,0 +1,190 @@
+root@autodl-container-027f4cad3d-4acf2c67:~/xixihaha/P-Flow# # 生成
+python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/SVD_only_3samples \
+    --sample_ids 7 17 21 \
+    --inversion --svd --blend --alpha 0.004 \
+    --seed 42 --verbose
+
+# 评测
+python evaluation/run_clip_xclip_eval.py \
+  --orig-dir data/videos \
+  --gen-dir outputs/SVD_only_3samples \
+  --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+  --output-dir outputs/SVD_only_3samples/eval_clip
+2026-06-14 17:46:01,150 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_only_3samples/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.004)']
+  alpha=0.004, rho_s=0.1, rho_m=0.9
+
+2026-06-14 17:46:01,167 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 3 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.004)']
+
+  [1/3] 处理 7...
+2026-06-14 17:46:01,169 [INFO] [P-Flow] sample=7, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-14 17:46:03,299 [INFO]   [Inversion] encoding reference → latent...
+2026-06-14 17:46:03,315 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-14 17:46:03,315 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+Loading checkpoint shards: 100%|███████████████████████████████████████████████████████████████████████████████████| 5/5 [00:01<00:00,  3.32it/s]
+Loading checkpoint shards: 100%|███████████████████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  7.69it/s]
+Loading pipeline components...: 100%|██████████████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  2.13it/s]
+2026-06-14 17:46:11,777 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-14 17:46:11,777 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-14 17:46:14,338 [INFO]   [Inversion] euler (1st-order)...
+2026-06-14 17:47:47,508 [INFO]   [Inversion Quality] η_inv: std=1.1797, mean=-0.1855, range=[-3.578, 3.750], cos_sim(η_inv, random)=0.0002, cos_sim(η_inv, z0)=0.9844
+2026-06-14 17:47:47,508 [INFO]   [SVD-V2] mode=adaptive, ρ_s=0.1, ρ_m=0.9
+2026-06-14 17:47:47,633 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-14 17:47:47,650 [DEBUG]   [Stage2] Temporal: kept top-8/21 components
+2026-06-14 17:47:47,651 [DEBUG]   [Adaptive] motion_strength=0.0979
+2026-06-14 17:47:47,651 [INFO]   [Stage3] mode=skip (motion too weak)
+2026-06-14 17:47:47,651 [INFO]   η_temporal: mean=-0.1855, std=1.1797
+2026-06-14 17:47:47,651 [INFO]   ═══════════════════════════════════════════════
+2026-06-14 17:47:47,651 [INFO]   [CONFLICT DIAG] Prompt-SVD 方向冲突诊断
+2026-06-14 17:47:47,651 [INFO]   ═══════════════════════════════════════════════
+2026-06-14 17:47:47,651 [INFO]   [CONFLICT DIAG] Caption 运动关键词:
+2026-06-14 17:47:47,651 [INFO]     direction: ['up']
+2026-06-14 17:47:47,651 [INFO]     speed: ['gentle']
+2026-06-14 17:47:47,651 [INFO]     camera: ['view', 'close-up']
+2026-06-14 17:47:47,651 [INFO]     motion: ['move']
+2026-06-14 17:47:47,651 [INFO]   [CONFLICT DIAG] ⚠️ Caption 包含 5 个运动关键词 → prompt 已有明确运动指令，SVD 方向若不一致则产生冲突
+2026-06-14 17:47:47,651 [INFO]   [CONFLICT DIAG] η_temporal shape=[1, 16, 21, 60, 104], parsed frames=16
+2026-06-14 17:47:47,654 [INFO]   [CONFLICT DIAG] 帧间余弦相似度: mean=0.1878, std=0.4967, range=[-0.7656, 0.9492]
+2026-06-14 17:47:47,654 [INFO]   [CONFLICT DIAG] ℹ️ 中等帧间相关性 (mean_cos=0.1878) → SVD 有一定方向偏好
+2026-06-14 17:47:47,656 [INFO]   [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos=-0.3415 (>0.5=强方向运动, <0.1=无规律)
+2026-06-14 17:47:47,656 [INFO]   [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)=0.5508 (高值=持续单向运动)
+2026-06-14 17:47:47,657 [INFO]   [CONFLICT DIAG] SVD 空间能量分布 (%): TL=26.8% TR=20.4% BL=31.5% BR=21.2%
+2026-06-14 17:47:47,657 [INFO]   [CONFLICT DIAG] SVD 方向偏好: SVD 能量偏左
+2026-06-14 17:47:47,657 [INFO]   [CONFLICT DIAG] ⚠️ Prompt 方向: ['up'] vs SVD: ['SVD 能量偏左'] → 请人工判断是否冲突
+2026-06-14 17:47:47,657 [INFO]   [CONFLICT DIAG] ★ 冲突风险评估: HIGH
+2026-06-14 17:47:47,657 [INFO]   [CONFLICT DIAG]   原因: prompt 有运动词 + SVD 有方向性; prompt 和 SVD 都有方向偏好
+2026-06-14 17:47:47,657 [INFO]   [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; (3) 使用简化 prompt 无运动描述
+2026-06-14 17:47:47,657 [INFO]   ═══════════════════════════════════════════════
+2026-06-14 17:47:47,657 [INFO]   [Noise Decision Summary] trajectory_anchor=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE (shape={eta_temporal.shape}), use_blend=True
+2026-06-14 17:47:47,657 [INFO]   [Noise Decision] → 将使用 SVD-blended 噪声 (α=0.004)
+2026-06-14 17:47:47,657 [INFO]   iter 1/1: The video depicts a close-up view of a cup filled with dark ...
+2026-06-14 17:47:47,658 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=1.1797, η_mixed std=0.9961, mean=-0.0114
+2026-06-14 17:47:47,658 [INFO]   [Blend Diag] cos(temporal, random)=-0.0001, cos(mixed, random)=0.9961, cos(mixed, temporal)=0.0757
+2026-06-14 17:47:47,659 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.075967 (越大越说明 temporal 有影响)
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:52<00:00,  3.76s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-14 17:49:45,562 [INFO] [P-Flow] Done in 224.4s → outputs/SVD_only_3samples/sample_7/7.mp4
+2026-06-14 17:49:45,562 [INFO]   [SAMPLE SUMMARY] sample_id=7
+2026-06-14 17:49:45,562 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls, and they appear to be miniature models. The liquid in the cup is smooth, with some ripples around the boats, suggesting a gentle movement. The lighting highlights the reflective surface of the liquid, creating subtle reflections of the boats. The background is slightly blurred, focusing attention on the cup and the boats. The overall scene has a serene and whimsical feel, as if the boats are sailing on a miniature sea within the cup.
+2026-06-14 17:49:45,562 [INFO]   [SAMPLE SUMMARY] caption_length=630 chars, word_count=108
+2026-06-14 17:49:45,562 [INFO]   [SAMPLE SUMMARY] elapsed=224.4s, output=outputs/SVD_only_3samples/sample_7/7.mp4
+  [2/3] 处理 17...
+2026-06-14 17:49:45,564 [INFO] [P-Flow] sample=17, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-14 17:49:47,626 [INFO]   [Inversion] encoding reference → latent...
+2026-06-14 17:49:49,951 [INFO]   [Inversion] euler (1st-order)...
+2026-06-14 17:51:23,875 [INFO]   [Inversion Quality] η_inv: std=0.9727, mean=0.1279, range=[-3.500, 4.312], cos_sim(η_inv, random)=-0.0005, cos_sim(η_inv, z0)=0.9688
+2026-06-14 17:51:23,875 [INFO]   [SVD-V2] mode=adaptive, ρ_s=0.1, ρ_m=0.9
+2026-06-14 17:51:23,888 [DEBUG]   [Stage1] Spatial: removed top-16 components
+2026-06-14 17:51:23,892 [DEBUG]   [Stage2] Temporal: kept top-10/21 components
+2026-06-14 17:51:23,893 [DEBUG]   [Adaptive] motion_strength=0.1138
+2026-06-14 17:51:23,893 [INFO]   [Stage3] mode=skip (motion too weak)
+2026-06-14 17:51:23,893 [INFO]   η_temporal: mean=0.1279, std=0.9727
+2026-06-14 17:51:23,896 [INFO]   ═══════════════════════════════════════════════
+2026-06-14 17:51:23,896 [INFO]   [CONFLICT DIAG] Prompt-SVD 方向冲突诊断
+2026-06-14 17:51:23,896 [INFO]   ═══════════════════════════════════════════════
+2026-06-14 17:51:23,896 [INFO]   [CONFLICT DIAG] Caption 运动关键词:
+2026-06-14 17:51:23,896 [INFO]     direction: ['up', 'forward']
+2026-06-14 17:51:23,897 [INFO]     camera: ['view']
+2026-06-14 17:51:23,897 [INFO]     motion: ['move']
+2026-06-14 17:51:23,897 [INFO]   [CONFLICT DIAG] ⚠️ Caption 包含 4 个运动关键词 → prompt 已有明确运动指令，SVD 方向若不一致则产生冲突
+2026-06-14 17:51:23,897 [INFO]   [CONFLICT DIAG] η_temporal shape=[1, 16, 21, 60, 104], parsed frames=16
+2026-06-14 17:51:23,899 [INFO]   [CONFLICT DIAG] 帧间余弦相似度: mean=-0.0367, std=0.5295, range=[-0.6992, 0.8672]
+2026-06-14 17:51:23,899 [INFO]   [CONFLICT DIAG] ✓ 低帧间相关性 (mean_cos=-0.0367 ≤ 0.1) → SVD 噪声接近随机，冲突风险低
+2026-06-14 17:51:23,901 [INFO]   [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos=-0.4614 (>0.5=强方向运动, <0.1=无规律)
+2026-06-14 17:51:23,901 [INFO]   [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)=0.6055 (高值=持续单向运动)
+2026-06-14 17:51:23,901 [INFO]   [CONFLICT DIAG] SVD 空间能量分布 (%): TL=26.1% TR=34.5% BL=20.8% BR=18.6%
+2026-06-14 17:51:23,901 [INFO]   [CONFLICT DIAG] SVD 方向偏好: SVD 能量偏上
+2026-06-14 17:51:23,901 [INFO]   [CONFLICT DIAG] ⚠️ Prompt 方向: ['up', 'forward'] vs SVD: ['SVD 能量偏上'] → 请人工判断是否冲突
+2026-06-14 17:51:23,901 [INFO]   [CONFLICT DIAG] ★ 冲突风险评估: HIGH
+2026-06-14 17:51:23,901 [INFO]   [CONFLICT DIAG]   原因: prompt 和 SVD 都有方向偏好
+2026-06-14 17:51:23,901 [INFO]   [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; (3) 使用简化 prompt 无运动描述
+2026-06-14 17:51:23,901 [INFO]   ═══════════════════════════════════════════════
+2026-06-14 17:51:23,901 [INFO]   [Noise Decision Summary] trajectory_anchor=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE (shape={eta_temporal.shape}), use_blend=True
+2026-06-14 17:51:23,901 [INFO]   [Noise Decision] → 将使用 SVD-blended 噪声 (α=0.004)
+2026-06-14 17:51:23,902 [INFO]   iter 1/1: The video depicts a white SUV driving on a dusty, unpaved ro...
+2026-06-14 17:51:23,902 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.9727, η_mixed std=0.9961, mean=0.0078
+2026-06-14 17:51:23,902 [INFO]   [Blend Diag] cos(temporal, random)=-0.0004, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0623
+2026-06-14 17:51:23,903 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.062500 (越大越说明 temporal 有影响)
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:52<00:00,  3.77s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-14 17:53:21,920 [INFO] [P-Flow] Done in 216.4s → outputs/SVD_only_3samples/sample_17/17.mp4
+2026-06-14 17:53:21,921 [INFO]   [SAMPLE SUMMARY] sample_id=17
+2026-06-14 17:53:21,921 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear, suggesting it might be on a journey or adventure. As the SUV moves forward, it kicks up a cloud of dust behind it, indicating the dryness of the terrain and the speed at which it is traveling. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure.
+2026-06-14 17:53:21,921 [INFO]   [SAMPLE SUMMARY] caption_length=539 chars, word_count=94
+2026-06-14 17:53:21,921 [INFO]   [SAMPLE SUMMARY] elapsed=216.4s, output=outputs/SVD_only_3samples/sample_17/17.mp4
+  [3/3] 处理 21...
+2026-06-14 17:53:21,922 [INFO] [P-Flow] sample=21, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-14 17:53:24,112 [INFO]   [Inversion] encoding reference → latent...
+2026-06-14 17:53:26,439 [INFO]   [Inversion] euler (1st-order)...
+2026-06-14 17:55:00,555 [INFO]   [Inversion Quality] η_inv: std=0.9258, mean=0.0649, range=[-3.797, 3.672], cos_sim(η_inv, random)=0.0008, cos_sim(η_inv, z0)=0.9688
+2026-06-14 17:55:00,555 [INFO]   [SVD-V2] mode=adaptive, ρ_s=0.1, ρ_m=0.9
+2026-06-14 17:55:00,568 [DEBUG]   [Stage1] Spatial: removed top-19 components
+2026-06-14 17:55:00,573 [DEBUG]   [Stage2] Temporal: kept top-14/21 components
+2026-06-14 17:55:00,573 [DEBUG]   [Adaptive] motion_strength=0.1256
+2026-06-14 17:55:00,573 [INFO]   [Stage3] mode=skip (motion too weak)
+2026-06-14 17:55:00,573 [INFO]   η_temporal: mean=0.0649, std=0.9258
+2026-06-14 17:55:00,576 [INFO]   ═══════════════════════════════════════════════
+2026-06-14 17:55:00,576 [INFO]   [CONFLICT DIAG] Prompt-SVD 方向冲突诊断
+2026-06-14 17:55:00,576 [INFO]   ═══════════════════════════════════════════════
+2026-06-14 17:55:00,576 [INFO]   [CONFLICT DIAG] Caption 运动关键词:
+2026-06-14 17:55:00,576 [INFO]     motion: ['move']
+2026-06-14 17:55:00,576 [INFO]   [CONFLICT DIAG] ⚠️ Caption 包含 1 个运动关键词 → prompt 已有明确运动指令，SVD 方向若不一致则产生冲突
+2026-06-14 17:55:00,576 [INFO]   [CONFLICT DIAG] η_temporal shape=[1, 16, 21, 60, 104], parsed frames=16
+2026-06-14 17:55:00,578 [INFO]   [CONFLICT DIAG] 帧间余弦相似度: mean=-0.1381, std=0.5092, range=[-0.8203, 0.8438]
+2026-06-14 17:55:00,579 [INFO]   [CONFLICT DIAG] ✓ 低帧间相关性 (mean_cos=-0.1381 ≤ 0.1) → SVD 噪声接近随机，冲突风险低
+2026-06-14 17:55:00,580 [INFO]   [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos=-0.4394 (>0.5=强方向运动, <0.1=无规律)
+2026-06-14 17:55:00,581 [INFO]   [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)=0.7070 (高值=持续单向运动)
+2026-06-14 17:55:00,581 [INFO]   [CONFLICT DIAG] SVD 空间能量分布 (%): TL=27.2% TR=21.8% BL=28.1% BR=22.9%
+2026-06-14 17:55:00,581 [INFO]   [CONFLICT DIAG] SVD 方向偏好: SVD 能量偏左
+2026-06-14 17:55:00,581 [INFO]   [CONFLICT DIAG] ★ 冲突风险评估: LOW
+2026-06-14 17:55:00,581 [INFO]   [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; (3) 使用简化 prompt 无运动描述
+2026-06-14 17:55:00,581 [INFO]   ═══════════════════════════════════════════════
+2026-06-14 17:55:00,581 [INFO]   [Noise Decision Summary] trajectory_anchor=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE (shape={eta_temporal.shape}), use_blend=True
+2026-06-14 17:55:00,581 [INFO]   [Noise Decision] → 将使用 SVD-blended 噪声 (α=0.004)
+2026-06-14 17:55:00,581 [INFO]   iter 1/1: The video depicts a lush, dense jungle with tall trees and t...
+2026-06-14 17:55:00,582 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.9258, η_mixed std=0.9961, mean=0.0041
+2026-06-14 17:55:00,582 [INFO]   [Blend Diag] cos(temporal, random)=-0.0003, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0588
+2026-06-14 17:55:00,582 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.059047 (越大越说明 temporal 有影响)
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:52<00:00,  3.77s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-14 17:56:58,635 [INFO] [P-Flow] Done in 216.7s → outputs/SVD_only_3samples/sample_21/21.mp4
+2026-06-14 17:56:58,635 [INFO]   [SAMPLE SUMMARY] sample_id=21
+2026-06-14 17:56:58,635 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a lush, dense jungle with tall trees and thick foliage. The scene is vibrant with various shades of green from the leaves and plants. Throughout the video, numerous paper airplanes are seen flying through the air, appearing to be tossed or released into the environment. These airplanes come in different colors, including white, pink, purple, and yellow, adding a playful and whimsical element to the natural setting. The movement of the airplanes contrasts with the stillness of the surrounding jungle, creating a dynamic visual experience. The lighting suggests it might be daytime, as sunlight filters through the canopy above, casting dappled shadows on the ground below.
+2026-06-14 17:56:58,636 [INFO]   [SAMPLE SUMMARY] caption_length=694 chars, word_count=109
+2026-06-14 17:56:58,636 [INFO]   [SAMPLE SUMMARY] elapsed=216.7s, output=outputs/SVD_only_3samples/sample_21/21.mp4
+
+批量完成! 输出: outputs/SVD_only_3samples
+Found 3 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/3] 7 CLIP(o-t=0.3816, g-t=0.3058, o-g=0.7861) XCLIP(o-t=0.2661, g-t=0.2619, o-g=0.6537)
+[2/3] 17 CLIP(o-t=0.3528, g-t=0.3105, o-g=0.7425) XCLIP(o-t=0.2493, g-t=0.0806, o-g=0.4647)
+[3/3] 21 CLIP(o-t=0.3840, g-t=0.3028, o-g=0.7113) XCLIP(o-t=0.2848, g-t=0.1594, o-g=0.3980)
+
+Evaluation complete!
+  Samples: 3
+  orig_gen_clip mean:  0.746625
+  orig_gen_xclip mean: 0.505472
+  CSV: outputs/SVD_only_3samples/eval_clip/clip_xclip_results.csv
+  Summary: outputs/SVD_only_3samples/eval_clip/eval_summary.md
+root@autodl-container-027f4cad3d-4acf2c67:~/xixihaha/P-Flow# 
+
+
+
