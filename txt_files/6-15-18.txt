@@ -1,0 +1,313 @@
+Anchor + SVD cos-proportional（修正命令
+root@autodl-container-027f4cad3d-4acf2c67:~/xixihaha/P-Flow# cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/Anchor_SVD_cosProp_3samples \
+    --sample_ids 7 17 21 \
+    --inversion --svd --blend --alpha 0.004 \
+    --trajectory_anchor \
+    --anchor_beta_max 0.03 --anchor_schedule warmup_decay \
+    --anchor_cos_threshold 0.2 \
+    --anchor_quality_threshold 0.05 \
+    --seed 42 --verbose
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/Anchor_SVD_cosProp_3samples \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/Anchor_SVD_cosProp_3samples/eval_clip
+2026-06-15 18:31:10,079 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/Anchor_SVD_cosProp_3samples/run_log.txt
+P-Flow | pflow_inversion_svd_blend_trajectory_anchor
+  Flags: ['inversion', 'svd', 'blend(α=0.004)', 'trajectory_anchor(β_max=0.03, sched=warmup_decay)']
+  alpha=0.004, rho_s=0.1, rho_m=0.9
+  [Trajectory Anchor] β_max=0.03, schedule=warmup_decay, cache_every_n=1
+
+2026-06-15 18:31:10,096 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 3 个样本
+实验: pflow_inversion_svd_blend_trajectory_anchor
+Flags: ['inversion', 'svd', 'blend(α=0.004)', 'trajectory_anchor(β_max=0.03, sched=warmup_decay)']
+
+  [1/3] 处理 7...
+2026-06-15 18:31:10,097 [INFO] [P-Flow] sample=7, flags=['inversion', 'svd', 'blend(α=0.004)', 'trajectory_anchor(β_max=0.03, sched=warmup_decay)']
+2026-06-15 18:31:12,495 [INFO]   [Inversion] encoding reference → latent...
+2026-06-15 18:31:12,511 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-15 18:31:12,511 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+Loading checkpoint shards: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5/5 [00:01<00:00,  2.99it/s]
+Loading checkpoint shards: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  6.27it/s]
+Loading pipeline components...: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  1.75it/s]
+2026-06-15 18:31:21,562 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-15 18:31:21,562 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-15 18:31:24,113 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-15 18:31:24,113 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|█████████████████████▌                                                                                                  | 9/50 [00:16<01:16,  1.88s/it]2026-06-15 18:31:42,884 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0884, std=0.5312, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████████████████████▏                                                                         | 19/50 [00:35<00:58,  1.89s/it]2026-06-15 18:32:01,733 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.1074, std=0.6562, cached=21 points
+Inversion + Trajectory:  58%|█████████████████████████████████████████████████████████████████████                                                  | 29/50 [00:54<00:39,  1.90s/it]2026-06-15 18:32:20,697 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.1309, std=0.8086, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████████████████████████████████████▊                          | 39/50 [01:13<00:20,  1.90s/it]2026-06-15 18:32:39,689 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.1582, std=0.9883, cached=41 points
+Inversion + Trajectory:  98%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▌  | 49/50 [01:32<00:01,  1.90s/it]2026-06-15 18:32:58,710 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.1855, std=1.1797, cached=51 points
+2026-06-15 18:32:58,711 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.1855, std=1.1797                                                                 
+2026-06-15 18:32:58,751 [INFO]   [Inversion Quality] η_inv: std=1.1797, mean=-0.1855, range=[-3.578, 3.750], cos_sim(η_inv, random)=0.0002, cos_sim(η_inv, z0)=0.9844
+2026-06-15 18:32:58,751 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-15 18:32:58,847 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-15 18:32:58,864 [DEBUG]   [Stage2] Temporal: kept top-8/21 components
+2026-06-15 18:32:58,865 [INFO]   η_temporal: mean=0.0013, std=0.3730
+2026-06-15 18:32:58,865 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:32:58,865 [INFO]   [CONFLICT DIAG] Prompt-SVD 方向冲突诊断
+2026-06-15 18:32:58,865 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:32:58,865 [INFO]   [CONFLICT DIAG] Caption 运动关键词:
+2026-06-15 18:32:58,865 [INFO]     direction: ['up']
+2026-06-15 18:32:58,865 [INFO]     speed: ['gentle']
+2026-06-15 18:32:58,865 [INFO]     camera: ['view', 'close-up']
+2026-06-15 18:32:58,865 [INFO]     motion: ['move']
+2026-06-15 18:32:58,865 [INFO]   [CONFLICT DIAG] ⚠️ Caption 包含 5 个运动关键词 → prompt 已有明确运动指令，SVD 方向若不一致则产生冲突
+2026-06-15 18:32:58,865 [INFO]   [CONFLICT DIAG] η_temporal shape=[1, 16, 21, 60, 104], parsed frames=16
+2026-06-15 18:32:58,867 [INFO]   [CONFLICT DIAG] 帧间余弦相似度: mean=0.0567, std=0.3282, range=[-0.5977, 0.6992]
+2026-06-15 18:32:58,867 [INFO]   [CONFLICT DIAG] ✓ 低帧间相关性 (mean_cos=0.0567 ≤ 0.1) → SVD 噪声接近随机，冲突风险低
+2026-06-15 18:32:58,869 [INFO]   [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos=-0.4530 (>0.5=强方向运动, <0.1=无规律)
+2026-06-15 18:32:58,869 [INFO]   [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)=0.0393 (高值=持续单向运动)
+2026-06-15 18:32:58,870 [INFO]   [CONFLICT DIAG] SVD 空间能量分布 (%): TL=24.8% TR=20.7% BL=25.7% BR=28.7%
+2026-06-15 18:32:58,870 [INFO]   [CONFLICT DIAG] SVD 能量空间均匀分布，无明显方向偏好
+2026-06-15 18:32:58,870 [INFO]   [CONFLICT DIAG] ★ 冲突风险评估: LOW
+2026-06-15 18:32:58,870 [INFO]   [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; (3) 使用简化 prompt 无运动描述
+2026-06-15 18:32:58,870 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:32:58,870 [INFO]   [Trajectory Anchor] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-15 18:32:58,872 [INFO]   [Trajectory Anchor] η_temporal 帧间一致性: mean_cos=0.0567, std=0.3282, range=[-0.5977, 0.6992] (阈值=0.05)
+2026-06-15 18:32:58,872 [INFO]   [Trajectory Anchor] ✅ 门控通过 (mean_cos=0.0567 >= 0.05)，启用轨迹锚定 + SVD blend
+2026-06-15 18:32:58,872 [INFO]   [Trajectory Anchor] Cached 51 trajectory points, t range=[0.000, 1.000]
+2026-06-15 18:32:58,872 [INFO]   [Noise Decision Summary] trajectory_anchor=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE (shape={eta_temporal.shape}), use_blend=True
+2026-06-15 18:32:58,872 [INFO]   [Noise Decision] → 将使用 SVD-blended 噪声 (α=0.004)
+2026-06-15 18:32:58,872 [INFO]   iter 1/1: The video depicts a close-up view of a cup filled with dark ...
+2026-06-15 18:32:58,873 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3730, η_mixed std=0.9961, mean=0.0005
+2026-06-15 18:32:58,873 [INFO]   [Blend Diag] cos(temporal, random)=0.0002, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0242
+2026-06-15 18:32:58,874 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024517 (越大越说明 temporal 有影响)
+2026-06-15 18:32:58,874 [INFO]   [Trajectory Anchor] β_max=0.03, schedule=warmup_decay, trajectory points=51, gen steps=30
+2026-06-15 18:32:58,874 [INFO]   [Trajectory Anchor] β schedule (first 5): ['0.0150', '0.0180', '0.0210', '0.0240', '0.0270'], (last 5): ['0.0081', '0.0061', '0.0041', '0.0020', '0.0000']
+2026-06-15 18:32:58,874 [INFO]   [Trajectory Anchor] cos-proportional β 模式已启用 (检测到 SVD-blended latents, effective_β = β_t × cos(gen,ref))
+2026-06-15 18:32:58,878 [INFO]   [Trajectory Anchor] 起点对齐诊断: cos(z_T_actual, ref_traj[t=1.000])=0.0069 (⚠️ 严重偏移)
+2026-06-15 18:32:58,878 [INFO]   [Trajectory Anchor] 源头差异说明: z_T = SVD-blended (α=0.004), ref_traj[t=1] = raw eta_inv (无SVD无blend), 差异来自 SVD 滤波 + α-blend 稀释
+  0%|                                                                                                                                                        | 0/30 [00:00<?, ?it/s]2026-06-15 18:33:02,832 [INFO]     [Anchor step  0/30] 🟢 首次有效 anchor (cos=0.0131, effective_β=0.0002)
+2026-06-15 18:33:02,832 [INFO]     [Anchor step  0/30] t=0.967→ref_t=0.040, β_sched=0.0150, effective_β=0.0002, shift=0.43, cos=0.0131, latent_std=0.9826
+  3%|████▊                                                                                                                                           | 1/30 [00:03<01:51,  3.83s/it]2026-06-15 18:33:06,655 [INFO]     [Anchor step  1/30] t=0.933→ref_t=0.060, β_sched=0.0180, effective_β=0.0003, shift=0.64, cos=0.0165, latent_std=0.9714
+  7%|█████████▌                                                                                                                                      | 2/30 [00:07<01:47,  3.83s/it]2026-06-15 18:33:10,486 [INFO]     [Anchor step  2/30] t=0.900→ref_t=0.100, β_sched=0.0210, effective_β=0.0005, shift=0.95, cos=0.0216, latent_std=0.9595
+ 10%|██████████████▍                                                                                                                                 | 3/30 [00:11<01:43,  3.83s/it]2026-06-15 18:33:14,313 [INFO]     [Anchor step  3/30] t=0.867→ref_t=0.140, β_sched=0.0240, effective_β=0.0006, shift=1.31, cos=0.0268, latent_std=0.9472
+ 13%|███████████████████▏                                                                                                                            | 4/30 [00:15<01:39,  3.83s/it]2026-06-15 18:33:18,137 [INFO]     [Anchor step  4/30] t=0.833→ref_t=0.160, β_sched=0.0270, effective_β=0.0009, shift=1.75, cos=0.0326, latent_std=0.9345
+ 17%|████████████████████████                                                                                                                        | 5/30 [00:19<01:35,  3.83s/it]2026-06-15 18:33:21,963 [INFO]     [Anchor step  5/30] t=0.800→ref_t=0.200, β_sched=0.0300, effective_β=0.0012, shift=2.24, cos=0.0387, latent_std=0.9214
+ 20%|████████████████████████████▊                                                                                                                   | 6/30 [00:22<01:31,  3.83s/it]2026-06-15 18:33:25,791 [INFO]     [Anchor step  6/30] t=0.767→ref_t=0.240, β_sched=0.0300, effective_β=0.0014, shift=2.55, cos=0.0453, latent_std=0.9079
+ 23%|█████████████████████████████████▌                                                                                                              | 7/30 [00:26<01:28,  3.83s/it]2026-06-15 18:33:29,617 [INFO]     [Anchor step  7/30] t=0.733→ref_t=0.260, β_sched=0.0299, effective_β=0.0016, shift=2.89, cos=0.0526, latent_std=0.8941
+ 27%|██████████████████████████████████████▍                                                                                                         | 8/30 [00:30<01:24,  3.83s/it]2026-06-15 18:33:33,444 [INFO]     [Anchor step  8/30] t=0.700→ref_t=0.300, β_sched=0.0297, effective_β=0.0018, shift=3.19, cos=0.0605, latent_std=0.8798
+ 30%|███████████████████████████████████████████▏                                                                                                    | 9/30 [00:34<01:20,  3.83s/it]2026-06-15 18:33:37,272 [INFO]     [Anchor step  9/30] t=0.667→ref_t=0.340, β_sched=0.0294, effective_β=0.0020, shift=3.48, cos=0.0691, latent_std=0.8653
+ 33%|███████████████████████████████████████████████▋                                                                                               | 10/30 [00:38<01:16,  3.83s/it]2026-06-15 18:33:41,099 [INFO]     [Anchor step 10/30] t=0.633→ref_t=0.360, β_sched=0.0289, effective_β=0.0023, shift=3.80, cos=0.0786, latent_std=0.8506
+ 37%|████████████████████████████████████████████████████▍                                                                                          | 11/30 [00:42<01:12,  3.83s/it]2026-06-15 18:33:44,926 [INFO]     [Anchor step 11/30] t=0.600→ref_t=0.400, β_sched=0.0283, effective_β=0.0025, shift=4.06, cos=0.0889, latent_std=0.8355
+ 40%|█████████████████████████████████████████████████████████▏                                                                                     | 12/30 [00:45<01:08,  3.83s/it]2026-06-15 18:33:48,753 [INFO]     [Anchor step 12/30] t=0.567→ref_t=0.440, β_sched=0.0275, effective_β=0.0028, shift=4.31, cos=0.1003, latent_std=0.8204
+ 43%|█████████████████████████████████████████████████████████████▉                                                                                 | 13/30 [00:49<01:05,  3.83s/it]2026-06-15 18:33:52,577 [INFO]     [Anchor step 13/30] t=0.533→ref_t=0.460, β_sched=0.0266, effective_β=0.0030, shift=4.57, cos=0.1128, latent_std=0.8052
+ 47%|██████████████████████████████████████████████████████████████████▋                                                                            | 14/30 [00:53<01:01,  3.83s/it]2026-06-15 18:33:56,403 [INFO]     [Anchor step 14/30] t=0.500→ref_t=0.500, β_sched=0.0256, effective_β=0.0032, shift=4.75, cos=0.1266, latent_std=0.7901
+ 50%|███████████████████████████████████████████████████████████████████████▌                                                                       | 15/30 [00:57<00:57,  3.83s/it]2026-06-15 18:34:00,232 [INFO]     [Anchor step 15/30] t=0.467→ref_t=0.540, β_sched=0.0245, effective_β=0.0035, shift=4.89, cos=0.1417, latent_std=0.7754
+ 53%|████████████████████████████████████████████████████████████████████████████▎                                                                  | 16/30 [01:01<00:53,  3.83s/it]2026-06-15 18:34:04,057 [INFO]     [Anchor step 16/30] t=0.433→ref_t=0.560, β_sched=0.0233, effective_β=0.0037, shift=5.04, cos=0.1581, latent_std=0.7613
+ 57%|█████████████████████████████████████████████████████████████████████████████████                                                              | 17/30 [01:05<00:49,  3.83s/it]2026-06-15 18:34:07,888 [INFO]     [Anchor step 17/30] t=0.400→ref_t=0.600, β_sched=0.0219, effective_β=0.0039, shift=5.08, cos=0.1760, latent_std=0.7482
+ 60%|█████████████████████████████████████████████████████████████████████████████████████▊                                                         | 18/30 [01:08<00:45,  3.83s/it]2026-06-15 18:34:11,715 [INFO]     [Anchor step 18/30] t=0.367→ref_t=0.640, β_sched=0.0205, effective_β=0.0040, shift=5.07, cos=0.1955, latent_std=0.7366
+ 63%|██████████████████████████████████████████████████████████████████████████████████████████▌                                                    | 19/30 [01:12<00:42,  3.83s/it]2026-06-15 18:34:15,543 [INFO]     [Anchor step 19/30] t=0.333→ref_t=0.660, β_sched=0.0189, effective_β=0.0041, shift=5.04, cos=0.2162, latent_std=0.7271
+ 67%|███████████████████████████████████████████████████████████████████████████████████████████████▎                                               | 20/30 [01:16<00:38,  3.83s/it]2026-06-15 18:34:19,368 [INFO]     [Anchor step 20/30] t=0.300→ref_t=0.700, β_sched=0.0173, effective_β=0.0041, shift=4.89, cos=0.2380, latent_std=0.7204
+ 70%|████████████████████████████████████████████████████████████████████████████████████████████████████                                           | 21/30 [01:20<00:34,  3.83s/it]2026-06-15 18:34:23,198 [INFO]     [Anchor step 21/30] t=0.267→ref_t=0.740, β_sched=0.0156, effective_β=0.0041, shift=4.67, cos=0.2606, latent_std=0.7176
+ 73%|████████████████████████████████████████████████████████████████████████████████████████████████████████▊                                      | 22/30 [01:24<00:30,  3.83s/it]2026-06-15 18:34:27,026 [INFO]     [Anchor step 22/30] t=0.233→ref_t=0.760, β_sched=0.0138, effective_β=0.0039, shift=4.41, cos=0.2834, latent_std=0.7200
+ 77%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████▋                                 | 23/30 [01:28<00:26,  3.83s/it]2026-06-15 18:34:30,855 [INFO]     [Anchor step 23/30] t=0.200→ref_t=0.800, β_sched=0.0120, effective_β=0.0036, shift=4.04, cos=0.3054, latent_std=0.7288
+ 80%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████▍                            | 24/30 [01:31<00:22,  3.83s/it]2026-06-15 18:34:34,685 [INFO]     [Anchor step 24/30] t=0.167→ref_t=0.840, β_sched=0.0100, effective_β=0.0033, shift=3.59, cos=0.3256, latent_std=0.7457
+ 83%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▏                       | 25/30 [01:35<00:19,  3.83s/it]2026-06-15 18:34:38,515 [INFO]     [Anchor step 25/30] t=0.133→ref_t=0.860, β_sched=0.0081, effective_β=0.0028, shift=3.08, cos=0.3434, latent_std=0.7730
+ 87%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▉                   | 26/30 [01:39<00:15,  3.83s/it]2026-06-15 18:34:42,344 [INFO]     [Anchor step 26/30] t=0.100→ref_t=0.900, β_sched=0.0061, effective_β=0.0022, shift=2.48, cos=0.3574, latent_std=0.8124
+ 90%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▋              | 27/30 [01:43<00:11,  3.83s/it]2026-06-15 18:34:46,170 [INFO]     [Anchor step 27/30] t=0.067→ref_t=0.940, β_sched=0.0041, effective_β=0.0015, shift=1.78, cos=0.3672, latent_std=0.8658
+ 93%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▍         | 28/30 [01:47<00:07,  3.83s/it]2026-06-15 18:34:49,998 [INFO]     [Anchor step 28/30] t=0.033→ref_t=0.960, β_sched=0.0020, effective_β=0.0008, shift=0.97, cos=0.3729, latent_std=0.9374
+ 97%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▏    | 29/30 [01:50<00:03,  3.83s/it]2026-06-15 18:34:53,822 [DEBUG]     [Anchor step 29/30] t=0.000, β=0.000000 < 1e-6, skipped
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:54<00:00,  3.83s/it]
+2026-06-15 18:34:57,362 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:34:57,362 [INFO]   [Trajectory Anchor] 生成完成总结:
+2026-06-15 18:34:57,363 [INFO]     applied=29, skipped=0 (cos-proportional), total=29/30
+2026-06-15 18:34:57,363 [INFO]     first_anchor_step=0, total_shift=95.9610, avg_shift=3.3090
+2026-06-15 18:34:57,363 [INFO]     前半段 (step 0~13): avg_cos(gen,ref)=0.0541, avg_shift=2.58
+2026-06-15 18:34:57,363 [INFO]     后半段 (step 14~28): avg_cos(gen,ref)=0.2579, avg_shift=3.99
+2026-06-15 18:34:57,363 [INFO]     趋势: cos 从 0.0541→0.2579 (收敛), shift 从 2.58→3.99 (异常 ⚠️)
+2026-06-15 18:34:57,363 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-15 18:34:59,137 [INFO] [P-Flow] Done in 229.0s → outputs/Anchor_SVD_cosProp_3samples/sample_7/7.mp4
+2026-06-15 18:34:59,137 [INFO]   [SAMPLE SUMMARY] sample_id=7
+2026-06-15 18:34:59,137 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls, and they appear to be miniature models. The liquid in the cup is smooth, with some ripples around the boats, suggesting a gentle movement. The lighting highlights the reflective surface of the liquid, creating subtle reflections of the boats. The background is slightly blurred, focusing attention on the cup and the boats. The overall scene has a serene and whimsical feel, as if the boats are sailing on a miniature sea within the cup.
+2026-06-15 18:34:59,137 [INFO]   [SAMPLE SUMMARY] caption_length=630 chars, word_count=108
+2026-06-15 18:34:59,137 [INFO]   [SAMPLE SUMMARY] elapsed=229.0s, output=outputs/Anchor_SVD_cosProp_3samples/sample_7/7.mp4
+  [2/3] 处理 17...
+2026-06-15 18:34:59,139 [INFO] [P-Flow] sample=17, flags=['inversion', 'svd', 'blend(α=0.004)', 'trajectory_anchor(β_max=0.03, sched=warmup_decay)']
+2026-06-15 18:35:01,561 [INFO]   [Inversion] encoding reference → latent...
+2026-06-15 18:35:03,918 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-15 18:35:03,918 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|█████████████████████▌                                                                                                  | 9/50 [00:17<01:18,  1.91s/it]2026-06-15 18:35:23,020 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0649, std=0.4219, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████████████████████▏                                                                         | 19/50 [00:36<00:59,  1.91s/it]2026-06-15 18:35:42,113 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0771, std=0.5195, cached=21 points
+Inversion + Trajectory:  58%|█████████████████████████████████████████████████████████████████████                                                  | 29/50 [00:55<00:40,  1.91s/it]2026-06-15 18:36:01,221 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0913, std=0.6445, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████████████████████████████████████▊                          | 39/50 [01:14<00:21,  1.91s/it]2026-06-15 18:36:20,357 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.1089, std=0.7930, cached=41 points
+Inversion + Trajectory:  98%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▌  | 49/50 [01:33<00:01,  1.92s/it]2026-06-15 18:36:39,513 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.1279, std=0.9727, cached=51 points
+2026-06-15 18:36:39,514 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.1279, std=0.9727                                                                  
+2026-06-15 18:36:39,515 [INFO]   [Inversion Quality] η_inv: std=0.9727, mean=0.1279, range=[-3.500, 4.312], cos_sim(η_inv, random)=-0.0005, cos_sim(η_inv, z0)=0.9688
+2026-06-15 18:36:39,515 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-15 18:36:39,528 [DEBUG]   [Stage1] Spatial: removed top-16 components
+2026-06-15 18:36:39,533 [DEBUG]   [Stage2] Temporal: kept top-10/21 components
+2026-06-15 18:36:39,533 [INFO]   η_temporal: mean=-0.0001, std=0.3320
+2026-06-15 18:36:39,536 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:36:39,537 [INFO]   [CONFLICT DIAG] Prompt-SVD 方向冲突诊断
+2026-06-15 18:36:39,537 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:36:39,537 [INFO]   [CONFLICT DIAG] Caption 运动关键词:
+2026-06-15 18:36:39,537 [INFO]     direction: ['up', 'forward']
+2026-06-15 18:36:39,537 [INFO]     camera: ['view']
+2026-06-15 18:36:39,537 [INFO]     motion: ['move']
+2026-06-15 18:36:39,537 [INFO]   [CONFLICT DIAG] ⚠️ Caption 包含 4 个运动关键词 → prompt 已有明确运动指令，SVD 方向若不一致则产生冲突
+2026-06-15 18:36:39,537 [INFO]   [CONFLICT DIAG] η_temporal shape=[1, 16, 21, 60, 104], parsed frames=16
+2026-06-15 18:36:39,539 [INFO]   [CONFLICT DIAG] 帧间余弦相似度: mean=-0.0195, std=0.2162, range=[-0.3223, 0.4785]
+2026-06-15 18:36:39,539 [INFO]   [CONFLICT DIAG] ✓ 低帧间相关性 (mean_cos=-0.0195 ≤ 0.1) → SVD 噪声接近随机，冲突风险低
+2026-06-15 18:36:39,541 [INFO]   [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos=-0.5172 (>0.5=强方向运动, <0.1=无规律)
+2026-06-15 18:36:39,541 [INFO]   [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)=0.1299 (高值=持续单向运动)
+2026-06-15 18:36:39,542 [INFO]   [CONFLICT DIAG] SVD 空间能量分布 (%): TL=32.9% TR=24.4% BL=22.0% BR=20.8%
+2026-06-15 18:36:39,542 [INFO]   [CONFLICT DIAG] SVD 方向偏好: SVD 能量偏上
+2026-06-15 18:36:39,542 [INFO]   [CONFLICT DIAG] ⚠️ Prompt 方向: ['up', 'forward'] vs SVD: ['SVD 能量偏上'] → 请人工判断是否冲突
+2026-06-15 18:36:39,542 [INFO]   [CONFLICT DIAG] ★ 冲突风险评估: HIGH
+2026-06-15 18:36:39,542 [INFO]   [CONFLICT DIAG]   原因: prompt 和 SVD 都有方向偏好
+2026-06-15 18:36:39,542 [INFO]   [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; (3) 使用简化 prompt 无运动描述
+2026-06-15 18:36:39,542 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:36:39,542 [INFO]   [Trajectory Anchor] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-15 18:36:39,544 [INFO]   [Trajectory Anchor] η_temporal 帧间一致性: mean_cos=-0.0195, std=0.2162, range=[-0.3223, 0.4785] (阈值=0.05)
+2026-06-15 18:36:39,544 [WARNING]   [Trajectory Anchor] ⚠️ η_temporal 帧间一致性过低 (mean_cos=-0.0195 < 0.05)，跳过轨迹锚定，但保留 SVD blend (α=0.004)
+2026-06-15 18:36:39,545 [INFO]   [Trajectory Anchor] Generator 已重置 (seed=59)，生成将使用 SVD-blended 噪声（保留运动先验，无轨迹约束）
+2026-06-15 18:36:39,545 [INFO]   [Noise Decision Summary] trajectory_anchor=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE (shape={eta_temporal.shape}), use_blend=True
+2026-06-15 18:36:39,545 [INFO]   [Noise Decision] → 将使用 SVD-blended 噪声 (α=0.004)
+2026-06-15 18:36:39,545 [INFO]   iter 1/1: The video depicts a white SUV driving on a dusty, unpaved ro...
+2026-06-15 18:36:39,545 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3320, η_mixed std=0.9961, mean=-0.0004
+2026-06-15 18:36:39,546 [INFO]   [Blend Diag] cos(temporal, random)=0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0216
+2026-06-15 18:36:39,546 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021840 (越大越说明 temporal 有影响)
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.84s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-15 18:38:40,020 [INFO] [P-Flow] Done in 220.9s → outputs/Anchor_SVD_cosProp_3samples/sample_17/17.mp4
+2026-06-15 18:38:40,021 [INFO]   [SAMPLE SUMMARY] sample_id=17
+2026-06-15 18:38:40,021 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear, suggesting it might be on a journey or adventure. As the SUV moves forward, it kicks up a cloud of dust behind it, indicating the dryness of the terrain and the speed at which it is traveling. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure.
+2026-06-15 18:38:40,021 [INFO]   [SAMPLE SUMMARY] caption_length=539 chars, word_count=94
+2026-06-15 18:38:40,021 [INFO]   [SAMPLE SUMMARY] elapsed=220.9s, output=outputs/Anchor_SVD_cosProp_3samples/sample_17/17.mp4
+  [3/3] 处理 21...
+2026-06-15 18:38:40,023 [INFO] [P-Flow] sample=21, flags=['inversion', 'svd', 'blend(α=0.004)', 'trajectory_anchor(β_max=0.03, sched=warmup_decay)']
+2026-06-15 18:38:42,045 [INFO]   [Inversion] encoding reference → latent...
+2026-06-15 18:38:44,410 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-15 18:38:44,410 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|█████████████████████▌                                                                                                  | 9/50 [00:17<01:18,  1.91s/it]2026-06-15 18:39:03,546 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0339, std=0.4102, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████████████████████▏                                                                         | 19/50 [00:36<00:59,  1.91s/it]2026-06-15 18:39:22,665 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0400, std=0.5039, cached=21 points
+Inversion + Trajectory:  58%|█████████████████████████████████████████████████████████████████████                                                  | 29/50 [00:55<00:40,  1.91s/it]2026-06-15 18:39:41,797 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0469, std=0.6172, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████████████████████████████████████▊                          | 39/50 [01:14<00:21,  1.91s/it]2026-06-15 18:40:00,936 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0552, std=0.7578, cached=41 points
+Inversion + Trajectory:  98%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▌  | 49/50 [01:33<00:01,  1.91s/it]2026-06-15 18:40:20,088 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0649, std=0.9258, cached=51 points
+2026-06-15 18:40:20,088 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0649, std=0.9258                                                                  
+2026-06-15 18:40:20,089 [INFO]   [Inversion Quality] η_inv: std=0.9258, mean=0.0649, range=[-3.797, 3.672], cos_sim(η_inv, random)=0.0008, cos_sim(η_inv, z0)=0.9688
+2026-06-15 18:40:20,090 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-15 18:40:20,104 [DEBUG]   [Stage1] Spatial: removed top-19 components
+2026-06-15 18:40:20,108 [DEBUG]   [Stage2] Temporal: kept top-14/21 components
+2026-06-15 18:40:20,109 [INFO]   η_temporal: mean=0.0001, std=0.3281
+2026-06-15 18:40:20,116 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:40:20,116 [INFO]   [CONFLICT DIAG] Prompt-SVD 方向冲突诊断
+2026-06-15 18:40:20,116 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:40:20,116 [INFO]   [CONFLICT DIAG] Caption 运动关键词:
+2026-06-15 18:40:20,116 [INFO]     motion: ['move']
+2026-06-15 18:40:20,116 [INFO]   [CONFLICT DIAG] ⚠️ Caption 包含 1 个运动关键词 → prompt 已有明确运动指令，SVD 方向若不一致则产生冲突
+2026-06-15 18:40:20,116 [INFO]   [CONFLICT DIAG] η_temporal shape=[1, 16, 21, 60, 104], parsed frames=16
+2026-06-15 18:40:20,118 [INFO]   [CONFLICT DIAG] 帧间余弦相似度: mean=0.0609, std=0.1760, range=[-0.2080, 0.3457]
+2026-06-15 18:40:20,118 [INFO]   [CONFLICT DIAG] ✓ 低帧间相关性 (mean_cos=0.0609 ≤ 0.1) → SVD 噪声接近随机，冲突风险低
+2026-06-15 18:40:20,120 [INFO]   [CONFLICT DIAG] 帧间差分方向一致性: mean_Δcos=-0.4724 (>0.5=强方向运动, <0.1=无规律)
+2026-06-15 18:40:20,121 [INFO]   [CONFLICT DIAG] 首末帧差分方向相关: cos(Δ_first, Δ_last)=0.0151 (高值=持续单向运动)
+2026-06-15 18:40:20,121 [INFO]   [CONFLICT DIAG] SVD 空间能量分布 (%): TL=25.7% TR=21.5% BL=26.4% BR=26.3%
+2026-06-15 18:40:20,121 [INFO]   [CONFLICT DIAG] SVD 能量空间均匀分布，无明显方向偏好
+2026-06-15 18:40:20,121 [INFO]   [CONFLICT DIAG] ★ 冲突风险评估: LOW
+2026-06-15 18:40:20,121 [INFO]   [CONFLICT DIAG] 建议: 若 CLIP 下降且风险为 HIGH，考虑: (1) 降低 α 至 0.0005; (2) 对该样本禁用 SVD; (3) 使用简化 prompt 无运动描述
+2026-06-15 18:40:20,121 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:40:20,121 [INFO]   [Trajectory Anchor] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-15 18:40:20,123 [INFO]   [Trajectory Anchor] η_temporal 帧间一致性: mean_cos=0.0609, std=0.1760, range=[-0.2080, 0.3457] (阈值=0.05)
+2026-06-15 18:40:20,123 [INFO]   [Trajectory Anchor] ✅ 门控通过 (mean_cos=0.0609 >= 0.05)，启用轨迹锚定 + SVD blend
+2026-06-15 18:40:20,123 [INFO]   [Trajectory Anchor] Cached 51 trajectory points, t range=[0.000, 1.000]
+2026-06-15 18:40:20,123 [INFO]   [Noise Decision Summary] trajectory_anchor=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE (shape={eta_temporal.shape}), use_blend=True
+2026-06-15 18:40:20,123 [INFO]   [Noise Decision] → 将使用 SVD-blended 噪声 (α=0.004)
+2026-06-15 18:40:20,123 [INFO]   iter 1/1: The video depicts a lush, dense jungle with tall trees and t...
+2026-06-15 18:40:20,124 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3281, η_mixed std=0.9961, mean=-0.0000
+2026-06-15 18:40:20,124 [INFO]   [Blend Diag] cos(temporal, random)=0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0214
+2026-06-15 18:40:20,124 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021668 (越大越说明 temporal 有影响)
+2026-06-15 18:40:20,125 [INFO]   [Trajectory Anchor] β_max=0.03, schedule=warmup_decay, trajectory points=51, gen steps=30
+2026-06-15 18:40:20,125 [INFO]   [Trajectory Anchor] β schedule (first 5): ['0.0150', '0.0180', '0.0210', '0.0240', '0.0270'], (last 5): ['0.0081', '0.0061', '0.0041', '0.0020', '0.0000']
+2026-06-15 18:40:20,125 [INFO]   [Trajectory Anchor] cos-proportional β 模式已启用 (检测到 SVD-blended latents, effective_β = β_t × cos(gen,ref))
+2026-06-15 18:40:20,126 [INFO]   [Trajectory Anchor] 起点对齐诊断: cos(z_T_actual, ref_traj[t=1.000])=0.0066 (⚠️ 严重偏移)
+2026-06-15 18:40:20,126 [INFO]   [Trajectory Anchor] 源头差异说明: z_T = SVD-blended (α=0.004), ref_traj[t=1] = raw eta_inv (无SVD无blend), 差异来自 SVD 滤波 + α-blend 稀释
+  0%|                                                                                                                                                        | 0/30 [00:00<?, ?it/s]2026-06-15 18:40:24,086 [INFO]     [Anchor step  0/30] 🟢 首次有效 anchor (cos=0.0163, effective_β=0.0002)
+2026-06-15 18:40:24,087 [INFO]     [Anchor step  0/30] t=0.967→ref_t=0.040, β_sched=0.0150, effective_β=0.0002, shift=0.47, cos=0.0163, latent_std=0.9842
+  3%|████▊                                                                                                                                           | 1/30 [00:03<01:51,  3.84s/it]2026-06-15 18:40:27,924 [INFO]     [Anchor step  1/30] t=0.933→ref_t=0.060, β_sched=0.0180, effective_β=0.0004, shift=0.78, cos=0.0231, latent_std=0.9726
+  7%|█████████▌                                                                                                                                      | 2/30 [00:07<01:47,  3.84s/it]2026-06-15 18:40:31,761 [INFO]     [Anchor step  2/30] t=0.900→ref_t=0.100, β_sched=0.0210, effective_β=0.0006, shift=1.18, cos=0.0308, latent_std=0.9609
+ 10%|██████████████▍                                                                                                                                 | 3/30 [00:11<01:43,  3.84s/it]2026-06-15 18:40:35,598 [INFO]     [Anchor step  3/30] t=0.867→ref_t=0.140, β_sched=0.0240, effective_β=0.0009, shift=1.67, cos=0.0394, latent_std=0.9486
+ 13%|███████████████████▏                                                                                                                            | 4/30 [00:15<01:39,  3.84s/it]2026-06-15 18:40:39,437 [INFO]     [Anchor step  4/30] t=0.833→ref_t=0.160, β_sched=0.0270, effective_β=0.0013, shift=2.27, cos=0.0487, latent_std=0.9360
+ 17%|████████████████████████                                                                                                                        | 5/30 [00:19<01:35,  3.84s/it]2026-06-15 18:40:43,278 [INFO]     [Anchor step  5/30] t=0.800→ref_t=0.200, β_sched=0.0300, effective_β=0.0018, shift=2.96, cos=0.0587, latent_std=0.9231
+ 20%|████████████████████████████▊                                                                                                                   | 6/30 [00:23<01:32,  3.84s/it]2026-06-15 18:40:47,115 [INFO]     [Anchor step  6/30] t=0.767→ref_t=0.240, β_sched=0.0300, effective_β=0.0021, shift=3.40, cos=0.0696, latent_std=0.9098
+ 23%|█████████████████████████████████▌                                                                                                              | 7/30 [00:26<01:28,  3.84s/it]2026-06-15 18:40:50,954 [INFO]     [Anchor step  7/30] t=0.733→ref_t=0.260, β_sched=0.0299, effective_β=0.0024, shift=3.88, cos=0.0815, latent_std=0.8963
+ 27%|██████████████████████████████████████▍                                                                                                         | 8/30 [00:30<01:24,  3.84s/it]2026-06-15 18:40:54,791 [INFO]     [Anchor step  8/30] t=0.700→ref_t=0.300, β_sched=0.0297, effective_β=0.0028, shift=4.33, cos=0.0944, latent_std=0.8825
+ 30%|███████████████████████████████████████████▏                                                                                                    | 9/30 [00:34<01:20,  3.84s/it]2026-06-15 18:40:58,626 [INFO]     [Anchor step  9/30] t=0.667→ref_t=0.340, β_sched=0.0294, effective_β=0.0032, shift=4.75, cos=0.1084, latent_std=0.8684
+ 33%|███████████████████████████████████████████████▋                                                                                               | 10/30 [00:38<01:16,  3.84s/it]2026-06-15 18:41:02,462 [INFO]     [Anchor step 10/30] t=0.633→ref_t=0.360, β_sched=0.0289, effective_β=0.0036, shift=5.19, cos=0.1235, latent_std=0.8542
+ 37%|████████████████████████████████████████████████████▍                                                                                          | 11/30 [00:42<01:12,  3.84s/it]2026-06-15 18:41:06,300 [INFO]     [Anchor step 11/30] t=0.600→ref_t=0.400, β_sched=0.0283, effective_β=0.0040, shift=5.57, cos=0.1400, latent_std=0.8398
+ 40%|█████████████████████████████████████████████████████████▏                                                                                     | 12/30 [00:46<01:09,  3.84s/it]2026-06-15 18:41:10,138 [INFO]     [Anchor step 12/30] t=0.567→ref_t=0.440, β_sched=0.0275, effective_β=0.0043, shift=5.91, cos=0.1580, latent_std=0.8254
+ 43%|█████████████████████████████████████████████████████████████▉                                                                                 | 13/30 [00:49<01:05,  3.84s/it]2026-06-15 18:41:13,971 [INFO]     [Anchor step 13/30] t=0.533→ref_t=0.460, β_sched=0.0266, effective_β=0.0047, shift=6.24, cos=0.1776, latent_std=0.8111
+ 47%|██████████████████████████████████████████████████████████████████▋                                                                            | 14/30 [00:53<01:01,  3.84s/it]2026-06-15 18:41:17,808 [INFO]     [Anchor step 14/30] t=0.500→ref_t=0.500, β_sched=0.0256, effective_β=0.0051, shift=6.48, cos=0.1990, latent_std=0.7971
+ 50%|███████████████████████████████████████████████████████████████████████▌                                                                       | 15/30 [00:57<00:57,  3.84s/it]2026-06-15 18:41:21,646 [INFO]     [Anchor step 15/30] t=0.467→ref_t=0.540, β_sched=0.0245, effective_β=0.0054, shift=6.67, cos=0.2221, latent_std=0.7837
+ 53%|████████████████████████████████████████████████████████████████████████████▎                                                                  | 16/30 [01:01<00:53,  3.84s/it]2026-06-15 18:41:25,482 [INFO]     [Anchor step 16/30] t=0.433→ref_t=0.560, β_sched=0.0233, effective_β=0.0058, shift=6.83, cos=0.2473, latent_std=0.7711
+ 57%|█████████████████████████████████████████████████████████████████████████████████                                                              | 17/30 [01:05<00:49,  3.84s/it]2026-06-15 18:41:29,318 [INFO]     [Anchor step 17/30] t=0.400→ref_t=0.600, β_sched=0.0219, effective_β=0.0060, shift=6.87, cos=0.2741, latent_std=0.7597
+ 60%|█████████████████████████████████████████████████████████████████████████████████████▊                                                         | 18/30 [01:09<00:46,  3.84s/it]2026-06-15 18:41:33,151 [INFO]     [Anchor step 18/30] t=0.367→ref_t=0.640, β_sched=0.0205, effective_β=0.0062, shift=6.83, cos=0.3029, latent_std=0.7502
+ 63%|██████████████████████████████████████████████████████████████████████████████████████████▌                                                    | 19/30 [01:12<00:42,  3.84s/it]2026-06-15 18:41:36,986 [INFO]     [Anchor step 19/30] t=0.333→ref_t=0.660, β_sched=0.0189, effective_β=0.0063, shift=6.74, cos=0.3335, latent_std=0.7432
+ 67%|███████████████████████████████████████████████████████████████████████████████████████████████▎                                               | 20/30 [01:16<00:38,  3.84s/it]2026-06-15 18:41:40,821 [INFO]     [Anchor step 20/30] t=0.300→ref_t=0.700, β_sched=0.0173, effective_β=0.0063, shift=6.53, cos=0.3649, latent_std=0.7393
+ 70%|████████████████████████████████████████████████████████████████████████████████████████████████████                                           | 21/30 [01:20<00:34,  3.84s/it]2026-06-15 18:41:44,656 [INFO]     [Anchor step 21/30] t=0.267→ref_t=0.740, β_sched=0.0156, effective_β=0.0062, shift=6.23, cos=0.3967, latent_std=0.7397
+ 73%|████████████████████████████████████████████████████████████████████████████████████████████████████████▊                                      | 22/30 [01:24<00:30,  3.84s/it]2026-06-15 18:41:48,494 [INFO]     [Anchor step 22/30] t=0.233→ref_t=0.760, β_sched=0.0138, effective_β=0.0059, shift=5.86, cos=0.4285, latent_std=0.7457
+ 77%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████▋                                 | 23/30 [01:28<00:26,  3.84s/it]2026-06-15 18:41:52,329 [INFO]     [Anchor step 23/30] t=0.200→ref_t=0.800, β_sched=0.0120, effective_β=0.0055, shift=5.39, cos=0.4582, latent_std=0.7585
+ 80%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████▍                            | 24/30 [01:32<00:23,  3.84s/it]2026-06-15 18:41:56,168 [INFO]     [Anchor step 24/30] t=0.167→ref_t=0.840, β_sched=0.0100, effective_β=0.0049, shift=4.83, cos=0.4849, latent_std=0.7798
+ 83%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▏                       | 25/30 [01:35<00:19,  3.84s/it]2026-06-15 18:42:00,003 [INFO]     [Anchor step 25/30] t=0.133→ref_t=0.860, β_sched=0.0081, effective_β=0.0041, shift=4.18, cos=0.5079, latent_std=0.8117
+ 87%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▉                   | 26/30 [01:39<00:15,  3.84s/it]2026-06-15 18:42:03,837 [INFO]     [Anchor step 26/30] t=0.100→ref_t=0.900, β_sched=0.0061, effective_β=0.0032, shift=3.41, cos=0.5251, latent_std=0.8560
+ 90%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▋              | 27/30 [01:43<00:11,  3.84s/it]2026-06-15 18:42:07,670 [INFO]     [Anchor step 27/30] t=0.067→ref_t=0.940, β_sched=0.0041, effective_β=0.0022, shift=2.50, cos=0.5361, latent_std=0.9144
+ 93%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▍         | 28/30 [01:47<00:07,  3.83s/it]2026-06-15 18:42:11,503 [INFO]     [Anchor step 28/30] t=0.033→ref_t=0.960, β_sched=0.0020, effective_β=0.0011, shift=1.38, cos=0.5422, latent_std=0.9912
+ 97%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▏    | 29/30 [01:51<00:03,  3.83s/it]2026-06-15 18:42:15,333 [DEBUG]     [Anchor step 29/30] t=0.000, β=0.000000 < 1e-6, skipped
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:55<00:00,  3.84s/it]
+2026-06-15 18:42:18,865 [INFO]   ═══════════════════════════════════════════════
+2026-06-15 18:42:18,866 [INFO]   [Trajectory Anchor] 生成完成总结:
+2026-06-15 18:42:18,866 [INFO]     applied=29, skipped=0 (cos-proportional), total=29/30
+2026-06-15 18:42:18,866 [INFO]     first_anchor_step=0, total_shift=129.3163, avg_shift=4.4592
+2026-06-15 18:42:18,866 [INFO]     前半段 (step 0~13): avg_cos(gen,ref)=0.0836, avg_shift=3.47
+2026-06-15 18:42:18,866 [INFO]     后半段 (step 14~28): avg_cos(gen,ref)=0.3882, avg_shift=5.38
+2026-06-15 18:42:18,866 [INFO]     趋势: cos 从 0.0836→0.3882 (收敛), shift 从 3.47→5.38 (异常 ⚠️)
+2026-06-15 18:42:18,866 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-15 18:42:20,492 [INFO] [P-Flow] Done in 220.5s → outputs/Anchor_SVD_cosProp_3samples/sample_21/21.mp4
+2026-06-15 18:42:20,492 [INFO]   [SAMPLE SUMMARY] sample_id=21
+2026-06-15 18:42:20,492 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a lush, dense jungle with tall trees and thick foliage. The scene is vibrant with various shades of green from the leaves and plants. Throughout the video, numerous paper airplanes are seen flying through the air, appearing to be tossed or released into the environment. These airplanes come in different colors, including white, pink, purple, and yellow, adding a playful and whimsical element to the natural setting. The movement of the airplanes contrasts with the stillness of the surrounding jungle, creating a dynamic visual experience. The lighting suggests it might be daytime, as sunlight filters through the canopy above, casting dappled shadows on the ground below.
+2026-06-15 18:42:20,493 [INFO]   [SAMPLE SUMMARY] caption_length=694 chars, word_count=109
+2026-06-15 18:42:20,493 [INFO]   [SAMPLE SUMMARY] elapsed=220.5s, output=outputs/Anchor_SVD_cosProp_3samples/sample_21/21.mp4
+
+批量完成! 输出: outputs/Anchor_SVD_cosProp_3samples
+Found 3 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/3] 7 CLIP(o-t=0.3816, g-t=0.3754, o-g=0.9076) XCLIP(o-t=0.2661, g-t=0.2044, o-g=0.6159)
+[2/3] 17 CLIP(o-t=0.3528, g-t=0.3482, o-g=0.9092) XCLIP(o-t=0.2493, g-t=0.2157, o-g=0.8368)
+[3/3] 21 CLIP(o-t=0.3840, g-t=0.4151, o-g=0.9019) XCLIP(o-t=0.2848, g-t=0.1775, o-g=0.6885)
+
+Evaluation complete!
+  Samples: 3
+  orig_gen_clip mean:  0.906211
+  orig_gen_xclip mean: 0.713772
+  CSV: outputs/Anchor_SVD_cosProp_3samples/eval_clip/clip_xclip_results.csv
+  Summary: outputs/Anchor_SVD_cosProp_3samples/eval_clip/eval_summary.md
+root@autodl-container-027f4cad3d-4acf2c67:~/xixihaha/P-Flow# 
+
+
+
+
+
+
+
+
+
+再跑 FI 自适应门控验证
