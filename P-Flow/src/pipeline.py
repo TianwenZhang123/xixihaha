@@ -186,6 +186,44 @@ class PFlowConfig:
     vda_end_step: int = -1                # VDA 结束步 (step_index < 此值才启用; -1=到最后一步)
     # 后期步数 cos 自然高, VDA 作用减弱, 可以提前结束节省计算
 
+    # ── VDA v3: 角度自适应质量门控 ──
+    vda_angle_gate: bool = False          # 是否启用角度自适应门控 (替代 mean_cos 门控)
+    # 核心改进: 用 angle(v_ref, v_gen) 替代 η_temporal 帧间 cos 作为质量指标
+    # 原理: angle 直接反映 VDA 引导的有效性, mean_cos 只反映反演噪声的帧间相关性
+    # 前几步 angle 趋势预测整体验果, 如果前几步 angle 突然增大则快速回退
+    vda_angle_probe_steps: int = 5        # 前 N 步用于试探的步数 (推荐 3~7)
+    vda_angle_probe_threshold: float = 95.0  # 试探期内 angle 平均超过此值则回退
+    # angle < 90°: v_ref 与 v_gen 同向, VDA 有效 → 全量引导
+    # 90° < angle < probe_threshold: VDA 部分有效 → 按 angle_scale 降权
+    # angle > probe_threshold: VDA 可能有害 → 快速回退到标准生成
+    vda_angle_gate_decay: str = "linear"  # 角度降权方式: linear / cosine / step
+    #   linear: angle_scale = 1.0 - (angle - 90) / (threshold - 90)
+    #   cosine: angle_scale = 0.5 * (1 + cos(pi * (angle - 90) / (threshold - 90)))
+    #   step: angle < 90 → 1.0, angle >= 90 → 0.0 (硬切换)
+
+    # ── L3 V3: Feature Injection (FI) ──
+    # 核心思想: 不做 latent 空间的方向修正 (VDA), 改做 DiT 特征空间的信息注入
+    # 反演过程中缓存 DiT 每步的 cross-attention 输出, 生成时以残差方式注入
+    # 优势:
+    #   1. 特征空间语义对齐比 latent 空间方向对齐更鲁棒
+    #   2. 不修改 ODE 积分路径, 只修改 DiT 中间表示
+    #   3. 类似 ControlNet 的零训练注入, 但不需要训练
+    feature_inject: bool = False          # 是否启用 Feature Injection
+    fi_layers: str = "all"                # 注入哪些层: "all" / "mid" / "last" / 逗号分隔的层号
+    #   all: 所有 transformer 块 (30 层全注入)
+    #   mid: 中间 1/3 层 (layer 10~19, 高语义层)
+    #   last: 最后 1/3 层 (layer 20~29, 细节层)
+    #   "5,10,15,20": 指定层号
+    fi_lambda: float = 0.1               # FI 注入强度 λ (推荐 0.01~0.3)
+    # h_injected = h_current + λ * (h_ref - h_current) = (1-λ)*h_current + λ*h_ref
+    # λ=0: 无注入, λ=1: 完全替换为参考特征
+    fi_schedule: str = "middle_peak"      # λ 调度策略 (同 VDA: middle_peak / warmup_decay / cosine_decay / constant)
+    fi_quality_gate: bool = True          # 是否启用质量门控 (基于 mean_cos)
+    fi_cache_mode: str = "attention"      # 缓存什么特征:
+    #   attention: cross-attention 输出 (语义对齐, 推荐)
+    #   hidden: 完整 hidden_states (信息丰富但维度大)
+    #   mlp: MLP 输出 (更高级语义)
+
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
 
@@ -227,7 +265,15 @@ class PFlowConfig:
         if self.trajectory_anchor:
             flags.append(f"trajectory_anchor(β_max={self.anchor_beta_max}, sched={self.anchor_schedule})")
         if self.velocity_anchor:
-            flags.append(f"velocity_anchor({self.vda_mode}: γ={self.vda_gamma}, sched={self.vda_schedule}, perp_only={self.vda_use_perp_only}" + (f", angle_thr={self.vda_angle_threshold}°" if self.vda_mode == "v2" else "") + ")")
+            vda_desc = f"velocity_anchor({self.vda_mode}: γ={self.vda_gamma}, sched={self.vda_schedule}, perp_only={self.vda_use_perp_only}"
+            if self.vda_mode == "v2":
+                vda_desc += f", angle_thr={self.vda_angle_threshold}°"
+            if self.vda_angle_gate:
+                vda_desc += f", angle_gate(probe={self.vda_angle_probe_steps}步, thr={self.vda_angle_probe_threshold}°, decay={self.vda_angle_gate_decay})"
+            vda_desc += ")"
+            flags.append(vda_desc)
+        if self.feature_inject:
+            flags.append(f"feature_inject(λ={self.fi_lambda}, layers={self.fi_layers}, sched={self.fi_schedule}, mode={self.fi_cache_mode})")
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
         if self.use_midpoint:
@@ -357,9 +403,10 @@ class PFlowPipeline:
         prompt_embeds_for_diag = None
         ref_latents_enc = None
         ref_trajectory_from_inversion = None  # 合并模式：反演时同时缓存的轨迹
+        fi_ref_features = None  # Feature Injection 参考特征缓存
         if cfg.use_inversion:
             # 判断是否需要在反演时同时缓存轨迹
-            need_trajectory = cfg.trajectory_anchor or cfg.velocity_anchor
+            need_trajectory = cfg.trajectory_anchor or cfg.velocity_anchor or cfg.feature_inject
             cache_every_n = cfg.anchor_cache_every_n if need_trajectory else 1
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds_for_diag, ref_trajectory_from_inversion = \
                 self._compute_noise_prior(
@@ -380,7 +427,7 @@ class PFlowPipeline:
 
         # ── Step 3.6: 轨迹缓存 (灰盒 Trajectory Anchor / VDA) ──
         ref_trajectory = None
-        if cfg.trajectory_anchor or cfg.velocity_anchor:
+        if cfg.trajectory_anchor or cfg.velocity_anchor or cfg.feature_inject:
             if not cfg.use_inversion:
                 logger.warning(
                     "  [Trajectory Anchor] trajectory_anchor=True 但 use_inversion=False, "
@@ -435,6 +482,13 @@ class PFlowPipeline:
             #   关键: 重置 generator seed，使生成阶段的随机状态与 baseline 完全一致。
             #   时间开销: 只多花 inversion 的时间（~1.5min），生成阶段不重复。
             # 注意: VDA 模式下跳过此硬门控, VDA 有自己的软门控 (vda_quality_scale)
+            # Feature Injection: 需要反演时缓存 DiT 特征
+            fi_ref_features = None
+            if cfg.feature_inject and ref_trajectory_from_inversion is not None:
+                fi_ref_features = self._cache_fi_ref_features(
+                    ref_trajectory_from_inversion, prompt_embeds_for_diag
+                )
+
             if cfg.anchor_quality_gate and eta_temporal is not None and not cfg.velocity_anchor:
                 eta_gate = eta_temporal
                 if eta_gate.dim() == 5:
@@ -563,6 +617,13 @@ class PFlowPipeline:
                 gen_video = self._generate_with_vda(
                     current_prompt, latents, generator,
                     ref_trajectory=ref_trajectory,
+                    eta_temporal=eta_temporal,
+                    negative_prompt=neg_prompt,
+                )
+            elif cfg.feature_inject and fi_ref_features is not None:
+                gen_video = self._generate_with_fi(
+                    current_prompt, latents, generator,
+                    ref_features=fi_ref_features,
                     eta_temporal=eta_temporal,
                     negative_prompt=neg_prompt,
                 )
@@ -2448,8 +2509,37 @@ class PFlowPipeline:
             "avg_perp_ratio": 0.0,  # 正交分量占比
         }
 
+        # ── VDA v3: 角度自适应门控状态 ──
+        angle_gate_state = {
+            "probe_angles": [],        # 前 N 步的 angle 记录
+            "probe_complete": False,    # 试探期是否结束
+            "probe_verdict": None,      # "pass" / "fail" / None
+            "global_angle_scale": 1.0, # 全局角度缩放 (由试探结果决定)
+            "aborted": False,          # 是否已回退到标准生成
+        }
+
         # 保存前一步的 latent (用于差分估计生成速度)
         prev_latent_holder = [None]
+
+        # ── VDA v3: 计算角度降权函数 ──
+        def _compute_angle_scale(angle_deg: float) -> float:
+            """根据 angle 和配置计算 angle_scale。"""
+            threshold = cfg.vda_angle_probe_threshold
+            if angle_deg < 90.0:
+                return 1.0  # 同向，完全信任
+            elif angle_deg > threshold:
+                return 0.0  # 反向，完全跳过
+            else:
+                # 在 90°~threshold 之间降权
+                ratio = (angle_deg - 90.0) / (threshold - 90.0)
+                if cfg.vda_angle_gate_decay == "linear":
+                    return 1.0 - ratio
+                elif cfg.vda_angle_gate_decay == "cosine":
+                    return 0.5 * (1.0 + math.cos(math.pi * ratio))
+                elif cfg.vda_angle_gate_decay == "step":
+                    return 0.0  # 硬切换: 只要 > 90° 就跳过
+                else:
+                    return 1.0 - ratio  # 默认 linear
 
         def vda_callback(pipe, step_index, timestep, callback_kwargs):
             """VDA callback: 速度方向引导 (带 try-except 错误保护)。"""
@@ -2592,6 +2682,64 @@ class PFlowPipeline:
                 cos_v_ref_v_gen = max(min(cos_v_ref_v_gen, 1.0), -1.0)  # clamp to [-1, 1]
                 angle_deg = math.degrees(math.acos(cos_v_ref_v_gen))
 
+                # ── VDA v3: 角度自适应门控 (前 N 步试探 + 快速回退) ──
+                if cfg.vda_angle_gate and not angle_gate_state["aborted"]:
+                    # 收集前 N 步的 angle 数据
+                    if not angle_gate_state["probe_complete"]:
+                        angle_gate_state["probe_angles"].append(angle_deg)
+
+                        # 试探期结束判定
+                        vda_step_count = len(angle_gate_state["probe_angles"])
+                        if vda_step_count >= cfg.vda_angle_probe_steps:
+                            angle_gate_state["probe_complete"] = True
+                            probe_avg = sum(angle_gate_state["probe_angles"]) / len(angle_gate_state["probe_angles"])
+                            probe_max = max(angle_gate_state["probe_angles"])
+
+                            if probe_avg > cfg.vda_angle_probe_threshold:
+                                # ❌ 试探期 angle 平均超过阈值 → VDA 可能有害
+                                angle_gate_state["probe_verdict"] = "fail"
+                                angle_gate_state["global_angle_scale"] = 0.0
+                                logger.warning(
+                                    f"    [VDA v3 Angle Gate] ❌ 试探期失败! "
+                                    f"avg_angle={probe_avg:.1f}° > threshold={cfg.vda_angle_probe_threshold:.0f}°, "
+                                    f"max_angle={probe_max:.1f}°, "
+                                    f"probe_angles={[f'{a:.1f}°' for a in angle_gate_state['probe_angles']]}"
+                                )
+                                logger.warning(
+                                    f"    [VDA v3 Angle Gate] 后续步数将完全跳过 VDA"
+                                )
+                            elif probe_avg > 90.0:
+                                # ⚡ 试探期 angle 平均在 90°~threshold 之间 → 按比例降权
+                                # 使用最小 angle_scale 作为全局降权因子
+                                min_scale = min(_compute_angle_scale(a) for a in angle_gate_state["probe_angles"])
+                                angle_gate_state["probe_verdict"] = "reduced"
+                                angle_gate_state["global_angle_scale"] = min_scale
+                                logger.info(
+                                    f"    [VDA v3 Angle Gate] ⚡ 试探期部分通过: "
+                                    f"avg_angle={probe_avg:.1f}° (90°~{cfg.vda_angle_probe_threshold:.0f}°), "
+                                    f"global_angle_scale={min_scale:.3f}, "
+                                    f"probe_angles={[f'{a:.1f}°' for a in angle_gate_state['probe_angles']]}"
+                                )
+                            else:
+                                # ✅ 试探期 angle 全部 < 90° → VDA 有效
+                                angle_gate_state["probe_verdict"] = "pass"
+                                angle_gate_state["global_angle_scale"] = 1.0
+                                logger.info(
+                                    f"    [VDA v3 Angle Gate] ✅ 试探期通过: "
+                                    f"avg_angle={probe_avg:.1f}° < 90°, "
+                                    f"probe_angles={[f'{a:.1f}°' for a in angle_gate_state['probe_angles']]}"
+                                )
+
+                    # 根据试探结果决定当前步的行为
+                    if angle_gate_state["probe_verdict"] == "fail":
+                        # 完全跳过 VDA
+                        prev_latent_holder[0] = latents_current.clone()
+                        vda_stats["steps_skipped"] += 1
+                        return callback_kwargs
+                    elif angle_gate_state["probe_verdict"] == "reduced":
+                        # 使用全局降权
+                        pass  # 在 Step 4 中通过 global_angle_scale 生效
+
                 # ── Step 4: 计算方向修正冲量 ──
                 gamma_t = gamma_values[step_index] * quality_scale
 
@@ -2620,6 +2768,24 @@ class PFlowPipeline:
                             f"    [VDA v2 step {step_index:2d}] angle_scale={angle_scale:.3f} "
                             f"(angle={angle_deg:.1f}°, thr={angle_thr:.0f}°), "
                             f"γ_eff={gamma_t:.5f} (base={gamma_values[step_index]*quality_scale:.5f})"
+                        )
+
+                # ── v3: 角度自适应门控缩放 ──
+                if cfg.vda_angle_gate:
+                    # 当前步的角度缩放 (per-step)
+                    current_angle_scale = _compute_angle_scale(angle_deg)
+                    # 与全局缩放取较小值 (保守策略)
+                    combined_scale = min(current_angle_scale, angle_gate_state["global_angle_scale"])
+                    gamma_t = gamma_t * combined_scale
+
+                    if step_index % 5 == 0 or step_index == cfg.vda_start_step:
+                        logger.info(
+                            f"    [VDA v3 step {step_index:2d}] angle={angle_deg:.1f}°, "
+                            f"per_step_scale={current_angle_scale:.3f}, "
+                            f"global_scale={angle_gate_state['global_angle_scale']:.3f}, "
+                            f"combined={combined_scale:.3f}, "
+                            f"γ_eff={gamma_t:.5f}, "
+                            f"probe={'done:' + str(angle_gate_state['probe_verdict']) if angle_gate_state['probe_complete'] else f'{len(angle_gate_state["probe_angles"])}/{cfg.vda_angle_probe_steps}'}"
                         )
 
                 if cfg.vda_use_perp_only:
@@ -2779,6 +2945,14 @@ class PFlowPipeline:
                     f"full={n_full}, reduced={n_reduced}, zero={n_zero_scale}/{len(angle_scales)}"
                 )
 
+            # ── v3: 角度门控统计 ──
+            if cfg.vda_angle_gate:
+                logger.info(
+                    f"    [VDA v3 Angle Gate] verdict={angle_gate_state['probe_verdict']}, "
+                    f"global_scale={angle_gate_state['global_angle_scale']:.3f}, "
+                    f"probe_angles={[f'{a:.1f}°' for a in angle_gate_state['probe_angles']]}"
+                )
+
             # ── shift_ratio 统计 ──
             shift_ratios = [s["shift_ratio"] for s in vda_stats["per_step"]]
             avg_shift_ratio = sum(shift_ratios) / len(shift_ratios)
@@ -2868,7 +3042,389 @@ class PFlowPipeline:
             video = denormalize_video(video)
         return video.clamp(0, 1)
 
-    def _vlm_refine(
+    def _cache_fi_ref_features(
+        self,
+        ref_trajectory: Dict[float, torch.Tensor],
+        prompt_embeds: torch.Tensor,
+    ) -> Dict[str, Any]:
+        """
+        Feature Injection: 在反演过程中缓存 DiT 每步的中间特征。
+
+        核心思路:
+            不在 latent 空间做方向修正 (VDA), 而是缓存反演过程中 DiT 的中间表示,
+            在生成时以残差方式注入到对应层。
+
+        实现方式:
+            沿反演轨迹的若干关键 t 值, 重新前向传播 DiT, 通过 hook 捕获中间特征。
+            这比在反演时直接 hook 更灵活, 因为可以选择性地只缓存关键步。
+
+        Args:
+            ref_trajectory: 反演轨迹 {t_value: z_ref_tensor(cpu)}
+            prompt_embeds: prompt embedding (用于 DiT 前向)
+
+        Returns:
+            ref_features: dict {step_index: {layer_idx: tensor}}
+        """
+        cfg = self.config
+        num_steps = cfg.num_inference_steps
+
+        logger.info("  ═══════════════════════════════════════════════")
+        logger.info("  [FI] 开始缓存参考特征")
+        logger.info("  ═══════════════════════════════════════════════")
+
+        # 确定要缓存哪些步的特征
+        # 选择与生成步数相同的关键 t 值
+        traj_keys = sorted(ref_trajectory.keys())
+
+        # 映射: 生成 step_index → ref_trajectory 的 t 值
+        # 生成: step_index 完成后 t = 1 - (step_index+1)/N
+        # 反演: 同一进度对应 t_traj = 1 - t_progress
+        dt_gen = 1.0 / num_steps
+
+        # 只缓存与生成步对应的点 (减少显存)
+        cache_points = {}  # step_index → t_traj_key
+        for step_idx in range(num_steps):
+            t_progress = 1.0 - (step_idx + 1) / num_steps
+            t_traj = 1.0 - t_progress
+            # 找最近的 trajectory key
+            nearest_t = min(traj_keys, key=lambda t: abs(t - t_traj))
+            cache_points[step_idx] = nearest_t
+
+        logger.info(
+            f"  [FI] 缓存 {len(cache_points)} 个关键步的特征 "
+            f"(对应 {num_steps} 步生成)"
+        )
+
+        # 解析注入层配置
+        transformer = self.pipe.transformer
+        num_layers = len(transformer.blocks) if hasattr(transformer, 'blocks') else 30
+
+        if cfg.fi_layers == "all":
+            target_layers = list(range(num_layers))
+        elif cfg.fi_layers == "mid":
+            target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
+        elif cfg.fi_layers == "last":
+            target_layers = list(range(2 * num_layers // 3, num_layers))
+        else:
+            # 逗号分隔的层号
+            try:
+                target_layers = [int(x.strip()) for x in cfg.fi_layers.split(",")]
+            except ValueError:
+                logger.warning(f"  [FI] 无法解析 fi_layers='{cfg.fi_layers}', 使用 'mid'")
+                target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
+
+        logger.info(
+            f"  [FI] 注入层: {target_layers} ({len(target_layers)}/{num_layers} 层)"
+        )
+
+        # 缓存参考特征
+        ref_features = {}  # {step_index: {layer_idx: feature_tensor(cpu)}}
+
+        # Hook 用于捕获中间特征
+        captured_features = {}
+
+        def make_hook(layer_idx):
+            def hook_fn(module, input, output):
+                # 捕获输出
+                if isinstance(output, tuple):
+                    captured_features[layer_idx] = output[0].detach().cpu()
+                else:
+                    captured_features[layer_idx] = output.detach().cpu()
+            return hook_fn
+
+        # 注册 hook
+        hooks = []
+        blocks = transformer.blocks if hasattr(transformer, 'blocks') else []
+        for layer_idx in target_layers:
+            if layer_idx < len(blocks):
+                block = blocks[layer_idx]
+                # Hook 在 block 的前向传播之后
+                # Wan2.1 DiT block 结构: self-attn → cross-attn → ffn
+                # 我们 hook cross-attn 输出 (如果 cache_mode=attention)
+                # 或者 block 整体输出 (如果 cache_mode=hidden)
+                if cfg.fi_cache_mode == "attention" and hasattr(block, 'cross_attn'):
+                    h = block.cross_attn.register_forward_hook(make_hook(layer_idx))
+                elif cfg.fi_cache_mode == "mlp" and hasattr(block, 'ffn'):
+                    h = block.ffn.register_forward_hook(make_hook(layer_idx))
+                else:
+                    # fallback: hook 整个 block
+                    h = block.register_forward_hook(make_hook(layer_idx))
+                hooks.append(h)
+
+        try:
+            # 沿轨迹前向传播缓存特征
+            for step_idx in sorted(cache_points.keys()):
+                t_traj_key = cache_points[step_idx]
+                z_ref = ref_trajectory[t_traj_key].to(
+                    device=self.device, dtype=self.dtype
+                )
+
+                # 构造 timestep tensor
+                # 反演 t 值: t_traj_key 是反演坐标 (t=1=数据, t=0=噪声)
+                # WanPipeline 的 timestep: t=1=噪声, t=0=数据
+                # 所以对应 pipeline timestep = t_traj_key
+                t_tensor = torch.full(
+                    (z_ref.shape[0],), t_traj_key, device=self.device, dtype=z_ref.dtype
+                )
+
+                captured_features.clear()
+
+                # DiT 前向传播
+                with torch.no_grad():
+                    _ = transformer(
+                        hidden_states=z_ref,
+                        timestep=t_tensor,
+                        encoder_hidden_states=prompt_embeds,
+                        return_dict=False,
+                    )
+
+                # 保存捕获的特征
+                ref_features[step_idx] = {}
+                for layer_idx, feat in captured_features.items():
+                    ref_features[step_idx][layer_idx] = feat
+
+                if step_idx % 5 == 0:
+                    logger.info(
+                        f"    [FI Cache] step {step_idx}: "
+                        f"t_traj={t_traj_key:.3f}, "
+                        f"cached {len(captured_features)} layers"
+                    )
+
+        finally:
+            # 移除所有 hook
+            for h in hooks:
+                h.remove()
+
+        total_cached = sum(len(v) for v in ref_features.values())
+        logger.info(
+            f"  [FI] 参考特征缓存完成: "
+            f"{len(ref_features)} steps × {len(target_layers)} layers = {total_cached} tensors"
+        )
+
+        # 保存元信息
+        ref_features["_meta"] = {
+            "target_layers": target_layers,
+            "num_layers": num_layers,
+            "cache_mode": cfg.fi_cache_mode,
+            "num_steps": num_steps,
+        }
+
+        return ref_features
+
+    @torch.no_grad()
+    def _generate_with_fi(
+        self,
+        prompt: str,
+        latents: Optional[torch.Tensor],
+        generator: torch.Generator,
+        ref_features: Dict[str, Any],
+        eta_temporal: Optional[torch.Tensor] = None,
+        negative_prompt: str = "",
+    ) -> torch.Tensor:
+        """
+        L3 V3: Feature Injection (FI) 生成。
+
+        核心思想:
+            在生成过程中, 通过 hook 在 DiT 每步前向传播时, 将参考特征以残差方式注入。
+
+        数学:
+            h_injected = h_current + λ * (h_ref - h_current)
+                       = (1-λ) * h_current + λ * h_ref
+
+        优势:
+            - 不修改 ODE 积分路径 (latent 不变), 只修改 DiT 的中间表示
+            - 特征空间语义对齐比 latent 空间方向对齐更鲁棒
+            - 类似 ControlNet 的零训练注入, 但不需要训练
+
+        Args:
+            prompt: 生成 prompt
+            latents: 初始噪声 (可含 SVD prior)
+            generator: 随机数生成器
+            ref_features: 参考特征缓存 {step_index: {layer_idx: tensor}}
+            eta_temporal: SVD 滤波后的噪声 (用于质量门控)
+            negative_prompt: 负面 prompt
+        """
+        cfg = self.config
+        num_steps = cfg.num_inference_steps
+
+        logger.info("  ═══════════════════════════════════════════════")
+        logger.info("  [FI] 开始 Feature Injection 生成")
+        logger.info("  ═══════════════════════════════════════════════")
+
+        # 提取元信息
+        meta = ref_features.get("_meta", {})
+        target_layers = meta.get("target_layers", [])
+
+        # ── 预计算 λ 调度 ──
+        lambda_values = self._compute_gamma_schedule(
+            num_steps, cfg.fi_lambda, cfg.fi_schedule
+        )
+
+        # ── 质量门控 ──
+        quality_scale = 1.0
+        if cfg.fi_quality_gate:
+            quality_scale = self._compute_vda_quality_scale(eta_temporal)
+            if quality_scale < 1e-6:
+                logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
+                return self._generate(prompt, latents, generator, negative_prompt)
+
+        logger.info(
+            f"  [FI] λ_max={cfg.fi_lambda}, schedule={cfg.fi_schedule}, "
+            f"quality_scale={quality_scale:.4f}, "
+            f"layers={target_layers}, cache_mode={cfg.fi_cache_mode}"
+        )
+
+        # ── FI 统计 ──
+        fi_stats = {
+            "steps_injected": 0,
+            "steps_no_ref": 0,
+            "total_injection_norm": 0.0,
+            "per_step": [],
+        }
+
+        # ── 注册注入 hook ──
+        transformer = self.pipe.transformer
+        blocks = transformer.blocks if hasattr(transformer, 'blocks') else []
+
+        # 当前步的参考特征和 λ (在 callback 中更新)
+        current_ref = [{}]  # {layer_idx: feature_tensor}
+        current_lambda = [0.0]
+        injection_stats_per_step = [{}]  # 每步注入统计
+
+        def make_injection_hook(layer_idx):
+            """创建注入 hook: h_injected = (1-λ)*h_current + λ*h_ref"""
+            def hook_fn(module, input, output):
+                if layer_idx not in current_ref[0]:
+                    return output
+
+                h_ref = current_ref[0][layer_idx]
+                lam = current_lambda[0]
+
+                if lam < 1e-8:
+                    return output
+
+                # 获取当前输出
+                if isinstance(output, tuple):
+                    h_current = output[0]
+                else:
+                    h_current = output
+
+                # 确保形状匹配
+                h_ref_dev = h_ref.to(device=h_current.device, dtype=h_current.dtype)
+
+                if h_ref_dev.shape != h_current.shape:
+                    # 形状不匹配时跳过 (可能是 batch 维度差异)
+                    if step_idx_ref[0] % 5 == 0:
+                        logger.debug(
+                            f"      [FI Hook layer {layer_idx}] 形状不匹配: "
+                            f"ref={h_ref_dev.shape} vs current={h_current.shape}, 跳过"
+                        )
+                    return output
+
+                # 残差注入: h_injected = (1-λ)*h_current + λ*h_ref
+                h_injected = (1.0 - lam) * h_current + lam * h_ref_dev
+
+                # 记录注入统计
+                injection_norm = (h_injected - h_current).norm().item()
+                injection_stats_per_step[0][layer_idx] = injection_norm
+
+                if isinstance(output, tuple):
+                    return (h_injected,) + output[1:]
+                return h_injected
+
+            return hook_fn
+
+        # 注册 hook
+        hooks = []
+        step_idx_ref = [0]  # 用于在 hook 中引用当前步
+
+        for layer_idx in target_layers:
+            if layer_idx < len(blocks):
+                block = blocks[layer_idx]
+                if cfg.fi_cache_mode == "attention" and hasattr(block, 'cross_attn'):
+                    h = block.cross_attn.register_forward_hook(make_injection_hook(layer_idx))
+                elif cfg.fi_cache_mode == "mlp" and hasattr(block, 'ffn'):
+                    h = block.ffn.register_forward_hook(make_injection_hook(layer_idx))
+                else:
+                    h = block.register_forward_hook(make_injection_hook(layer_idx))
+                hooks.append(h)
+
+        try:
+            # ── FI callback: 每步注入前更新参考特征和 λ ──
+            def fi_callback(pipe, step_index, timestep, callback_kwargs):
+                """FI callback: 更新注入 hook 的参数。"""
+                # 更新当前步索引
+                step_idx_ref[0] = step_index
+
+                # 计算当前步的 λ
+                lam = lambda_values[step_index] * quality_scale
+                current_lambda[0] = lam
+
+                # 获取当前步的参考特征
+                step_features = ref_features.get(step_index, {})
+                current_ref[0] = {}
+
+                for layer_idx in target_layers:
+                    if layer_idx in step_features:
+                        current_ref[0][layer_idx] = step_features[layer_idx].to(self.device)
+
+                # 重置注入统计
+                injection_stats_per_step[0] = {}
+
+                # callback 不修改 latents
+                return callback_kwargs
+
+            # ── 构建生成参数 ──
+            kwargs = {
+                "prompt": prompt,
+                "negative_prompt": negative_prompt or NEGATIVE_PROMPT,
+                "height": cfg.height,
+                "width": cfg.width,
+                "num_frames": cfg.num_frames,
+                "guidance_scale": cfg.guidance_scale,
+                "num_inference_steps": num_steps,
+                "generator": generator,
+                "output_type": "pt",
+                "callback_on_step_end": fi_callback,
+                "callback_on_step_end_tensor_inputs": ["latents"],
+            }
+            if latents is not None:
+                kwargs["latents"] = latents
+
+            output = self.pipe(**kwargs)
+
+        finally:
+            # 移除所有 hook
+            for h in hooks:
+                h.remove()
+
+        # ── FI 统计总结 ──
+        logger.info("  ═══════════════════════════════════════════════")
+        logger.info(f"  [FI] 生成完成总结")
+        logger.info(
+            f"    λ schedule: first 5={[f'{l:.4f}' for l in lambda_values[:5]]}, "
+            f"last 5={[f'{l:.4f}' for l in lambda_values[-5:]]}"
+        )
+        logger.info("  ═══════════════════════════════════════════════")
+
+        # 处理输出格式
+        if hasattr(output, "frames"):
+            video = output.frames
+            if isinstance(video, list):
+                import torchvision.transforms as T
+                frames = [T.ToTensor()(f) for f in video[0]]
+                video = torch.stack(frames, dim=1)
+            elif isinstance(video, torch.Tensor):
+                if video.dim() == 5:
+                    video = video[0]
+                    if video.shape[0] == cfg.num_frames:
+                        video = video.permute(1, 0, 2, 3)
+        else:
+            video = output[0]
+
+        if video.min() < 0:
+            video = denormalize_video(video)
+        return video.clamp(0, 1)
         self,
         ref_video: torch.Tensor,
         gen_video: torch.Tensor,

@@ -205,6 +205,33 @@ def parse_args():
     p.add_argument("--vda_end_step", type=int, default=-1,
                    help="VDA 结束步 (默认 -1=到最后一步)")
 
+    # ── VDA v3: 角度自适应质量门控 ──
+    p.add_argument("--vda_angle_gate", action="store_true",
+                   help="启用 VDA v3 角度自适应门控 (替代 mean_cos 门控, 用前几步 angle 判断 VDA 是否有效)")
+    p.add_argument("--vda_angle_probe_steps", type=int, default=5,
+                   help="VDA v3 试探期步数 (前 N 步 angle 用于判断; 推荐 3~7)")
+    p.add_argument("--vda_angle_probe_threshold", type=float, default=95.0,
+                   help="VDA v3 试探期 angle 均值超过此值则回退 (推荐 90~100)")
+    p.add_argument("--vda_angle_gate_decay", type=str, default="linear",
+                   choices=["linear", "cosine", "step"],
+                   help="VDA v3 角度降权方式: linear/cosine/step")
+
+    # ── L3 V3: Feature Injection (FI) ──
+    p.add_argument("--feature_inject", action="store_true",
+                   help="启用 Feature Injection: 在 DiT 特征空间注入参考信息 (独立于 VDA)")
+    p.add_argument("--fi_layers", type=str, default="mid",
+                   help="FI 注入层: 'all'/'mid'/'last'/逗号分隔层号 (默认 mid=中间1/3层)")
+    p.add_argument("--fi_lambda", type=float, default=0.1,
+                   help="FI 注入强度 λ (推荐 0.01~0.3; 0=无注入, 1=完全替换)")
+    p.add_argument("--fi_schedule", type=str, default="middle_peak",
+                   choices=["constant", "middle_peak", "warmup_decay", "cosine_decay"],
+                   help="FI λ 调度策略")
+    p.add_argument("--fi_no_quality_gate", action="store_true",
+                   help="禁用 FI 质量门控")
+    p.add_argument("--fi_cache_mode", type=str, default="attention",
+                   choices=["attention", "hidden", "mlp"],
+                   help="FI 缓存特征类型: attention=cross-attn输出(推荐), hidden=block输出, mlp=ffn输出")
+
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
                    help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
@@ -325,6 +352,18 @@ def build_config(args) -> PFlowConfig:
         vda_norm_clamp=args.vda_norm_clamp,
         vda_start_step=args.vda_start_step,
         vda_end_step=args.vda_end_step,
+        # VDA v3: 角度自适应质量门控
+        vda_angle_gate=args.vda_angle_gate,
+        vda_angle_probe_steps=args.vda_angle_probe_steps,
+        vda_angle_probe_threshold=args.vda_angle_probe_threshold,
+        vda_angle_gate_decay=args.vda_angle_gate_decay,
+        # L3 V3: Feature Injection
+        feature_inject=args.feature_inject,
+        fi_layers=args.fi_layers,
+        fi_lambda=args.fi_lambda,
+        fi_schedule=args.fi_schedule,
+        fi_quality_gate=not args.fi_no_quality_gate,
+        fi_cache_mode=args.fi_cache_mode,
     )
 
 
@@ -447,7 +486,11 @@ def main():
         vda_info = f"  [VDA {config.vda_mode}] γ={config.vda_gamma}, schedule={config.vda_schedule}"
         if config.vda_mode == "v2":
             vda_info += f", angle_threshold={config.vda_angle_threshold}°"
+        if config.vda_angle_gate:
+            vda_info += f", angle_gate(probe={config.vda_angle_probe_steps}, thr={config.vda_angle_probe_threshold}°, decay={config.vda_angle_gate_decay})"
         print(vda_info)
+    if config.feature_inject:
+        print(f"  [FI] λ={config.fi_lambda}, layers={config.fi_layers}, schedule={config.fi_schedule}, mode={config.fi_cache_mode}")
     if config.use_iter:
         print(f"  iterations={config.i_max}")
     print()
