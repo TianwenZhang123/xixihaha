@@ -160,8 +160,8 @@ class PFlowConfig:
     #   两者语义正交互补, 不要求起点对齐
     velocity_anchor: bool = False          # 是否启用 VDA (Velocity Direction Anchor)
     vda_mode: str = "v1"                  # VDA 版本:
-    #   v1: 原始版本 (motion_coherence soft gate, 不使用 angle 门控)
-    #   v2: 角度自适应版本 (实时 angle(v_ref,v_gen) 门控, angle>threshold 时降权)
+    #   v1: 原始差分方向 (实测 angle>90°, 效果差)
+    #   v2: 反转差分+角度自适应 (angle<90° 时信任, >threshold 时跳过; 推荐)
     vda_gamma: float = 0.03               # VDA 方向引导强度 γ (推荐搜索: 0.01 ~ 0.10)
     # γ 越大, 参考速度方向的影响越强; 太大会偏离 ODE 流形
     vda_schedule: str = "middle_peak"      # γ 调度策略:
@@ -175,10 +175,10 @@ class PFlowConfig:
     vda_quality_scale: bool = True        # True: 门控值映射为 γ 缩放因子 (不硬跳过); False: 硬跳过
     # 软门控: motion_strength 低 → γ 缩小但不为零 (保留微弱引导)
     vda_angle_threshold: float = 110.0    # v2 专属: 角度自适应阈值 (度)
-    # angle(v_ref,v_gen) > 此值时 VDA 降权; 推荐 100~120
+    # angle(v_ref,v_gen) > 此值时 VDA 完全跳过; 推荐 100~120
     #   - angle < 90°: v_ref 与 v_gen 同向, 完全信任 → angle_scale=1.0
-    #   - 90° < angle < threshold: 逐渐降权 → angle_scale 线性 1.0→0.5
-    #   - angle > threshold: v_ref 与 v_gen 近反向, 严重干扰 → angle_scale=0.0
+    #   - 90° < angle < threshold: 线性降权 → angle_scale 1.0→0.0
+    #   - angle > threshold: v_ref 与 v_gen 近反向, 完全跳过 → angle_scale=0.0
     vda_norm_clamp: float = 0.0           # >0 时, 每步 Δz 的范数不超过 clamp * ‖z_current‖
     # 防止单步偏移过大导致生成崩溃 (推荐: 0.05~0.10; 0=不限制)
     vda_start_step: int = 1               # VDA 起始步 (step_index >= 此值才启用; 0=第一步就启用)
@@ -1875,9 +1875,8 @@ class PFlowPipeline:
             # 即 step 0 完成后 t≈0.97, 最后一步完成后 t≈0.0
             t_progress = 1.0 - (step_index + 1) / num_steps
 
-            # ref_trajectory 的键 t 是反演的 t 约定: t=1.0=数据, t=0.0=噪声
-            # WanPipeline 的 t 约定: t 大=噪声, t 小=数据
-            # 需要反转 t_progress 来匹配 trajectory 键
+            # 反演轨迹: t=1.0(数据) → t=0.0(噪声)
+            # "相同去噪进度" 的反演 t = 1 - t_progress
             t_traj = 1.0 - t_progress
 
             # 在参考轨迹中找最近的 t 点
@@ -2471,16 +2470,29 @@ class PFlowPipeline:
 
                 # ── 当前 t 进度 ──
                 # WanPipeline: step_index 完成后, t 从 ~1.0 降到 1-(step_index+1)/N
-                # 在 Wan 约定中, t 大=噪声端, t 小=数据端
                 t_progress = 1.0 - (step_index + 1) / num_steps
 
                 # ── Step 1: 获取参考速度方向 ──
-                # ref_trajectory 的键 t 是反演的 t 约定: t=1.0=数据, t=0.0=噪声
-                # WanPipeline 的 t 约定: t=1.0=噪声, t=0.0=数据
-                # 所以需要反转 t_progress 来匹配 trajectory 键
-                # t_progress=0.97 (Wan: 噪声端) → 1-0.97=0.03 (反演: 噪声端) ✓
-                t_traj_curr = 1.0 - t_progress       # 生成当前状态在反演轨迹中的对应 t
-                t_traj_prev = 1.0 - (t_progress + dt_gen)  # 生成前一步在反演轨迹中的对应 t
+                #
+                # 反演轨迹: t=1.0(数据) → t=0.0(噪声)
+                # 生成轨迹: t=1.0(噪声) → t=0.0(数据)
+                # 两者 t 值相同但含义镜像。
+                #
+                # 在反演轨迹中，同一 t 值对应的 x 与生成中的 x 不在同一点
+                # （因为起点不同，cos(z_T, ref_z_T)≈0.007）。
+                #
+                # VDA 的目标：用反演轨迹在**相同去噪进度**处的速度方向
+                # 来引导生成的速度方向。
+                # "相同去噪进度" = 生成刚走了 N% 的路，反演也走了 N% 的路
+                #
+                # 生成进度: t_progress (0.97=刚开始, 0.0=完成)
+                # 反演进度: 在反演中，进度 = 1-t (t=1.0=0%进度, t=0.0=100%进度)
+                # 所以 "相同进度" 的反演 t = 1 - t_progress
+                #
+                # 注意: 之前直接用 t_progress 匹配测试过，angle 无改善
+                # （因为根本原因是两条 ODE 轨迹不在同一流形上）
+                t_traj_curr = 1.0 - t_progress
+                t_traj_prev = 1.0 - (t_progress + dt_gen)
                 t_curr_ref = min(traj_keys, key=lambda t: abs(t - t_traj_curr))
                 t_prev_ref = min(traj_keys, key=lambda t: abs(t - t_traj_prev))
 
@@ -2502,16 +2514,29 @@ class PFlowPipeline:
                     device=latents_current.device, dtype=latents_current.dtype
                 )
 
-                # 参考速度: 生成方向 (噪声→数据)
-                # 在反演轨迹中, t_curr_ref 更接近数据端(反演起点), t_prev_ref 更接近噪声端(反演终点)
-                # 生成方向 = 从噪声到数据 = (数据端 - 噪声端) / dt
-                dt_actual = t_curr_ref - t_prev_ref
+                # 参考速度方向
+                #
+                # v1 方式: v_ref = (z_ref_curr - z_ref_prev) / |dt|
+                #   理论上是生成方向，但实测 angle > 90°
+                #   原因: 反演轨迹和生成轨迹不在同一流形上，
+                #   相同进度处的差分方向不可靠
+                #
+                # v2 方式: 反转 v_ref = (z_ref_prev - z_ref_curr) / |dt|
+                #   将反演轨迹的差分方向直接作为引导信号
+                #   反演方向 = 数据→噪声，但我们利用的是差分向量的正交分量
+                #   正交分量不依赖全局方向，只依赖局部变化模式
+                dt_actual = t_prev_ref - t_curr_ref  # > 0
                 if abs(dt_actual) < 1e-10:
                     prev_latent_holder[0] = latents_current.clone()
                     vda_stats["steps_skipped"] += 1
                     return callback_kwargs
 
-                v_ref = (z_ref_curr - z_ref_prev) / abs(dt_actual)
+                if cfg.vda_mode == "v2":
+                    # v2: 反转差分方向，配合角度自适应
+                    v_ref = (z_ref_prev - z_ref_curr) / abs(dt_actual)
+                else:
+                    # v1: 原始方向
+                    v_ref = (z_ref_curr - z_ref_prev) / abs(dt_actual)
 
                 # ── Step 2: 估计生成速度 (差分) ──
                 if prev_latent_holder[0] is None:
@@ -2579,13 +2604,14 @@ class PFlowPipeline:
                 if cfg.vda_mode == "v2":
                     angle_thr = cfg.vda_angle_threshold
                     if angle_deg < 90.0:
+                        # v2 反转后 angle < 90°: 完全信任
                         angle_scale = 1.0
                     elif angle_deg > angle_thr:
+                        # v2 反转后 angle > threshold: 完全跳过
                         angle_scale = 0.0
                     else:
-                        # 线性衰减: 90° → 1.0, threshold → 0.5
-                        # (不完全归零, 保留微弱引导, 由 quality_scale 托底)
-                        angle_scale = 1.0 - 0.5 * (angle_deg - 90.0) / (angle_thr - 90.0)
+                        # 线性衰减: 90° → 1.0, threshold → 0.0
+                        angle_scale = 1.0 - (angle_deg - 90.0) / (angle_thr - 90.0)
 
                     gamma_t = gamma_t * angle_scale
 

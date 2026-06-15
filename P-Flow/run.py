@@ -182,7 +182,7 @@ def parse_args():
                    help="启用 VDA (Velocity Direction Anchor): 用参考轨迹速度方向微调去噪过程, 不要求起点对齐")
     p.add_argument("--vda_mode", type=str, default="v1",
                    choices=["v1", "v2"],
-                   help="VDA 版本: v1=原始(motion_coherence gate), v2=角度自适应(angle gate, 推荐)")
+                   help="VDA 版本: v1=原始差分方向(angle>90°bug), v2=反转差分+角度自适应(推荐)")
     p.add_argument("--vda_gamma", type=float, default=0.03,
                    help="VDA 方向引导强度 γ (推荐搜索 0.01~0.10; 越大参考速度影响越强)")
     p.add_argument("--vda_schedule", type=str, default="middle_peak",
