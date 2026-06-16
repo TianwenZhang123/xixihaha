@@ -70,18 +70,22 @@ Therefore, ONLY the opening words and ending words significantly affect generati
 ## Your task: HEAD/TAIL REPLACEMENT (nothing else)
 
 ### OPENING (first 3-8 words):
-IF the caption starts with a meaningless preamble like "The video depicts/shows/features/captures/showcases...", REPLACE it with the core subject noun phrase.
-IF the caption already starts with a concrete noun, DO NOT CHANGE IT.
+IF the caption starts with a meaningless preamble like "The video depicts/shows/features/captures/showcases...", REPLACE it with a subject+action phrase that puts the CORE MOTION SUBJECT first.
+IF the caption already starts with a concrete noun+action, DO NOT CHANGE IT.
+
+The first token receives 10-15x more attention than middle tokens. Put the MOTION SUBJECT (who/what is moving) before adjectives like color.
 
 Examples of valid replacements:
-- "The video depicts a white SUV driving..." → "White SUV driving..."
-- "The video showcases two small sailboats..." → "Two small sailboats..."
-- "The video captures a golden retriever..." → "Golden retriever..."
-- "A person running against..." → KEEP AS-IS (already starts with subject)
+- "The video depicts a white SUV driving..." → "SUV driving on a dusty road..." (subject+action first, color moved after)
+- "The video showcases two small sailboats..." → "Sailboats floating on dark liquid..." (subject+action first)
+- "The video captures a golden retriever..." → "Retriever running through a field..." (subject+action first)
+- "A person running against..." → KEEP AS-IS (already starts with subject+action)
 
 ### ENDING (last sentence or trailing clause):
-IF the caption ends with a generic summary/atmosphere sentence ("The overall mood/atmosphere/scene creates/conveys...", "creating a sense of...", "adding to the overall aesthetic..."), REPLACE it with 1-3 vivid visual or motion keywords that are ALREADY mentioned somewhere in the middle of the caption.
+IF the caption ends with a generic summary/atmosphere sentence ("The overall mood/atmosphere/scene creates/conveys...", "creating a sense of...", "adding to the overall aesthetic..."), REPLACE it with 1-3 vivid VISUAL-ONLY keywords that are ALREADY mentioned somewhere in the middle of the caption.
 IF the caption already ends with a concrete visual description, DO NOT CHANGE IT.
+
+ENDING KEYWORDS MUST be visual nouns/adjectives only. Do NOT include motion direction, speed, or trajectory (e.g., "forward", "upward", "accelerating", "left to right") — motion is handled by other system components.
 
 Examples of valid replacements:
 - "...The overall atmosphere conveys exploration." → "...clear blue sky, dust trail."
@@ -95,7 +99,8 @@ Examples of valid replacements:
 2. SAME LENGTH: Output must be within ±5% of input word count. You are REPLACING, not deleting or adding.
 3. ZERO new information: The ending keywords must come from facts already stated in the caption's middle. Do NOT invent new details.
 4. ZERO motion changes: Every motion verb, direction, speed MUST appear UNCHANGED in its original position.
-5. If BOTH opening and ending are already good (no preamble, no generic summary), output the caption UNCHANGED.
+5. ENDING KEYWORDS MUST NOT contain motion direction, speed, or trajectory descriptions. Only visual nouns and adjectives are allowed (e.g., "dust cloud", "pine trees", "golden sunlight", "reflective surface").
+6. If BOTH opening and ending are already good (no preamble, no generic summary), output the caption UNCHANGED.
 
 ## FULL EXAMPLES:
 
@@ -103,17 +108,17 @@ INPUT (94 words):
 "The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure."
 
 OUTPUT (88 words):
-"White SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. Dust cloud, pine trees, distant mountains."
+"SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. Dust trail, pine trees, distant mountains."
 
-Changed: opening "The video depicts a" → "" (subject-first); ending "The overall atmosphere..." → keywords from middle. Middle 100% unchanged.
+Changed: opening "The video depicts a white" → "" (subject+action first); ending "The overall atmosphere..." → visual keywords from middle. Middle 100% unchanged.
 
 INPUT (77 words):
 "The video features a person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. The overall atmosphere of the video is focused on the physical activity and the simplicity of the setting."
 
 OUTPUT (72 words):
-"A person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. Soft lighting, steady jogging pace."
+"Person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. Soft lighting, white tank top."
 
-Changed: opening "The video features" removed; ending "The overall atmosphere..." → keywords from middle. Middle 100% unchanged.
+Changed: opening "The video features a" → "" (subject+action first); ending "The overall atmosphere..." → visual keywords from middle. Middle 100% unchanged.
 
 INPUT (that needs NO change, 65 words):
 "A close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls. The liquid in the cup is smooth, with some ripples around the boats. The background is slightly blurred, focusing attention on the cup and the boats."
@@ -126,8 +131,8 @@ No preamble, no generic ending → output is IDENTICAL to input.
 Output ONLY the modified caption. No explanations."""
 
 LLM_USER_TEMPLATE = """Optimize this VLM caption ({word_count} words) for a T2V model. ONLY do 2 things:
-(1) If it starts with "The video depicts/shows/features/captures...", replace that preamble with the subject noun. Otherwise keep the opening as-is.
-(2) If it ends with a generic summary/atmosphere sentence, replace it with 1-3 vivid keywords already mentioned in the middle. Otherwise keep the ending as-is.
+(1) If it starts with "The video depicts/shows/features/captures...", replace that preamble with the subject+action phrase (motion subject first, before adjectives). Otherwise keep the opening as-is.
+(2) If it ends with a generic summary/atmosphere sentence, replace it with 1-3 visual-only keywords already mentioned in the middle (NO motion direction/speed). Otherwise keep the ending as-is.
 Do NOT change anything in the middle. Output should be approximately the SAME length (±5%).
 
 INPUT:
