@@ -8,12 +8,9 @@
 
 | 层 | 技术 | 信息维度 | 实际执行的事 |
 |----|------|---------|-------------|
-| Layer 1 | V4 Hybrid Prompt Rewrite | 语义："什么在动" | LLM 将 VLM 描述改写为指导性 prompt（一次 API 调用，非迭代） |
+| Layer 1 | v9 Subtract+Supplement | 语义："什么在动" | Step1: LLM 纯删减（去 preamble/hedging/summary，不碰运动描述）→ Step2: VLM 看视频补充真实视觉细节（颜色/材质/光照/空间关系） |
 | Layer 2 | SVD Noise Prior | 结构："从哪里开始动" | 参考视频 → VAE 编码 → Flow Inversion 反演噪声 → SVD 去内容保运动 → 与随机噪声按 α=0.004 混合 |
-| Layer 3 | Trajectory Anchor | 轨迹："怎么动" | 利用 callback 在每步去噪后将 latent 向参考轨迹 soft lerp，引导运动方向 |
-
-两层叠加效果（10 样本验证）：CLIP +2.9%，XCLIP +8.1%（相对 baseline，L1+L2）。L3 实验进行中。
-
+| Layer 3 | Feature Injection (FI) | 特征："往哪个方向去噪" | 反演时 inline hook 缓存 DiT 中间层特征，生成时以残差方式注入：h = (1-λ)·h_gen + λ·h_ref |
 ---
 
 ## 目录结构
@@ -28,7 +25,7 @@ P-Flow/
 ├── data/
 │   ├── videos/                        # ← 需要准备: 参考视频 ({id}.mp4)
 │   ├── captions_qwen/                #    VLM 原始 caption ({id}.txt)
-│   └── captions_hybrid/             #    Layer 1 产出 (脚本自动生成)
+│   └── captions_v9/                 #    Layer 1 产出: v9 改写 (脚本自动生成)
 ├── outputs/                           #    实验输出 (自动创建)
 ├── src/
 │   ├── pipeline.py                    #    统一管线 (PFlowConfig + PFlowPipeline)
@@ -38,7 +35,7 @@ P-Flow/
 │   ├── video_utils.py                 #    视频 I/O
 │   └── distributed.py                 #    GPU 推理工具
 ├── scripts/
-│   ├── rewrite_hybrid.py              #    Layer 1: LLM 话术改写
+│   ├── rewrite_minimal.py             #    Layer 1: v9 Subtract+Supplement 改写
 │   ├── reproduce.sh                   #    一键复现脚本
 │   └── ...
 ├── evaluation/
@@ -116,63 +113,70 @@ python run.py \
 
 ---
 
-### Step 1：+Layer 1（Hybrid Prompt Rewrite）
+### Step 1：+Layer 1（v9 Subtract+Supplement）
 
 ```bash
-# 1a. LLM 改写 caption（一次性预处理，10 个样本约 10 秒）
-python scripts/rewrite_hybrid.py \
+# 1a. LLM 纯删减 + VLM 视觉补充（一次性预处理）
+python scripts/rewrite_minimal.py \
     --input-dir data/captions_qwen \
-    --output-dir data/captions_hybrid \
+    --output-dir data/captions_v9 \
+    --video-dir data/videos \
     --backend dashscope --model qwen-plus \
+    --vlm-provider dashscope --vlm-model qwen-vl-max \
     --sample-ids 7 17 21 31 32 33 34 43 46 47 \
     --skip-existing
 
 # 1b. 用改写后的 caption 生成视频
 python run.py \
     --data_dir data/videos \
-    --caption_dir data/captions_hybrid \
+    --caption_dir data/captions_v9 \
     --output_dir outputs/step1_L1 \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
     --seed 42 --resume
 ```
 
-**执行内容**: 读取 hybrid caption → 纯随机噪声 → Wan2.1 生成 → 输出（和 baseline 唯一区别是换了更好的 prompt）
-**预期**: CLIP ≈ 0.8842, XCLIP ≈ 0.7430 (CLIP +1.6%, XCLIP +3.7%)
+**执行内容**: Step1 LLM 纯删减（去 preamble/hedging/summary，不碰运动描述）→ Step2 VLM 看原始视频补充真实视觉细节 → 用改写后 caption + 纯随机噪声 → Wan2.1 生成 → 输出
+**预期**: CLIP ≈ 0.8947, XCLIP ≈ 0.7973 (vs baseline: CLIP +2.2%, XCLIP +6.4%)
 
 ---
 
-### Step 2：+Layer 1 + Layer 2（Noise Prior）
+### Step 2：+Layer 2（SVD Noise Prior）
 
 ```bash
 python run.py \
     --data_dir data/videos \
-    --caption_dir data/captions_hybrid \
-    --output_dir outputs/step2_L1L2 \
-    --noise_prior --alpha 0.004 \
+    --caption_dir data/captions_qwen \
+    --output_dir outputs/step2_L2 \
+    --noise_prior --alpha 0.004 --svd_mode v1 \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
     --seed 42 --resume
 ```
 
-**执行内容**: 读取 hybrid caption → VAE 编码参考视频为 z₀ → Flow Inversion (50步逆向ODE) 得到 η_inv → SVD 两阶段滤波 (去内容保运动) 得到 η_temporal → η = √0.004·η_temporal + √0.996·η_random → 用混合噪声生成 → 输出
-**预期**: CLIP ≈ 0.8953, XCLIP ≈ 0.7667 (CLIP +2.9%, XCLIP +7.0%)
+**执行内容**: 读取 VLM 原始 caption → VAE 编码参考视频为 z₀ → Flow Inversion (50步逆向ODE) 得到 η_inv → SVD v1 两阶段滤波 (去内容保运动) 得到 η_temporal (std≈0.3) → η = √0.004·η_temporal + √0.996·η_random → 用混合噪声生成 → 输出
+**预期**: CLIP ≈ 0.8964, XCLIP ≈ 0.7874 (CLIP +2.4%, XCLIP +5.1%)
+
+> **重要**: L2 使用 `--svd_mode v1`（不做 renorm），配合裸 VLM caption 效果最佳。v1 模式保留 raw SVD 输出（std≈0.3），在 α=0.004 下形成最优的"低剂量方向偏置"。L1 改写与 L2 存在结构性矛盾（精确运动描述 + SVD 偏置互相拉扯），因此 L2 独立使用时不叠加 L1。
 
 ---
 
-### Step 3：+Layer 1 + Layer 2 + Layer 3（Trajectory Anchor）
+### Step 3：+Layer 2 + Layer 3（SVD + Feature Injection）
 
 ```bash
 python run.py \
     --data_dir data/videos \
-    --caption_dir data/captions_hybrid \
-    --output_dir outputs/step3_L1L2L3 \
-    --noise_prior --alpha 0.004 \
-    --trajectory_anchor --anchor_beta_max 0.3 --anchor_schedule warmup_decay \
+    --caption_dir data/captions_qwen \
+    --output_dir outputs/step3_L2L3_FI \
+    --inversion --svd --blend --alpha 0.004 --svd_mode v1 \
+    --feature_inject --fi_layers mid --fi_lambda 0.05 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
-    --seed 42 --resume
+    --seed 42 --verbose
 ```
 
-**执行内容**: 读取 hybrid caption → VAE 编码 z₀ → Flow Inversion 得 η_inv → SVD 得 η_temporal → 噪声混合 → **额外: 缓存 inversion 轨迹，生成时每步 callback 将 latent 向参考轨迹做 soft lerp（β warmup_decay 调度）** → 输出
-**预期**: 实验进行中
+**执行内容**: 读取 VLM 原始 caption → VAE 编码参考视频 → Flow Inversion (50步) → **反演时 inline hook 缓存 DiT 中间层特征** → SVD v1 两阶段滤波 → η = √0.004·η_temporal + √0.996·η_random → 混合噪声生成 → **每步 DiT forward 注入参考特征: h = (1-λ_eff)·h_gen + λ_eff·h_ref**（自适应门控 + 质量门控）→ 输出
+**预期**: CLIP ≈ 0.9042, XCLIP ≈ 0.8138 (10样本, vs Baseline CLIP +3.9%, XCLIP +13.6%)
+
+> 注：L2+L3(FI) 使用裸 VLM caption（`captions_qwen`）效果最佳。L1(v9) 可独立使用提升 XCLIP +1.3%，但与 L2 叠加时存在运动描述冲突，因此当前最强配置为 L2+L3 不叠加 L1 改写。
 
 ---
 
@@ -181,21 +185,28 @@ python run.py \
 评测脚本自动识别 `outputs/` 下的子目录结构（`sample_{id}/{id}.mp4`），无需手动平铺文件。
 
 ```bash
-# 评测单个 step
+# 评测 L2 (SVD Noise Prior)
 python evaluation/run_clip_xclip_eval.py \
     --orig-dir data/videos \
-    --gen-dir outputs/step2_L1L2 \
-    --caption-dir data/captions_hybrid \
-    --output-dir outputs/step2_L1L2/eval_clip
+    --gen-dir outputs/step2_L2 \
+    --caption-dir data/captions_qwen \
+    --output-dir outputs/step2_L2/eval_clip
+
+# 评测 L2+L3(FI)
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/step3_L2L3_FI \
+    --caption-dir data/captions_qwen \
+    --output-dir outputs/step3_L2L3_FI/eval_clip
 
 # 批量评测所有 step
-for step_dir in step0_baseline step1_L1 step2_L1L2; do
+for step_dir in step0_baseline step1_L1 step2_L2 step3_L2L3_FI; do
     [ -d "outputs/$step_dir" ] || continue
     echo "====== $step_dir ======"
     python evaluation/run_clip_xclip_eval.py \
         --orig-dir data/videos \
         --gen-dir outputs/$step_dir \
-        --caption-dir data/captions_hybrid \
+        --caption-dir data/captions_qwen \
         --output-dir outputs/$step_dir/eval_clip
 done
 ```
@@ -204,38 +215,33 @@ done
 
 ### 预期指标汇总
 
-| Step | 配置 | CLIP (orig_gen) | XCLIP (orig_gen) | 相对 Baseline |
-|------|------|----------------|-----------------|--------------|
-| 0 | Baseline | 0.8703 | 0.7164 | — |
-| 1 | +L1 | 0.8842 | 0.7430 | +1.6%, +3.7% |
-| 2 | +L1+L2 | **0.8952** | **0.7747** | +2.9%, +8.1% |
-| 3 | +L1+L2+L3 (Trajectory Anchor) | TBD | TBD | 实验进行中 |
+| Step | 配置 | CLIP (orig_gen) | XCLIP (orig_gen) | 相对 Baseline | 备注 |
+|------|------|----------------|-----------------|--------------|------|
+| 0a | Baseline (InternVL2 caption) | 0.8753 | 0.7491 | — | 6-11周会 #0 |
+| 0b | Baseline (Qwen-VL caption) | 0.8703 | 0.7164 | — | FI 实验 baseline |
+| 1 | +L1 (v9 Subtract+Supplement) | 0.8947 | 0.7973 | +2.2%, +6.4% | vs 0a |
+| 2 | +L2 (SVD v1, α=0.004) | **0.8964** | **0.7874** | +2.4%, +5.1% | vs 0a |
+| 3 | +L2+L3(FI) (当前最强) | **0.9042** | **0.8138** | +3.9%, +13.6% | vs 0b |
 
-> Step 2 实测值 (2026-06-05, A800, seed=42, alpha=0.004, 10 samples)。
+> ⚠️ **Baseline 说明**：Step 1/2 数据来自 InternVL2 caption 实验（baseline 0a）；Step 3 (FI) 使用 Qwen-VL caption（baseline 0b）。两组 baseline 不同（XCLIP 差 0.03），百分比不可直接跨行比较。待统一 caption 源后更新。Step 3 实测值 (2026-06-15, A800, seed=42, α=0.004, λ=0.05, layers=mid, 10 samples)。
 
 ---
 
-## 一键全跑（L1+L2 当前最强配置）
+## 一键全跑（L2+L3(FI) 当前最强配置）
 
 如果不需要逐层验证，直接一步到位：
 
 ```bash
-# 先生成 hybrid caption（如果没有的话）
-python scripts/rewrite_hybrid.py \
-    --input-dir data/captions_qwen \
-    --output-dir data/captions_hybrid \
-    --backend dashscope --model qwen-plus \
-    --sample-ids 7 17 21 31 32 33 34 43 46 47 \
-    --skip-existing
-
-# 跑 L1+L2 pipeline
+# L2+L3(FI) — 使用裸 VLM caption，无需 L1 改写
 python run.py \
     --data_dir data/videos \
-    --caption_dir data/captions_hybrid \
-    --output_dir outputs/full_L1L2 \
-    --noise_prior --alpha 0.004 \
+    --caption_dir data/captions_qwen \
+    --output_dir outputs/full_L2L3_FI \
+    --inversion --svd --blend --alpha 0.004 --svd_mode v1 \
+    --feature_inject --fi_layers mid --fi_lambda 0.05 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
-    --seed 42 --resume
+    --seed 42 --verbose
 ```
 
 或者用一键脚本（含逐层验证 + 自动评估）：
@@ -254,7 +260,7 @@ bash scripts/reproduce.sh
 | `--svd` | SVD 两阶段滤波 | — |
 | `--blend` | 噪声混合 (α 权重) | — |
 | `--noise_prior` | 噪声先验组合 | = `--inversion --svd --blend` |
-| `--trajectory_anchor` | 灰盒轨迹锚定 (L3) | — |
+| `--feature_inject` | Feature Injection 特征注入 (L3) | — |
 | `--full` | 全部启用 | = `--noise_prior` + `--iter 10 --composite` |
 
 关键参数（最优值 ≠ 默认值，需显式指定）：
@@ -262,8 +268,10 @@ bash scripts/reproduce.sh
 | 参数 | 默认值 | 最优值 | 说明 |
 |------|--------|--------|------|
 | `--alpha` | 0.001 | **0.004** | 噪声混合权重 |
-| `--anchor_beta_max` | 0.3 | 实验中 | 轨迹锚定最大 β |
-| `--anchor_schedule` | cosine_decay | warmup_decay | β 退火调度 |
+| `--fi_lambda` | 0.1 | **0.05** | FI 注入强度 λ |
+| `--fi_layers` | all | **mid** | 注入层 (mid=10~19层) |
+| `--fi_schedule` | middle_peak | middle_peak | λ 调度策略 |
+| `--fi_cache_mode` | attention | attention | 缓存特征类型 |
 
 ---
 
@@ -275,8 +283,8 @@ bash scripts/reproduce.sh
 | 模型 | Wan2.1-T2V-1.3B (~2.6GB bfloat16) |
 | 分辨率 | 480×832, 81 frames, 15fps |
 | Baseline 单样本 | ~30s |
-| +Noise Prior | ~80s (2.7×) |
-| +Trajectory Anchor | ~100s (3.3×) |
+| +Noise Prior (L2) | ~80s (2.7×) |
+| +L2+L3(FI) | ~230s (7.7×) |
 
 ---
 

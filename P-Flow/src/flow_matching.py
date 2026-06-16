@@ -211,15 +211,18 @@ class FlowMatchingInverter:
 
                 # FI inline: 捕获当前步的 DiT 特征
                 # 注意: _predict_velocity 内部的 _model_forward 已经触发了 hook
-                # fi_captured 此时应已填充，我们只需判断当前反演步是否对应某个生成步
+                # fi_captured 此时应已填充
+                # 关键: forward 用的是 t=timesteps[i] (当前步的 x_t),
+                #        不是 t_next (下一步的 x_t+dt)
+                # 所以映射时也必须用 t (不是 t_next)
                 if fi_config is not None and fi_captured:
-                    # 反演 step i 完成后，x_t 处于 t_next
+                    t_current = t.item()  # 当前 forward 的 timestep
                     # 找最近的生成 step_index
-                    t_rounded = round(t_next, 6)
-                    # 直接用最近匹配
+                    # 生成 step_idx 对应的 t_gen_traj = (step_idx + 1) / gen_num_steps
+                    # 反演 t_current 对应同一进度
                     nearest_gen_step = min(
                         inv_t_to_gen_step.keys(),
-                        key=lambda t_key: abs(t_key - t_rounded)
+                        key=lambda t_key: abs(t_key - round(t_current, 6))
                     )
                     gen_step_idx = inv_t_to_gen_step[nearest_gen_step]
 

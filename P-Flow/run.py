@@ -4,34 +4,25 @@ P-Flow Runner - 通过命令行 flag 控制各改动点。
 
 用法:
     # 纯 baseline (caption + 一次生成)
-    python run.py --video /path/to/ref.mp4 --caption "a cat walking"
+    python run.py --data_dir data/videos --caption_dir data/captions_qwen
 
-    # 启用噪声先验 (inversion + svd + blend)
-    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend
+    # L2: 启用噪声先验 (inversion + svd + blend)
+    python run.py --data_dir data/videos --caption_dir data/captions_qwen --inversion --svd --blend --alpha 0.004
 
-    # 启用迭代优化 (10轮VLM反馈)
-    python run.py --video /path/to/ref.mp4 --caption "a cat" --iter 10
-
-    # 完整 P-Flow (噪声先验 + 迭代优化)
-    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --iter 10 --composite
-
-    # 用中点法替代Euler
-    python run.py --video /path/to/ref.mp4 --caption "a cat" --inversion --svd --blend --midpoint
-
-    # 批量处理
-    python run.py --data_dir /path/to/videos --caption_dir /path/to/captions --inversion --svd --blend --iter 10
+    # L2+L3: 噪声先验 + Feature Injection (当前最强配置)
+    python run.py --data_dir data/videos --caption_dir data/captions_qwen \
+        --inversion --svd --blend --alpha 0.004 --svd_mode v1 \
+        --feature_inject --fi_layers mid --fi_lambda 0.05
 
 改动点 Flag 说明:
-    --inversion      启用 Flow Matching Inversion (从参考视频反演噪声)
-    --svd            启用 SVD 两阶段滤波 (空间去内容 + 时间保运动)
-    --blend          启用噪声混合 (η = sqrt(α)*η_temporal + sqrt(1-α)*η_random)
-    --iter N         启用迭代VLM优化 (N轮反馈循环)
-    --midpoint       使用二阶中点法ODE求解器 (替代默认Euler)
-    --composite      启用三面板垂直拼接 (ref|prev|current 送VLM对比)
+    --inversion       L2: 启用 Flow Matching Inversion (从参考视频反演噪声)
+    --svd             L2: 启用 SVD 两阶段滤波 (空间去内容 + 时间保运动)
+    --blend           L2: 启用噪声混合 (η = sqrt(α)*η_temporal + sqrt(1-α)*η_random)
+    --feature_inject  L3: 启用 Feature Injection (DiT特征空间注入)
+    --iter N          L1: 启用迭代VLM优化 (N轮反馈循环)
 
 快捷组合:
     --noise_prior  等价于 --inversion --svd --blend
-    --full         等价于 --inversion --svd --blend --iter 10 --composite
 """
 
 import sys
@@ -69,7 +60,7 @@ def parse_args():
 
     # ── 快捷组合 ──
     p.add_argument("--noise_prior", action="store_true", help="快捷: --inversion --svd --blend")
-    p.add_argument("--full", action="store_true", help="快捷: 全部启用 (iter=10)")
+    p.add_argument("--full", action="store_true", help="快捷: --inversion --svd --blend --feature_inject")
 
     # ── 参数调节 ──
     p.add_argument("--alpha", type=float, default=0.003, help="噪声混合权重 (推荐 0.001~0.01, P-Flow论文用 0.001)")
@@ -85,8 +76,7 @@ def parse_args():
     p.add_argument("--num_frames", type=int, default=81)
     p.add_argument("--fps", type=int, default=15)
 
-    # ── [已删除] 方向 B/C/D/E/F/G/H/I 及旧 Trajectory Anchor / VDA 参数 ──
-    # 这些方案均已实验验证失败或被 FI 替代，CLI 参数已移除
+    # ── [已废弃] 旧方案参数已全部移除，详见 pipeline.py PFlowConfig ──
 
     # ── L3 V3: Feature Injection (FI) ──
     p.add_argument("--feature_inject", action="store_true",
@@ -135,9 +125,7 @@ def build_config(args) -> PFlowConfig:
         args.inversion = True
         args.svd = True
         args.blend = True
-        args.composite = True
-        if args.iter == 0:
-            args.iter = 10
+        args.feature_inject = True
 
     if args.noise_prior:
         args.inversion = True
@@ -170,59 +158,7 @@ def build_config(args) -> PFlowConfig:
         negative_prompt=args.negative_prompt,
         negative_prompt_file=args.negative_prompt_dir,
         seed=args.seed,
-        # [已废弃] 旧方案参数映射（保留以兼容 pipeline 代码，CLI 入口已移除）
-        trajectory_anchor=False,
-        anchor_beta_max=0.3,
-        anchor_schedule="cosine_decay",
-        anchor_cache_every_n=1,
-        anchor_quality_gate=True,
-        anchor_quality_threshold=0.05,
-        velocity_anchor=False,
-        vda_mode="v1",
-        vda_gamma=0.03,
-        vda_schedule="middle_peak",
-        vda_use_perp_only=True,
-        vda_parallel_weight=0.1,
-        vda_quality_gate=True,
-        vda_quality_scale=True,
-        vda_angle_threshold=110.0,
-        vda_norm_clamp=0.0,
-        vda_start_step=1,
-        vda_end_step=-1,
-        vda_angle_gate=False,
-        vda_angle_probe_steps=5,
-        vda_angle_probe_threshold=95.0,
-        vda_angle_gate_decay="linear",
-        freq_reshape=False,
-        freq_reshape_beta=1.0,
-        adaptive_alpha=False,
-        sga_target_std=0.30,
-        sga_alpha_min=0.001,
-        sga_alpha_max=0.010,
-        podi=False,
-        podi_alpha=0.004,
-        podi_min_alignment=0.01,
-        podi_proj_mode="mean_pool",
-        cegi=False,
-        cegi_top_k=4,
-        cegi_alpha=0.02,
-        cegi_residual_alpha=0.0,
-        mstdi=False,
-        mstdi_levels=3,
-        mstdi_alpha_base=0.05,
-        mstdi_alpha_decay=0.25,
-        tpi=False,
-        tpi_gamma=0.5,
-        tpi_freq_min=1,
-        tpi_freq_max=-1,
-        ocs=False,
-        ocs_top_k=3,
-        ocs_suppress_ratio=0.5,
-        quality_gated_alpha=False,
-        qga_base_alpha=0.004,
-        qga_low_mult=0.25,
-        qga_high_mult=2.5,
-        # L3 V3: Feature Injection
+        # L3: Feature Injection
         feature_inject=args.feature_inject,
         fi_layers=args.fi_layers,
         fi_lambda=args.fi_lambda,
