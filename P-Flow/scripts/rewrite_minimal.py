@@ -1,28 +1,40 @@
 #!/usr/bin/env python3
 """
-Prompt rewrite v9-vlm: LLM pure subtraction + VLM visual supplement (2-step pipeline)
+Prompt rewrite v10: Head/Tail keyword replacement + VLM factual correction (2-step pipeline)
 
 Design:
-  v8-minimal showed CLIP 0.8915 < Pure L2's 0.8964.
-  Root cause: LLM-fabricated camera sentences occupy UMT5 tokens but aren't grounded
-  in visual facts, so they can't improve CLIP.
+  v9 (LLM deletion + VLM supplement) achieves XCLIP +1.3% with SVD alone, but when
+  combined with Feature Injection (L3), it UNDERPERFORMS bare caption (XCLIP 0.8051 < 0.8138).
+  Root cause: v9 changes ~18-25% of tokens, shifting h_gen feature distribution away from
+  the pre-cached h_ref features, causing semantic misalignment in FI adaptive gating.
 
-  v9-vlm strategy:
-    Step 1: LLM pure subtraction (remove preamble + hedging + summary, add NOTHING)
-            -> output becomes shorter (~70-85% of original)
-    Step 2: VLM watches original video + reads shortened caption
-            -> supplements missing visual details (colors, materials, lighting, spatial)
-            -> output restored to ~original length
-            -> every added detail is a real visual fact (VLM actually sees it)
+  v10 strategy (FI-compatible, minimal edit):
+    Step 1: LLM head/tail keyword replacement ONLY
+            - Replace meaningless preamble ("The video depicts/shows...") with subject noun
+            - Replace generic ending with vivid visual/motion keyword
+            - Middle content stays VERBATIM (95% unchanged)
+            -> output is SAME LENGTH as input (±5%)
+    Step 2: VLM factual correction (max 3 word-level changes)
+            - VLM watches video, compares with current caption
+            - Only fixes factual errors (wrong color, wrong count, wrong object)
+            - Max 3 single-word replacements, NO additions, NO deletions
+            -> output is SAME LENGTH as input
+
+  Theory (from 5.28 attention weight experiment):
+    DiT cross-attention has extreme U-shaped position distribution:
+    - Position 0 (first token): 10-15x weight vs middle
+    - Last token: ~equal to position 0
+    - Middle positions: nearly uniform (~0.001)
+    Therefore: only head/tail matter for generation quality.
 
 Usage:
     python scripts/rewrite_minimal.py \
         --input-dir /path/to/baseline_captions \
-        --output-dir /path/to/v9_captions \
+        --output-dir /path/to/v10_captions \
         --video-dir /path/to/original_videos \
         --backend dashscope \
         --model qwen-plus \
-        --vlm-provider dashscope
+        --vlm-provider local
 """
 
 import argparse
@@ -44,65 +56,79 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# Step 1: LLM Pure Subtraction System Prompt
+# Step 1: LLM Head/Tail Keyword Replacement
 # ============================================================================
 
-LLM_SYSTEM_PROMPT = """You clean up VLM video captions for a T2V model. You ONLY DELETE noise. You NEVER add anything.
+LLM_SYSTEM_PROMPT = """You optimize VLM video captions for a T2V model by replacing ONLY the first few words and last few words with more effective keywords.
 
-## Your 2 tasks (NOTHING ELSE):
+BACKGROUND: The T2V model's DiT cross-attention has an extreme U-shaped position weight distribution:
+- Position 0 (first token): receives 10-15x more attention than middle tokens
+- Last token: receives ~equal attention as position 0
+- All middle tokens: nearly uniform low attention
+Therefore, ONLY the opening words and ending words significantly affect generation. The middle content barely matters for quality.
 
-### 1. SUBJECT-FIRST OPENING
-Remove ONLY the "The video depicts/features/captures/shows" preamble phrase. Keep EVERYTHING else unchanged.
+## Your task: HEAD/TAIL REPLACEMENT (nothing else)
 
-Rules:
-- Delete ONLY the leading "The video [verb]" phrase (typically 3-5 words)
-- Keep the rest of the sentence EXACTLY as-is
-- Do NOT convert verb tenses (-ing stays -ing)
-- Do NOT restructure or compress the sentence
+### OPENING (first 3-8 words):
+IF the caption starts with a meaningless preamble like "The video depicts/shows/features/captures/showcases...", REPLACE it with the core subject noun phrase.
+IF the caption already starts with a concrete noun, DO NOT CHANGE IT.
 
-### 2. REMOVE NOISE (delete ONLY these specific patterns):
+Examples of valid replacements:
+- "The video depicts a white SUV driving..." → "White SUV driving..."
+- "The video showcases two small sailboats..." → "Two small sailboats..."
+- "The video captures a golden retriever..." → "Golden retriever..."
+- "A person running against..." → KEEP AS-IS (already starts with subject)
 
-DELETE these:
-- Hedging trailing clauses: ", suggesting...", ", indicating that...", ", implying..."
-- Overall summary sentences: any sentence starting with "The overall atmosphere/mood/scene/effect..."
-- Redundant emotional trailing clauses: ", conveying a sense of...", ", adding to the...", ", creating a sense of..."
-- Meta-commentary: "The video is focused on...", "The scene gives a feeling of..."
+### ENDING (last sentence or trailing clause):
+IF the caption ends with a generic summary/atmosphere sentence ("The overall mood/atmosphere/scene creates/conveys...", "creating a sense of...", "adding to the overall aesthetic..."), REPLACE it with 1-3 vivid visual or motion keywords that are ALREADY mentioned somewhere in the middle of the caption.
+IF the caption already ends with a concrete visual description, DO NOT CHANGE IT.
 
-Do NOT delete:
-- Any phrase containing a motion verb (walk, run, drive, fly, swim, move, ride, skate, jump, fall, climb, spin, roll, slide, flow, kick, swing, sway, drift, float)
-- Any standalone sentence describing what happens in the scene
-- Any visual detail (color, shape, size, position, texture, material)
-
-IMPORTANT: When in doubt, KEEP the phrase. Over-deletion is worse than under-deletion.
+Examples of valid replacements:
+- "...The overall atmosphere conveys exploration." → "...clear blue sky, dust trail."
+- "...creating a serene and peaceful mood." → "...smooth ripples, warm sunlight."
+- "...adding to the dynamic feel of the scene." → "...reflective surface, neon glow."
+- "...The background is slightly blurred." → KEEP AS-IS (already concrete)
 
 ## ABSOLUTE RULES:
 
-1. ZERO additions: Do NOT add ANY new words. Your output is a STRICT SUBSET of the input words.
-2. ZERO motion changes: Every verb, direction, speed description MUST appear UNCHANGED.
-3. ZERO rephrasing: If you keep a phrase, it must be verbatim from the input.
-4. Output will be shorter than input: This is expected. You are ONLY deleting. Typical: 70-90% of input.
+1. MIDDLE CONTENT UNCHANGED: Everything between the opening and ending MUST remain VERBATIM. Do NOT rephrase, reorder, delete, or add anything in the middle.
+2. SAME LENGTH: Output must be within ±5% of input word count. You are REPLACING, not deleting or adding.
+3. ZERO new information: The ending keywords must come from facts already stated in the caption's middle. Do NOT invent new details.
+4. ZERO motion changes: Every motion verb, direction, speed MUST appear UNCHANGED in its original position.
+5. If BOTH opening and ending are already good (no preamble, no generic summary), output the caption UNCHANGED.
 
-## EXAMPLES:
+## FULL EXAMPLES:
 
 INPUT (94 words):
-"The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear, suggesting it might be on a journey or adventure. As the SUV moves forward, it kicks up a cloud of dust behind it, indicating the dryness of the terrain and the speed at which it is traveling. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure."
+"The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure."
 
-OUTPUT (63 words):
-"A white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky."
+OUTPUT (88 words):
+"White SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. Dust cloud, pine trees, distant mountains."
 
-Deleted: "The video depicts" (preamble); ", suggesting..." (hedging); ", indicating..." (hedging); "The overall atmosphere..." (summary). ALL motion preserved. NOTHING added.
+Changed: opening "The video depicts a" → "" (subject-first); ending "The overall atmosphere..." → keywords from middle. Middle 100% unchanged.
 
 INPUT (77 words):
 "The video features a person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. The overall atmosphere of the video is focused on the physical activity and the simplicity of the setting."
 
-OUTPUT (56 words):
-"A person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run."
+OUTPUT (72 words):
+"A person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. Soft lighting, steady jogging pace."
 
-Deleted: "The video features" (preamble); "The overall atmosphere..." (summary). ALL motion preserved. NOTHING added.
+Changed: opening "The video features" removed; ending "The overall atmosphere..." → keywords from middle. Middle 100% unchanged.
 
-Output ONLY the cleaned caption. No explanations."""
+INPUT (that needs NO change, 65 words):
+"A close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls. The liquid in the cup is smooth, with some ripples around the boats. The background is slightly blurred, focusing attention on the cup and the boats."
 
-LLM_USER_TEMPLATE = """Clean up this VLM caption ({word_count} words). ONLY do 2 things: (1) Remove "The video depicts/shows/features/captures" preamble, (2) Delete hedging trailing clauses and overall-summary sentences. Do NOT add anything. Output will be SHORTER than input.
+OUTPUT (65 words - UNCHANGED):
+"A close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls. The liquid in the cup is smooth, with some ripples around the boats. The background is slightly blurred, focusing attention on the cup and the boats."
+
+No preamble, no generic ending → output is IDENTICAL to input.
+
+Output ONLY the modified caption. No explanations."""
+
+LLM_USER_TEMPLATE = """Optimize this VLM caption ({word_count} words) for a T2V model. ONLY do 2 things:
+(1) If it starts with "The video depicts/shows/features/captures...", replace that preamble with the subject noun. Otherwise keep the opening as-is.
+(2) If it ends with a generic summary/atmosphere sentence, replace it with 1-3 vivid keywords already mentioned in the middle. Otherwise keep the ending as-is.
+Do NOT change anything in the middle. Output should be approximately the SAME length (±5%).
 
 INPUT:
 {original_caption}
@@ -110,41 +136,51 @@ INPUT:
 OUTPUT:"""
 
 # ============================================================================
-# Step 2: VLM Visual Supplement System Prompt
+# Step 2: VLM Factual Correction Prompts (max 3 word-level fixes)
 # ============================================================================
 
-VLM_SUPPLEMENT_SYSTEM = """You are a visual detail specialist for text-to-video prompts. You receive:
+VLM_CORRECTION_SYSTEM = """You are a visual fact-checker for text-to-video prompts. You receive:
 1. A video (the original reference)
-2. A shortened caption that describes the video but is missing some visual details
+2. A caption that describes the video
 
-Your job: Watch the video carefully, then ADD specific visual details that you can SEE in the video but are NOT mentioned in the caption. Your goal is to make the caption more visually precise and restore it to approximately {target_words} words.
+Your ONLY job: Watch the video carefully, compare it with the caption, and FIX factual errors by replacing WRONG words with CORRECT words. You may make AT MOST 3 single-word replacements.
 
-## What to ADD (only things you can clearly SEE in the video):
-- Specific colors not mentioned (e.g., "the car is metallic silver", "golden sunlight")
-- Materials/textures visible (e.g., "wooden fence", "concrete sidewalk", "leather jacket")
-- Lighting conditions (e.g., "warm afternoon sunlight from the left", "overcast diffused light")
-- Spatial relationships (e.g., "positioned in the lower-left of frame", "stretching into background")
-- Surface details (e.g., "wet pavement reflecting lights", "dust particles in the air")
-- Background elements clearly visible but not described
+## What counts as a factual error (ONLY these):
+- Wrong color (e.g., caption says "red car" but video shows a blue car → replace "red" with "blue")
+- Wrong count (e.g., caption says "three birds" but video shows two → replace "three" with "two")
+- Wrong object identity (e.g., caption says "dog" but it's clearly a cat → replace "dog" with "cat")
+- Wrong material (e.g., caption says "wooden" but it's clearly metal → replace "wooden" with "metal")
 
 ## Rules:
-1. NEVER change or remove any existing text. Only INSERT new details.
-2. NEVER add motion/action not already described (motion is handled separately by SVD).
-3. NEVER add objects, people, or animals not visible in the video.
-4. NEVER add temporal markers (initially, then, gradually).
-5. NEVER add emotional/atmospheric interpretation. Only concrete visual facts.
-6. Every detail you add MUST be something you can clearly see in the video frames.
-7. Insert details naturally into existing sentences or add brief new descriptive phrases.
-8. Target output length: approximately {target_words} words.
+1. MAX 3 CHANGES. If you find more than 3 errors, fix only the 3 most obvious ones.
+2. Each change is a SINGLE-WORD REPLACEMENT. Do NOT add words, do NOT delete words.
+3. Output must be EXACTLY the same length (same word count) as input.
+4. NEVER change verbs, motion descriptions, or spatial relationships.
+5. NEVER change style/atmosphere words (these are subjective, not factual).
+6. NEVER restructure sentences or rephrase anything.
+7. If there are NO factual errors, output the caption UNCHANGED.
+8. When in doubt, DO NOT CHANGE. Only fix things you are 100% certain are wrong based on the video.
 
-Output ONLY the enriched caption. No explanations, no labels."""
+## Examples:
 
-VLM_SUPPLEMENT_USER = """Watch this video carefully. Below is a caption describing this video, but it is missing some visual details. Add specific visual details you can clearly SEE in the video but are NOT in the caption. Keep ALL existing text unchanged. Only INSERT new visual details. Target: ~{target_words} words.
+Input: "A red sedan driving on a highway with two passengers visible."
+Video shows: blue sedan, three passengers
+Output: "A blue sedan driving on a highway with three passengers visible."
+(2 changes: red→blue, two→three)
+
+Input: "A golden retriever running through a green field under overcast sky."
+Video shows: matches perfectly
+Output: "A golden retriever running through a green field under overcast sky."
+(0 changes: caption is accurate)
+
+Output ONLY the corrected caption. No explanations, no change logs."""
+
+VLM_CORRECTION_USER = """Watch this video carefully. Compare the caption below with what you see in the video. If any words are factually wrong (wrong color, wrong count, wrong object), replace them with the correct words. Make AT MOST 3 single-word replacements. If the caption is accurate, output it UNCHANGED.
 
 CURRENT CAPTION ({current_words} words):
 {caption}
 
-ENRICHED CAPTION:"""
+CORRECTED CAPTION:"""
 
 # ============================================================================
 # LLM Backends
@@ -403,10 +439,10 @@ def call_vlm_local(video_path: str, user_msg: str, system_msg: str,
 # Pipeline Steps
 # ============================================================================
 
-def step1_llm_subtract(original: str, backend: str, model: str,
+def step1_llm_headtail(original: str, backend: str, model: str,
                        api_base: str = "", api_key: str = "",
                        temperature: float = 0.2, max_retries: int = 3) -> str:
-    """Step 1: LLM pure subtraction (remove preamble + hedging + summary, add NOTHING)"""
+    """Step 1: LLM head/tail keyword replacement (keep middle verbatim, ±5% length)"""
     word_count = len(original.split())
 
     user_msg = LLM_USER_TEMPLATE.format(
@@ -436,15 +472,14 @@ def step1_llm_subtract(original: str, backend: str, model: str,
             logger.warning(f"  [Step1 retry {attempt+1}] Still starts with preamble")
             continue
 
-        # Validation 2: must not be longer than original (pure subtraction)
+        # Validation 2: length must be within ±15% of original (head/tail replace, not deletion)
         result_words = len(result.split())
-        if result_words > word_count:
-            logger.warning(f"  [Step1 retry {attempt+1}] Output longer than input: {result_words} > {word_count}")
+        if result_words > word_count * 1.15:
+            logger.warning(f"  [Step1 retry {attempt+1}] Output too long: {result_words} > {word_count}*1.15")
             continue
 
-        # Validation 3: not too short (at least 60% of original)
-        if result_words < word_count * 0.60:
-            logger.warning(f"  [Step1 retry {attempt+1}] Over-deleted: {result_words} < {word_count}*0.60")
+        if result_words < word_count * 0.85:
+            logger.warning(f"  [Step1 retry {attempt+1}] Output too short: {result_words} < {word_count}*0.85")
             continue
 
         return result
@@ -453,19 +488,18 @@ def step1_llm_subtract(original: str, backend: str, model: str,
     return result if result else original
 
 
-def step2_vlm_supplement(shortened_caption: str, video_path: str,
-                         target_words: int, vlm_provider: str = "dashscope",
+def step2_vlm_correction(step1_caption: str, video_path: str,
+                         vlm_provider: str = "dashscope",
                          api_key: str = "", vlm_model: str = "qwen-vl-max",
                          vlm_model_path: str = "/root/models/Qwen2.5-VL-7B-Instruct",
-                         temperature: float = 0.4, max_retries: int = 2) -> str:
-    """Step 2: VLM watches video + reads shortened caption, supplements real visual details"""
-    current_words = len(shortened_caption.split())
+                         temperature: float = 0.2, max_retries: int = 2) -> str:
+    """Step 2: VLM watches video, makes at most 3 factual word-level corrections"""
+    current_words = len(step1_caption.split())
 
-    system_msg = VLM_SUPPLEMENT_SYSTEM.format(target_words=target_words)
-    user_msg = VLM_SUPPLEMENT_USER.format(
-        target_words=target_words,
+    system_msg = VLM_CORRECTION_SYSTEM
+    user_msg = VLM_CORRECTION_USER.format(
         current_words=current_words,
-        caption=shortened_caption,
+        caption=step1_caption,
     )
 
     result = None
@@ -497,20 +531,19 @@ def step2_vlm_supplement(shortened_caption: str, video_path: str,
             if result.startswith("'") and result.endswith("'"):
                 result = result[1:-1]
 
-            # Validation: not start with "The video"
+            # Validation 1: length must be same as input (±10% tolerance for word-level replace)
+            result_words = len(result.split())
+            if result_words > current_words * 1.10:
+                logger.warning(f"  [Step2 retry {attempt+1}] VLM added too many words: {result_words} > {current_words}*1.10")
+                continue
+
+            if result_words < current_words * 0.90:
+                logger.warning(f"  [Step2 retry {attempt+1}] VLM deleted too many words: {result_words} < {current_words}*0.90")
+                continue
+
+            # Validation 2: not start with "The video"
             if result.lower().startswith(("the video", "this video", "in this video")):
                 logger.warning(f"  [Step2 retry {attempt+1}] VLM output starts with preamble")
-                continue
-
-            # Validation: not too long (max 120% of target)
-            result_words = len(result.split())
-            if result_words > target_words * 1.20:
-                logger.warning(f"  [Step2 retry {attempt+1}] VLM output too long: {result_words} > {target_words}*1.20")
-                continue
-
-            # Validation: should not be shorter than input
-            if result_words < current_words:
-                logger.warning(f"  [Step2 retry {attempt+1}] VLM output shorter than input: {result_words} < {current_words}")
                 continue
 
             return result
@@ -520,13 +553,13 @@ def step2_vlm_supplement(shortened_caption: str, video_path: str,
             if attempt < max_retries:
                 time.sleep(2)
 
-    # All VLM attempts failed, return Step1 result (no supplement is better than bad supplement)
+    # All VLM attempts failed, return Step1 result (no correction is better than bad correction)
     logger.warning(f"  Step2 all VLM attempts failed, using Step1 result")
-    return result if result else shortened_caption
+    return result if result else step1_caption
 
 
 def validate_rewrite(original: str, rewritten: str) -> dict:
-    """Validate rewrite quality"""
+    """Validate rewrite quality (v10: expect same length ±10%)"""
     orig_words = len(original.split())
     new_words = len(rewritten.split())
 
@@ -535,8 +568,10 @@ def validate_rewrite(original: str, rewritten: str) -> dict:
         issues.append("empty output")
     if rewritten.lower().startswith(("the video", "this video", "in this video")):
         issues.append("still starts with preamble")
-    if new_words > orig_words * 1.20:
-        issues.append(f"too long ({new_words} > {orig_words}*1.20)")
+    if new_words > orig_words * 1.10:
+        issues.append(f"too long ({new_words} > {orig_words}*1.10)")
+    if new_words < orig_words * 0.85:
+        issues.append(f"too short ({new_words} < {orig_words}*0.85)")
 
     # Check motion verb preservation
     motion_verbs = ["running", "walking", "driving", "flying", "swimming",
@@ -567,7 +602,7 @@ def validate_rewrite(original: str, rewritten: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Prompt rewrite v9-vlm: LLM pure subtraction + VLM visual supplement"
+        description="Prompt rewrite v10: Head/Tail keyword replacement + VLM factual correction"
     )
 
     # I/O
@@ -593,21 +628,21 @@ def main():
     parser.add_argument("--api-key", type=str, default="",
                         help="API Key (or set DASHSCOPE_API_KEY env var)")
 
-    # VLM supplement (Step 2)
+    # VLM correction (Step 2)
     parser.add_argument("--vlm-model", type=str, default="qwen-vl-max",
                         help="VLM model name (default: qwen-vl-max)")
-    parser.add_argument("--vlm-provider", type=str, default="dashscope",
+    parser.add_argument("--vlm-provider", type=str, default="local",
                         choices=["dashscope", "local"],
                         help="VLM backend: dashscope (remote) or local (GPU)")
     parser.add_argument("--vlm-model-path", type=str,
                         default="/root/models/Qwen2.5-VL-7B-Instruct",
                         help="Local VLM model path (only for --vlm-provider local)")
     parser.add_argument("--skip-vlm", action="store_true",
-                        help="Skip VLM supplement step (only do LLM subtraction)")
+                        help="Skip VLM correction step (only do LLM head/tail replacement)")
 
     # Generation params
     parser.add_argument("--temperature", type=float, default=0.2,
-                        help="LLM temperature (default: 0.2, low for precise deletion)")
+                        help="LLM temperature (default: 0.2, low for precise replacement)")
     parser.add_argument("--max-retries", type=int, default=3,
                         help="Max retries per sample (default: 3)")
     parser.add_argument("--delay", type=float, default=0.5,
@@ -639,7 +674,7 @@ def main():
     video_dir = None
     if not args.skip_vlm:
         if not args.video_dir:
-            logger.error("VLM supplement requires --video-dir, or use --skip-vlm to skip")
+            logger.error("VLM correction requires --video-dir, or use --skip-vlm to skip")
             sys.exit(1)
         video_dir = Path(args.video_dir)
         if not video_dir.exists():
@@ -660,7 +695,7 @@ def main():
         sys.exit(1)
 
     logger.info(f"{'='*60}")
-    logger.info(f"v9-subtract-supplement: LLM subtraction -> VLM visual supplement")
+    logger.info(f"v10-headtail-correction: LLM head/tail replace -> VLM factual correction")
     logger.info(f"{'='*60}")
     logger.info(f"Samples: {len(caption_files)}")
     logger.info(f"LLM: {args.backend}/{args.model}, temp={args.temperature}")
@@ -670,7 +705,7 @@ def main():
         logger.info(f"VLM: DISABLED (--skip-vlm)")
     logger.info(f"Input: {input_dir}")
     logger.info(f"Output: {output_dir}")
-    logger.info(f"Pipeline: Step1(LLM delete preamble/hedging/summary) -> Step2(VLM add visual details)")
+    logger.info(f"Pipeline: Step1(LLM head/tail keyword replace) -> Step2(VLM max-3 factual corrections)")
 
     # Statistics
     success = 0
@@ -697,10 +732,10 @@ def main():
         orig_words = len(original.split())
 
         # ====================================================================
-        # Step 1: LLM Pure Subtraction
+        # Step 1: LLM Head/Tail Keyword Replacement
         # ====================================================================
         try:
-            step1_result = step1_llm_subtract(
+            step1_result = step1_llm_headtail(
                 original=original,
                 backend=args.backend,
                 model=args.model,
@@ -713,7 +748,7 @@ def main():
             step1_words = len(step1_result.split())
             logger.info(
                 f"  [{idx}/{len(caption_files)}] {sample_id} Step1: "
-                f"{orig_words}->{step1_words} words (deleted {orig_words - step1_words})"
+                f"{orig_words}->{step1_words} words (delta {step1_words - orig_words:+d})"
             )
 
         except Exception as e:
@@ -725,7 +760,7 @@ def main():
             continue
 
         # ====================================================================
-        # Step 2: VLM Visual Supplement
+        # Step 2: VLM Factual Correction (max 3 word-level fixes)
         # ====================================================================
         final_result = step1_result  # Default fallback
 
@@ -733,22 +768,21 @@ def main():
             video_path = video_dir / f"{sample_id}.mp4"
             if video_path.exists():
                 try:
-                    final_result = step2_vlm_supplement(
-                        shortened_caption=step1_result,
+                    final_result = step2_vlm_correction(
+                        step1_caption=step1_result,
                         video_path=str(video_path),
-                        target_words=orig_words,
                         vlm_provider=args.vlm_provider,
                         api_key=api_key,
                         vlm_model=args.vlm_model,
                         vlm_model_path=args.vlm_model_path,
-                        temperature=0.4,
+                        temperature=0.2,
                         max_retries=2,
                     )
 
                     final_words = len(final_result.split())
                     logger.info(
                         f"  [{idx}/{len(caption_files)}] {sample_id} Step2: "
-                        f"{step1_words}->{final_words} words (target {orig_words})"
+                        f"{step1_words}->{final_words} words (corrections applied)"
                     )
 
                 except Exception as e:
@@ -808,19 +842,19 @@ def main():
         if successful:
             avg_step1 = sum(r["step1_ratio"] for r in successful) / len(successful)
             avg_final = sum(r["final_ratio"] for r in successful) / len(successful)
-            logger.info(f"Avg Step1 compression: {avg_step1:.2f}, Avg final ratio: {avg_final:.2f} (target ~1.0)")
+            logger.info(f"Avg Step1 ratio: {avg_step1:.2f}, Avg final ratio: {avg_final:.2f} (target ~1.0, v10 minimal edit)")
 
     # Save processing log
     log_file = output_dir / "rewrite_log.json"
     log_data = {
-        "version": "v9_subtract_supplement",
-        "strategy": "llm_pure_subtraction_then_vlm_visual_supplement",
-        "description": "2-step pipeline: Step1 LLM pure deletion (preamble+hedging+summary) -> Step2 VLM watches video and adds real visual details to restore length",
+        "version": "v10_headtail_correction",
+        "strategy": "llm_headtail_keyword_replace_then_vlm_factual_correction",
+        "description": "2-step pipeline: Step1 LLM replaces preamble->subject noun and generic ending->vivid keywords (middle unchanged); Step2 VLM makes max 3 word-level factual corrections. Total edit ratio ~5-8%, FI-compatible.",
         "pipeline": [
-            "Step1: LLM subtraction (remove preamble, hedging clauses, overall-summary sentences, add NOTHING)",
-            "Step2: VLM supplement (watch original video + read shortened caption, add grounded visual details)",
+            "Step1: LLM head/tail keyword replacement (preamble->subject, summary->keywords, middle verbatim)",
+            "Step2: VLM factual correction (watch video, fix max 3 wrong color/count/object words)",
         ],
-        "key_insight": "LLM-fabricated content (camera/spatial sentences) hurts CLIP because not visually grounded. VLM sees actual video so every supplement is a real visual fact.",
+        "key_insight": "DiT cross-attention U-shaped: pos0 gets 10-15x weight, last token equal, middle flat. v9 changed ~18% causing FI misalignment (XCLIP 0.8051<0.8138). v10 edits ~5-8% for FI compatibility.",
         "backend": args.backend,
         "model": args.model,
         "vlm_provider": args.vlm_provider if not args.skip_vlm else "disabled",
