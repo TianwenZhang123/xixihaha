@@ -102,7 +102,7 @@ export DASHSCOPE_API_KEY="your-key"   # Layer 1 改写需要
 # 用 VLM 原始 caption + 纯随机噪声生成
 python run.py \
     --data_dir data/videos \
-    --caption_dir data/captions_qwen \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
     --output_dir outputs/step0_baseline \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
     --seed 42 --resume
@@ -118,7 +118,7 @@ python run.py \
 ```bash
 # 1a. LLM 纯删减 + VLM 视觉补充（一次性预处理）
 python scripts/rewrite_minimal.py \
-    --input-dir data/captions_qwen \
+    --input-dir /root/xixihaha/test-v200/test-v200/captions \
     --output-dir data/captions_v9 \
     --video-dir data/videos \
     --backend dashscope --model qwen-plus \
@@ -145,7 +145,7 @@ python run.py \
 ```bash
 python run.py \
     --data_dir data/videos \
-    --caption_dir data/captions_qwen \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
     --output_dir outputs/step2_L2 \
     --noise_prior --alpha 0.004 --svd_mode v1 \
     --sample_ids 7 17 21 31 32 33 34 43 46 47 \
@@ -164,7 +164,7 @@ python run.py \
 ```bash
 python run.py \
     --data_dir data/videos \
-    --caption_dir data/captions_qwen \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
     --output_dir outputs/step3_L2L3_FI \
     --inversion --svd --blend --alpha 0.004 --svd_mode v1 \
     --feature_inject --fi_layers mid --fi_lambda 0.05 \
@@ -233,15 +233,21 @@ done
 
 ```bash
 # L2+L3(FI) — 使用裸 VLM caption，无需 L1 改写
-python run.py \
+cd /root/xixihaha/P-Flow && python run.py \
     --data_dir data/videos \
-    --caption_dir data/captions_qwen \
-    --output_dir outputs/full_L2L3_FI \
-    --inversion --svd --blend --alpha 0.004 --svd_mode v1 \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/FI_clean_code_3samples \
+    --sample_ids 7 17 21 \
+    --inversion --svd --blend --alpha 0.004 \
     --feature_inject --fi_layers mid --fi_lambda 0.05 \
     --fi_schedule middle_peak --fi_cache_mode attention \
-    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
     --seed 42 --verbose
+
+python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/FI_clean_code_3samples \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/FI_clean_code_3samples/eval_clip
 ```
 
 或者用一键脚本（含逐层验证 + 自动评估）：
