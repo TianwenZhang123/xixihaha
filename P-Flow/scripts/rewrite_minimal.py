@@ -75,10 +75,12 @@ IF the caption already starts with a concrete noun+action, DO NOT CHANGE IT.
 
 The first token receives 10-15x more attention than middle tokens. Put the MOTION SUBJECT (who/what is moving) before adjectives like color.
 
+You are REPLACING words, NOT deleting them. When you remove the preamble, you must ADD an equal number of words (e.g., add descriptive detail from the caption) so the total word count stays the same.
+
 Examples of valid replacements:
-- "The video depicts a white SUV driving..." → "SUV driving on a dusty road..." (subject+action first, color moved after)
-- "The video showcases two small sailboats..." → "Sailboats floating on dark liquid..." (subject+action first)
-- "The video captures a golden retriever..." → "Retriever running through a field..." (subject+action first)
+- "The video depicts a white SUV driving..." → "SUV driving across a white dusty road..." (subject+action first, "white" moved to modify road instead)
+- "The video showcases two small sailboats..." → "Sailboats gliding across dark liquid..." (subject+action first)
+- "The video captures a golden retriever..." → "Retriever bounding through a golden field..." (subject+action first)
 - "A person running against..." → KEEP AS-IS (already starts with subject+action)
 
 ### ENDING (last sentence or trailing clause):
@@ -96,7 +98,7 @@ Examples of valid replacements:
 ## ABSOLUTE RULES:
 
 1. MIDDLE CONTENT UNCHANGED: Everything between the opening and ending MUST remain VERBATIM. Do NOT rephrase, reorder, delete, or add anything in the middle.
-2. SAME LENGTH: Output must be within ±5% of input word count. You are REPLACING, not deleting or adding.
+2. SAME LENGTH: Output MUST be within ±5% of input word count. You are REPLACING words, NOT deleting them. When you remove preamble words like "The video depicts a", you MUST add an equal number of words elsewhere (e.g., move adjectives, expand the ending keywords) so total count stays the same.
 3. ZERO new information: The ending keywords must come from facts already stated in the caption's middle. Do NOT invent new details.
 4. ZERO motion changes: Every motion verb, direction, speed MUST appear UNCHANGED in its original position.
 5. ENDING KEYWORDS MUST NOT contain motion direction, speed, or trajectory descriptions. Only visual nouns and adjectives are allowed (e.g., "dust cloud", "pine trees", "golden sunlight", "reflective surface").
@@ -107,18 +109,18 @@ Examples of valid replacements:
 INPUT (94 words):
 "The video depicts a white SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. The overall atmosphere conveys a sense of exploration and outdoor adventure."
 
-OUTPUT (88 words):
-"SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. Dust trail, pine trees, distant mountains."
+OUTPUT (93 words):
+"SUV driving on a white dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear. As the SUV moves forward, it kicks up a cloud of dust behind it. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky. Pine trees, distant mountains, clear sky."
 
-Changed: opening "The video depicts a white" → "" (subject+action first); ending "The overall atmosphere..." → visual keywords from middle. Middle 100% unchanged.
+Changed: opening "The video depicts a" → removed, "white" moved to modify road; ending "The overall atmosphere..." → visual keywords from middle. Middle 100% unchanged. Word count: 94→93 (-1.1%).
 
 INPUT (77 words):
 "The video features a person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. The overall atmosphere of the video is focused on the physical activity and the simplicity of the setting."
 
-OUTPUT (72 words):
-"Person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. Soft lighting, white tank top."
+OUTPUT (76 words):
+"Person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. White tank top, black shorts."
 
-Changed: opening "The video features a" → "" (subject+action first); ending "The overall atmosphere..." → visual keywords from middle. Middle 100% unchanged.
+Changed: opening "The video features a" → removed (subject+action first); ending "The overall atmosphere..." → visual keywords from middle. Middle 100% unchanged. Word count: 77→76 (-1.3%).
 
 INPUT (that needs NO change, 65 words):
 "A close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls. The liquid in the cup is smooth, with some ripples around the boats. The background is slightly blurred, focusing attention on the cup and the boats."
@@ -133,7 +135,7 @@ Output ONLY the modified caption. No explanations."""
 LLM_USER_TEMPLATE = """Optimize this VLM caption ({word_count} words) for a T2V model. ONLY do 2 things:
 (1) If it starts with "The video depicts/shows/features/captures...", replace that preamble with the subject+action phrase (motion subject first, before adjectives). Otherwise keep the opening as-is.
 (2) If it ends with a generic summary/atmosphere sentence, replace it with 1-3 visual-only keywords already mentioned in the middle (NO motion direction/speed). Otherwise keep the ending as-is.
-Do NOT change anything in the middle. Output should be approximately the SAME length (±5%).
+Do NOT change anything in the middle. CRITICAL: Output MUST be {word_count} words (±5%). When removing preamble words, you MUST add an equal number of words by moving displaced adjectives or expanding ending keywords. You are REPLACING, not deleting.
 
 INPUT:
 {original_caption}
