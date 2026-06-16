@@ -85,136 +85,8 @@ def parse_args():
     p.add_argument("--num_frames", type=int, default=81)
     p.add_argument("--fps", type=int, default=15)
 
-    # ── Quality-Gated Alpha (方案 B) ──
-    p.add_argument("--quality_gated_alpha", action="store_true",
-                   help="启用 per-sample adaptive alpha (根据SVD方向质量动态调节注入量)")
-    p.add_argument("--qga_base_alpha", type=float, default=0.004,
-                   help="Quality-Gated Alpha 的基础 alpha")
-    p.add_argument("--qga_low_mult", type=float, default=0.25,
-                   help="quality=0 时的 alpha 倍率")
-    p.add_argument("--qga_high_mult", type=float, default=2.5,
-                   help="quality=1 时的 alpha 倍率")
-
-    # ── 方向 C: 频域噪声重塑 (叠加在 alpha blend 上) ──
-    p.add_argument("--freq_reshape", action="store_true",
-                   help="启用频域噪声重塑 (对 η_random 预处理后再 alpha 混合, 需配合 --blend --alpha)")
-    p.add_argument("--freq_reshape_beta", type=float, default=1.0,
-                   help="频域重塑强度: 0=不重塑(纯随机), 1=完全匹配频谱 (推荐0.5~1.0)")
-
-    # ── 方向 D: Std-Gated Adaptive Alpha (SGA) ──
-    p.add_argument("--adaptive_alpha", action="store_true",
-                   help="启用 per-sample adaptive alpha (根据 η_temporal std 动态调节注入量)")
-    p.add_argument("--sga_target_std", type=float, default=0.30,
-                   help="SGA 目标标准差: effective_alpha = alpha * (target_std / actual_std)")
-    p.add_argument("--sga_alpha_min", type=float, default=0.001,
-                   help="SGA alpha 下界 (防止完全不注入)")
-    p.add_argument("--sga_alpha_max", type=float, default=0.010,
-                   help="SGA alpha 上界 (防止过度注入导致 catastrophic failure)")
-
-    # ── 方向 E: Prompt-Orthogonal Decomposition Injection (PODI) ──
-    p.add_argument("--podi", action="store_true",
-                   help="启用 PODI: 只注入 η_temporal 中与 prompt 语义对齐的分量，过滤正交/冲突信号")
-    p.add_argument("--podi_alpha", type=float, default=0.004,
-                   help="PODI 注入强度 (默认与 baseline alpha 对齐做公平对比; 后续可尝试更大值 0.008~0.02)")
-    p.add_argument("--podi_min_alignment", type=float, default=0.01,
-                   help="最小对齐度阈值: alignment < 此值则放弃注入 (推荐 0.01~0.05)")
-    p.add_argument("--podi_proj_mode", type=str, default="mean_pool",
-                   choices=["mean_pool", "last_token", "weighted"],
-                   help="prompt embedding → latent 的投影方式 (mean_pool/last_token/weighted)")
-
-    # ── 方向 F: Channel-Energy Gated Injection (CEGI) ──
-    p.add_argument("--cegi", action="store_true",
-                   help="启用 CEGI: 只在 temporal energy 最高的 top-k channel 集中注入 prior")
-    p.add_argument("--cegi_top_k", type=int, default=4,
-                   help="注入的 channel 数量 (默认 4/16=25%%; 推荐搜索 2~8)")
-    p.add_argument("--cegi_alpha", type=float, default=0.02,
-                   help="选中 channel 的注入强度 (默认 0.02, 是 baseline 的 5x; 推荐搜索 0.01~0.05)")
-    p.add_argument("--cegi_residual_alpha", type=float, default=0.0,
-                   help="未选中 channel 的注入强度 (默认 0=纯随机; 可设 0.002 保留微弱 prior)")
-
-    # ── 方向 G: Multi-Scale Temporal Decomposition Injection (MSTDI) ──
-    p.add_argument("--mstdi", action="store_true",
-                   help="启用 MSTDI: 多尺度时序分解注入, 低频集中注入 temporal prior")
-    p.add_argument("--mstdi_levels", type=int, default=3,
-                   help="金字塔层数 (默认 3: 1/4, 1/2, 原始; 推荐 2~4)")
-    p.add_argument("--mstdi_alpha_base", type=float, default=0.05,
-                   help="最粗尺度 alpha (默认 0.05; 推荐 0.02~0.10)")
-    p.add_argument("--mstdi_alpha_decay", type=float, default=0.25,
-                   help="每层 alpha 衰减倍率 (默认 0.25: L0=0.05 → L1=0.0125 → L2≈0.003)")
-
-    # ── 方向 H: Temporal Phase Injection (TPI) ──
-    p.add_argument("--tpi", action="store_true",
-                   help="启用 TPI: 只注入 temporal 的时间相位, 保留 random 幅度")
-    p.add_argument("--tpi_gamma", type=float, default=0.5,
-                   help="相位插值强度 (0=纯random, 1=纯temporal; 默认 0.5; 推荐 0.3~0.7)")
-    p.add_argument("--tpi_freq_min", type=int, default=1,
-                   help="注入起始频率 bin (默认 1 跳过 DC; 0=包括 DC)")
-    p.add_argument("--tpi_freq_max", type=int, default=-1,
-                   help="注入结束频率 bin (默认 -1=所有; 可设 5 只注入低频)")
-
-    # ── 方向 I: Orthogonal Complement Suppression (OCS) ──
-    p.add_argument("--ocs", action="store_true",
-                   help="启用 OCS: 抑制 η_random 中与 temporal 主方向正交的分量")
-    p.add_argument("--ocs_top_k", type=int, default=3,
-                   help="SVD 保留的主成分数 (默认 3; 推荐 2~5)")
-    p.add_argument("--ocs_suppress_ratio", type=float, default=0.5,
-                   help="正交补抑制比例 (0=不抑制, 1=完全去除; 默认 0.5; 推荐 0.3~0.7)")
-
-    # ── 灰盒: Latent Trajectory Soft Anchor (旧方案) ──
-    p.add_argument("--trajectory_anchor", action="store_true",
-                   help="启用旧方案轨迹锚定 (position lerp, 已证明失败, 保留用于对比)")
-    p.add_argument("--anchor_beta_max", type=float, default=0.3,
-                   help="最大锚定强度 β_max (推荐搜索 0.1~0.5; 0.3 为中等强度)")
-    p.add_argument("--anchor_schedule", type=str, default="cosine_decay",
-                   choices=["cosine_decay", "linear_decay", "constant", "warmup_decay"],
-                   help="β 退火策略: 控制锚定力度如何随去噪步骤衰减")
-    p.add_argument("--anchor_cache_every_n", type=int, default=1,
-                   help="inversion 轨迹缓存间隔 (1=全缓存; 2=隔一步; 用于节省显存)")
-    p.add_argument("--no_anchor_quality_gate", action="store_true",
-                   help="禁用轨迹质量门控 (默认启用)")
-    p.add_argument("--anchor_quality_threshold", type=float, default=0.05,
-                   help="η_temporal 帧间 cos 阈值: mean_cos < 此值则跳过 anchor (默认 0.05)")
-    p.add_argument("--anchor_cos_threshold", type=float, default=0.2,
-                   help=">0 时启用 cos-proportional β 模式 (旧方案2; 设 0 禁用)")
-
-    # ── L3 V2: Velocity Direction Anchor (VDA) ──
-    p.add_argument("--velocity_anchor", action="store_true",
-                   help="启用 VDA (Velocity Direction Anchor): 用参考轨迹速度方向微调去噪过程, 不要求起点对齐")
-    p.add_argument("--vda_mode", type=str, default="v1",
-                   choices=["v1", "v2"],
-                   help="VDA 版本: v1=原始差分方向(angle>90°bug), v2=反转差分+角度自适应(推荐)")
-    p.add_argument("--vda_gamma", type=float, default=0.03,
-                   help="VDA 方向引导强度 γ (推荐搜索 0.01~0.10; 越大参考速度影响越强)")
-    p.add_argument("--vda_schedule", type=str, default="middle_peak",
-                   choices=["constant", "middle_peak", "warmup_decay", "cosine_decay"],
-                   help="γ 调度策略: middle_peak=中间最强 (推荐), constant=恒定, cosine_decay=前强后弱")
-    p.add_argument("--vda_no_perp_only", action="store_true",
-                   help="禁用'只注入正交分量'模式, 改为混合注入 (正交+微弱平行分量)")
-    p.add_argument("--vda_parallel_weight", type=float, default=0.1,
-                   help="vda_no_perp_only 时平行分量权重 (默认 0.1=微弱; 推荐 0.05~0.2)")
-    p.add_argument("--vda_no_quality_gate", action="store_true",
-                   help="禁用 VDA 质量门控")
-    p.add_argument("--vda_hard_gate", action="store_true",
-                   help="VDA 使用硬门控 (低于阈值完全跳过), 默认为软门控 (sigmoid 缩放)")
-    p.add_argument("--vda_angle_threshold", type=float, default=110.0,
-                   help="VDA v2 角度自适应阈值 (度): angle(v_ref,v_gen)>此值时降权 (推荐 100~120)")
-    p.add_argument("--vda_norm_clamp", type=float, default=0.0,
-                   help="每步 Δz 范数上限 = clamp * ‖z‖ (推荐 0.05~0.10; 0=不限制)")
-    p.add_argument("--vda_start_step", type=int, default=1,
-                   help="VDA 起始步 (默认 1=跳过第一步; 0=从第一步开始)")
-    p.add_argument("--vda_end_step", type=int, default=-1,
-                   help="VDA 结束步 (默认 -1=到最后一步)")
-
-    # ── VDA v3: 角度自适应质量门控 ──
-    p.add_argument("--vda_angle_gate", action="store_true",
-                   help="启用 VDA v3 角度自适应门控 (替代 mean_cos 门控, 用前几步 angle 判断 VDA 是否有效)")
-    p.add_argument("--vda_angle_probe_steps", type=int, default=5,
-                   help="VDA v3 试探期步数 (前 N 步 angle 用于判断; 推荐 3~7)")
-    p.add_argument("--vda_angle_probe_threshold", type=float, default=95.0,
-                   help="VDA v3 试探期 angle 均值超过此值则回退 (推荐 90~100)")
-    p.add_argument("--vda_angle_gate_decay", type=str, default="linear",
-                   choices=["linear", "cosine", "step"],
-                   help="VDA v3 角度降权方式: linear/cosine/step")
+    # ── [已删除] 方向 B/C/D/E/F/G/H/I 及旧 Trajectory Anchor / VDA 参数 ──
+    # 这些方案均已实验验证失败或被 FI 替代，CLI 参数已移除
 
     # ── L3 V3: Feature Injection (FI) ──
     p.add_argument("--feature_inject", action="store_true",
@@ -298,69 +170,58 @@ def build_config(args) -> PFlowConfig:
         negative_prompt=args.negative_prompt,
         negative_prompt_file=args.negative_prompt_dir,
         seed=args.seed,
-        # Quality-Gated Alpha
-        quality_gated_alpha=args.quality_gated_alpha,
-        qga_base_alpha=args.qga_base_alpha,
-        qga_low_mult=args.qga_low_mult,
-        qga_high_mult=args.qga_high_mult,
-        # 方向 C: 频域噪声重塑
-        freq_reshape=args.freq_reshape,
-        freq_reshape_beta=args.freq_reshape_beta,
-        # 方向 D: Std-Gated Adaptive Alpha
-        adaptive_alpha=args.adaptive_alpha,
-        sga_target_std=args.sga_target_std,
-        sga_alpha_min=args.sga_alpha_min,
-        sga_alpha_max=args.sga_alpha_max,
-        # 方向 E: PODI
-        podi=args.podi,
-        podi_alpha=args.podi_alpha,
-        podi_min_alignment=args.podi_min_alignment,
-        podi_proj_mode=args.podi_proj_mode,
-        # 方向 F: CEGI
-        cegi=args.cegi,
-        cegi_top_k=args.cegi_top_k,
-        cegi_alpha=args.cegi_alpha,
-        cegi_residual_alpha=args.cegi_residual_alpha,
-        # 方向 G: MSTDI
-        mstdi=args.mstdi,
-        mstdi_levels=args.mstdi_levels,
-        mstdi_alpha_base=args.mstdi_alpha_base,
-        mstdi_alpha_decay=args.mstdi_alpha_decay,
-        # 方向 H: TPI
-        tpi=args.tpi,
-        tpi_gamma=args.tpi_gamma,
-        tpi_freq_min=args.tpi_freq_min,
-        tpi_freq_max=args.tpi_freq_max,
-        # 方向 I: OCS
-        ocs=args.ocs,
-        ocs_top_k=args.ocs_top_k,
-        ocs_suppress_ratio=args.ocs_suppress_ratio,
-        # 灰盒: Trajectory Anchor
-        trajectory_anchor=args.trajectory_anchor,
-        anchor_beta_max=args.anchor_beta_max,
-        anchor_schedule=args.anchor_schedule,
-        anchor_cache_every_n=args.anchor_cache_every_n,
-        anchor_quality_gate=not args.no_anchor_quality_gate,
-        anchor_quality_threshold=args.anchor_quality_threshold,
-        anchor_cos_threshold=args.anchor_cos_threshold,
-        # L3 V2: Velocity Direction Anchor
-        velocity_anchor=args.velocity_anchor,
-        vda_mode=args.vda_mode,
-        vda_gamma=args.vda_gamma,
-        vda_schedule=args.vda_schedule,
-        vda_use_perp_only=not args.vda_no_perp_only,
-        vda_parallel_weight=args.vda_parallel_weight,
-        vda_quality_gate=not args.vda_no_quality_gate,
-        vda_quality_scale=not args.vda_hard_gate,
-        vda_angle_threshold=args.vda_angle_threshold,
-        vda_norm_clamp=args.vda_norm_clamp,
-        vda_start_step=args.vda_start_step,
-        vda_end_step=args.vda_end_step,
-        # VDA v3: 角度自适应质量门控
-        vda_angle_gate=args.vda_angle_gate,
-        vda_angle_probe_steps=args.vda_angle_probe_steps,
-        vda_angle_probe_threshold=args.vda_angle_probe_threshold,
-        vda_angle_gate_decay=args.vda_angle_gate_decay,
+        # [已废弃] 旧方案参数映射（保留以兼容 pipeline 代码，CLI 入口已移除）
+        trajectory_anchor=False,
+        anchor_beta_max=0.3,
+        anchor_schedule="cosine_decay",
+        anchor_cache_every_n=1,
+        anchor_quality_gate=True,
+        anchor_quality_threshold=0.05,
+        velocity_anchor=False,
+        vda_mode="v1",
+        vda_gamma=0.03,
+        vda_schedule="middle_peak",
+        vda_use_perp_only=True,
+        vda_parallel_weight=0.1,
+        vda_quality_gate=True,
+        vda_quality_scale=True,
+        vda_angle_threshold=110.0,
+        vda_norm_clamp=0.0,
+        vda_start_step=1,
+        vda_end_step=-1,
+        vda_angle_gate=False,
+        vda_angle_probe_steps=5,
+        vda_angle_probe_threshold=95.0,
+        vda_angle_gate_decay="linear",
+        freq_reshape=False,
+        freq_reshape_beta=1.0,
+        adaptive_alpha=False,
+        sga_target_std=0.30,
+        sga_alpha_min=0.001,
+        sga_alpha_max=0.010,
+        podi=False,
+        podi_alpha=0.004,
+        podi_min_alignment=0.01,
+        podi_proj_mode="mean_pool",
+        cegi=False,
+        cegi_top_k=4,
+        cegi_alpha=0.02,
+        cegi_residual_alpha=0.0,
+        mstdi=False,
+        mstdi_levels=3,
+        mstdi_alpha_base=0.05,
+        mstdi_alpha_decay=0.25,
+        tpi=False,
+        tpi_gamma=0.5,
+        tpi_freq_min=1,
+        tpi_freq_max=-1,
+        ocs=False,
+        ocs_top_k=3,
+        ocs_suppress_ratio=0.5,
+        quality_gated_alpha=False,
+        qga_base_alpha=0.004,
+        qga_low_mult=0.25,
+        qga_high_mult=2.5,
         # L3 V3: Feature Injection
         feature_inject=args.feature_inject,
         fi_layers=args.fi_layers,
@@ -476,25 +337,7 @@ def main():
     print(f"P-Flow | {config.experiment_name()}")
     print(f"  Flags: {flags or ['baseline (无改动)']}")
     if config.use_blend:
-        if config.adaptive_alpha:
-            print(f"  [SGA] adaptive alpha: base={config.alpha}, target_std={config.sga_target_std}, "
-                  f"range=[{config.sga_alpha_min}, {config.sga_alpha_max}]")
-            print(f"  rho_s={config.rho_s}, rho_m={config.rho_m}")
-        elif config.freq_reshape:
-            print(f"  η_random 频域重塑(β={config.freq_reshape_beta}) + alpha blend(α={config.alpha})")
-            print(f"  rho_s={config.rho_s}, rho_m={config.rho_m}")
-        else:
-            print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
-    if config.trajectory_anchor:
-        print(f"  [Trajectory Anchor] β_max={config.anchor_beta_max}, "
-              f"schedule={config.anchor_schedule}, cache_every_n={config.anchor_cache_every_n}")
-    if config.velocity_anchor:
-        vda_info = f"  [VDA {config.vda_mode}] γ={config.vda_gamma}, schedule={config.vda_schedule}"
-        if config.vda_mode == "v2":
-            vda_info += f", angle_threshold={config.vda_angle_threshold}°"
-        if config.vda_angle_gate:
-            vda_info += f", angle_gate(probe={config.vda_angle_probe_steps}, thr={config.vda_angle_probe_threshold}°, decay={config.vda_angle_gate_decay})"
-        print(vda_info)
+        print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
     if config.feature_inject:
         fi_adapt_str = f", adaptive(temp={config.fi_adaptive_temp})" if config.fi_adaptive_gate else ""
         print(f"  [FI] λ={config.fi_lambda}, layers={config.fi_layers}, schedule={config.fi_schedule}, mode={config.fi_cache_mode}{fi_adapt_str}")

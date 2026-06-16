@@ -83,125 +83,60 @@ class PFlowConfig:
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
 
-    # ── Quality-Gated Alpha (方案 B) ──
-    quality_gated_alpha: bool = False   # 是否启用 per-sample adaptive alpha
-    qga_base_alpha: float = 0.004      # 基础 alpha (当 quality_gated_alpha=False 时不影响原有 self.config.alpha)
-    qga_low_mult: float = 0.25         # quality=0 时的 alpha 倍率 (base_alpha * 0.25)
-    qga_high_mult: float = 2.5         # quality=1 时的 alpha 倍率 (base_alpha * 2.5)
+    # ── [已废弃] 旧方案参数（保留字段以兼容 pipeline 代码，默认值均未启用）──
+    trajectory_anchor: bool = False
+    anchor_beta_max: float = 0.3
+    anchor_schedule: str = "cosine_decay"
+    anchor_cache_every_n: int = 1
+    anchor_quality_gate: bool = True
+    anchor_quality_threshold: float = 0.05
+    velocity_anchor: bool = False
+    vda_mode: str = "v1"
+    vda_gamma: float = 0.03
+    vda_schedule: str = "middle_peak"
+    vda_use_perp_only: bool = True
+    vda_parallel_weight: float = 0.1
+    vda_quality_gate: bool = True
+    vda_quality_scale: bool = True
+    vda_angle_threshold: float = 110.0
+    vda_norm_clamp: float = 0.0
+    vda_start_step: int = 1
+    vda_end_step: int = -1
+    vda_angle_gate: bool = False
+    vda_angle_probe_steps: int = 5
+    vda_angle_probe_threshold: float = 95.0
+    vda_angle_gate_decay: str = "linear"
+    freq_reshape: bool = False
+    freq_reshape_beta: float = 1.0
+    adaptive_alpha: bool = False
+    sga_target_std: float = 0.30
+    sga_alpha_min: float = 0.001
+    sga_alpha_max: float = 0.010
+    podi: bool = False
+    podi_alpha: float = 0.004
+    podi_min_alignment: float = 0.01
+    podi_proj_mode: str = "mean_pool"
+    cegi: bool = False
+    cegi_top_k: int = 4
+    cegi_alpha: float = 0.02
+    cegi_residual_alpha: float = 0.0
+    mstdi: bool = False
+    mstdi_levels: int = 3
+    mstdi_alpha_base: float = 0.05
+    mstdi_alpha_decay: float = 0.25
+    tpi: bool = False
+    tpi_gamma: float = 0.5
+    tpi_freq_min: int = 1
+    tpi_freq_max: int = -1
+    ocs: bool = False
+    ocs_top_k: int = 3
+    ocs_suppress_ratio: float = 0.5
+    quality_gated_alpha: bool = False
+    qga_base_alpha: float = 0.004
+    qga_low_mult: float = 0.25
+    qga_high_mult: float = 2.5
 
-    # ── 方向 C: 频域噪声重塑 (Spectrum-Aligned Noise) ──
-    freq_reshape: bool = False          # 是否启用频域重塑 (替代 linear blend)
-    freq_reshape_beta: float = 1.0     # 重塑强度: 0=不重塑(纯随机), 1=完全匹配频谱形状
-                                       # 推荐搜索范围: 0.3~1.0
-
-    # ── 方向 D: Std-Gated Adaptive Alpha (SGA) ──
-    adaptive_alpha: bool = False        # 是否启用 per-sample adaptive alpha
-    sga_target_std: float = 0.30       # 目标标准差 (中位数附近, 根据实测样本 std 分布设定)
-    sga_alpha_min: float = 0.001       # alpha 下界 (防止完全不注入)
-    sga_alpha_max: float = 0.010       # alpha 上界 (防止过度注入)
-
-    # ── 方向 E: Prompt-Orthogonal Decomposition Injection (PODI) ──
-    podi: bool = False                  # 是否启用 PODI (只注入与 prompt 对齐的 η_temporal 分量)
-    podi_alpha: float = 0.004          # PODI 注入强度 (默认与 baseline alpha 相同, 公平对比)
-                                       # 因为注入的是安全分量, 后续可尝试更大值 (0.008~0.02)
-    podi_min_alignment: float = 0.01   # 最小对齐度阈值 (alignment < 此值则完全放弃注入)
-    podi_proj_mode: str = "mean_pool"  # prompt embedding → latent 投影方式:
-                                       #   mean_pool: 对 seq_len 维度均值池化后线性插值到 latent 维度
-                                       #   last_token: 取最后一个非 padding token
-                                       #   weighted: attention-weighted pooling
-
-    # ── 方向 F: Channel-Energy Gated Injection (CEGI) ──
-    cegi: bool = False                  # 是否启用 CEGI (通道能量门控注入)
-    cegi_top_k: int = 4                # 注入的 channel 数 (top-k temporal energy channels)
-    cegi_alpha: float = 0.02           # 被选中 channel 的注入强度 (集中注入, 比 baseline 大)
-    cegi_residual_alpha: float = 0.0   # 未选中 channel 的注入强度 (0=纯随机, >0 保留微弱 prior)
-
-    # ── 方向 G: Multi-Scale Temporal Decomposition Injection (MSTDI) ──
-    mstdi: bool = False                 # 是否启用 MSTDI (多尺度时序分解注入)
-    mstdi_levels: int = 3              # 金字塔层数 (2=粗/细, 3=粗/中/细, 4=四层)
-    mstdi_alpha_base: float = 0.05     # 最粗层的 alpha (强注入控制全局运动)
-    mstdi_alpha_decay: float = 0.25    # 每层 alpha 衰减比例 (alpha[i+1] = alpha[i] * decay)
-                                       # 默认: L0=0.05, L1=0.0125, L2=0.003125 → 高频几乎不注入
-
-    # ── 方向 H: Temporal Phase Injection (TPI) ──
-    tpi: bool = False                   # 是否启用 TPI (时间相位注入)
-    tpi_gamma: float = 0.5             # 相位注入强度 (0=纯随机相位, 1=完全用参考相位)
-    tpi_freq_min: int = 1              # 最小注入频率 bin (跳过 DC=0)
-    tpi_freq_max: int = -1             # 最大注入频率 bin (-1=全部)
-
-    # ── 方向 I: Orthogonal Complement Suppression (OCS) ──
-    ocs: bool = False                   # 是否启用 OCS (正交补空间抑制)
-    ocs_top_k: int = 3                 # SVD 保留的主成分数
-    ocs_suppress_ratio: float = 0.5    # 正交空间的抑制比例 (0=不抑制, 1=完全移除)
-
-    # ── 灰盒: Latent Trajectory Soft Anchor (旧方案，已废弃) ──
-    trajectory_anchor: bool = False     # 是否启用轨迹锚定 (旧方案: position lerp，已证明失败)
-    anchor_beta_max: float = 0.3       # 最大锚定强度 β_max (推荐搜索: 0.1 ~ 0.5)
-    anchor_schedule: str = "cosine_decay"  # β 退火调度: cosine_decay / linear_decay / constant / warmup_decay
-    anchor_cache_every_n: int = 1      # inversion 轨迹缓存间隔 (1=全部, 2=隔一步; 用于显存优化)
-    anchor_quality_gate: bool = True    # 是否启用轨迹质量门控 (基于 η_temporal 帧间余弦相似度)
-    anchor_quality_threshold: float = 0.05  # 帧间 cos 阈值: mean_cos < 此值则跳过 anchor
-    anchor_cos_threshold: float = 0.2   # >0 时启用 cos-proportional β 模式 (旧方案2)
-
-    # ── L3 V2: Velocity Direction Anchor (VDA) ──
-    # 核心思想: 不做位置 lerp (已证明失败), 改做速度方向微调
-    # 数学: 在 Flow ODE 每步去噪后, 用参考轨迹的速度方向信息微调当前 latent
-    #   v_ref = (z_ref[curr] - z_ref[prev]) / dt  (生成方向: 噪声→数据)
-    #   v_gen ≈ (z_gen[t] - z_gen[t-1]) / dt       (差分估计的生成速度)
-    #   v_ref_⊥ = v_ref - (v_ref·v_gen/‖v_gen‖²)·v_gen  (参考速度的正交分量)
-    #   Δz = γ · v_ref_⊥ · dt  (方向修正冲量)
-    #   z_adjusted = z_current + Δz
-    #
-    # 注意: ref_trajectory 的 t 约定 (t=1=数据, t=0=噪声) 与 WanPipeline (t=1=噪声, t=0=数据) 相反
-    #       VDA callback 中用 1-t_progress 做坐标变换
-    #
-    # 与 L2 的关系:
-    #   L2 提供起点偏置 (SVD-blended z_T), L3 提供过程方向引导
-    #   两者语义正交互补, 不要求起点对齐
-    velocity_anchor: bool = False          # 是否启用 VDA (Velocity Direction Anchor)
-    vda_mode: str = "v1"                  # VDA 版本:
-    #   v1: 原始差分方向 (实测 angle>90°, 效果差)
-    #   v2: 反转差分+角度自适应 (angle<90° 时信任, >threshold 时跳过; 推荐)
-    vda_gamma: float = 0.03               # VDA 方向引导强度 γ (推荐搜索: 0.01 ~ 0.10)
-    # γ 越大, 参考速度方向的影响越强; 太大会偏离 ODE 流形
-    vda_schedule: str = "middle_peak"      # γ 调度策略:
-    #   constant: γ 恒定
-    #   middle_peak: 中间阶段最强, 两端弱 (推荐; 前后期轨迹收敛不需要强引导)
-    #   warmup_decay: 先升后降
-    #   cosine_decay: 从 γ 递减到 0
-    vda_use_perp_only: bool = True         # True: 只注入正交分量 (不改变速度大小); False: 混合投影+正交
-    vda_parallel_weight: float = 0.1      # vda_use_perp_only=False 时, 平行分量注入权重 (0.1=微弱)
-    vda_quality_gate: bool = True         # 是否启用质量门控 (基于 motion_strength)
-    vda_quality_scale: bool = True        # True: 门控值映射为 γ 缩放因子 (不硬跳过); False: 硬跳过
-    # 软门控: motion_strength 低 → γ 缩小但不为零 (保留微弱引导)
-    vda_angle_threshold: float = 110.0    # v2 专属: 角度自适应阈值 (度)
-    # angle(v_ref,v_gen) > 此值时 VDA 完全跳过; 推荐 100~120
-    #   - angle < 90°: v_ref 与 v_gen 同向, 完全信任 → angle_scale=1.0
-    #   - 90° < angle < threshold: 线性降权 → angle_scale 1.0→0.0
-    #   - angle > threshold: v_ref 与 v_gen 近反向, 完全跳过 → angle_scale=0.0
-    vda_norm_clamp: float = 0.0           # >0 时, 每步 Δz 的范数不超过 clamp * ‖z_current‖
-    # 防止单步偏移过大导致生成崩溃 (推荐: 0.05~0.10; 0=不限制)
-    vda_start_step: int = 1               # VDA 起始步 (step_index >= 此值才启用; 0=第一步就启用)
-    # 设为 1 可以跳过第一步 (第一步速度估计不准确)
-    vda_end_step: int = -1                # VDA 结束步 (step_index < 此值才启用; -1=到最后一步)
-    # 后期步数 cos 自然高, VDA 作用减弱, 可以提前结束节省计算
-
-    # ── VDA v3: 角度自适应质量门控 ──
-    vda_angle_gate: bool = False          # 是否启用角度自适应门控 (替代 mean_cos 门控)
-    # 核心改进: 用 angle(v_ref, v_gen) 替代 η_temporal 帧间 cos 作为质量指标
-    # 原理: angle 直接反映 VDA 引导的有效性, mean_cos 只反映反演噪声的帧间相关性
-    # 前几步 angle 趋势预测整体验果, 如果前几步 angle 突然增大则快速回退
-    vda_angle_probe_steps: int = 5        # 前 N 步用于试探的步数 (推荐 3~7)
-    vda_angle_probe_threshold: float = 95.0  # 试探期内 angle 平均超过此值则回退
-    # angle < 90°: v_ref 与 v_gen 同向, VDA 有效 → 全量引导
-    # 90° < angle < probe_threshold: VDA 部分有效 → 按 angle_scale 降权
-    # angle > probe_threshold: VDA 可能有害 → 快速回退到标准生成
-    vda_angle_gate_decay: str = "linear"  # 角度降权方式: linear / cosine / step
-    #   linear: angle_scale = 1.0 - (angle - 90) / (threshold - 90)
-    #   cosine: angle_scale = 0.5 * (1 + cos(pi * (angle - 90) / (threshold - 90)))
-    #   step: angle < 90 → 1.0, angle >= 90 → 0.0 (硬切换)
-
-    # ── L3 V3: Feature Injection (FI) ──
+    # ── L3: Feature Injection (FI) ──
     # 核心思想: 不做 latent 空间的方向修正 (VDA), 改做 DiT 特征空间的信息注入
     # 反演过程中缓存 DiT 每步的 cross-attention 输出, 生成时以残差方式注入
     # 优势:
@@ -248,32 +183,7 @@ class PFlowConfig:
         if self.use_svd:
             flags.append("svd")
         if self.use_blend:
-            if self.cegi:
-                flags.append(f"blend(CEGI: top_k={self.cegi_top_k}, α_inject={self.cegi_alpha}, α_residual={self.cegi_residual_alpha})")
-            elif self.mstdi:
-                flags.append(f"blend(MSTDI: levels={self.mstdi_levels}, α_base={self.mstdi_alpha_base}, decay={self.mstdi_alpha_decay})")
-            elif self.tpi:
-                flags.append(f"blend(TPI: γ={self.tpi_gamma}, freq=[{self.tpi_freq_min},{self.tpi_freq_max}])")
-            elif self.ocs:
-                flags.append(f"blend(OCS: top_k={self.ocs_top_k}, suppress={self.ocs_suppress_ratio})")
-            elif self.podi:
-                flags.append(f"blend(PODI: α={self.podi_alpha}, min_align={self.podi_min_alignment})")
-            elif self.adaptive_alpha:
-                flags.append(f"blend(SGA: base={self.alpha}, target_std={self.sga_target_std})")
-            elif self.freq_reshape:
-                flags.append(f"blend(α={self.alpha})+freq_reshape(β={self.freq_reshape_beta})")
-            else:
-                flags.append(f"blend(α={self.alpha})")
-        if self.trajectory_anchor:
-            flags.append(f"trajectory_anchor(β_max={self.anchor_beta_max}, sched={self.anchor_schedule})")
-        if self.velocity_anchor:
-            vda_desc = f"velocity_anchor({self.vda_mode}: γ={self.vda_gamma}, sched={self.vda_schedule}, perp_only={self.vda_use_perp_only}"
-            if self.vda_mode == "v2":
-                vda_desc += f", angle_thr={self.vda_angle_threshold}°"
-            if self.vda_angle_gate:
-                vda_desc += f", angle_gate(probe={self.vda_angle_probe_steps}步, thr={self.vda_angle_probe_threshold}°, decay={self.vda_angle_gate_decay})"
-            vda_desc += ")"
-            flags.append(vda_desc)
+            flags.append(f"blend(α={self.alpha})")
         if self.feature_inject:
             fi_desc = f"feature_inject(λ={self.fi_lambda}, layers={self.fi_layers}, sched={self.fi_schedule}, mode={self.fi_cache_mode}"
             if self.fi_adaptive_gate:
@@ -409,16 +319,43 @@ class PFlowPipeline:
         prompt_embeds_for_diag = None
         ref_latents_enc = None
         ref_trajectory_from_inversion = None  # 合并模式：反演时同时缓存的轨迹
-        fi_ref_features = None  # Feature Injection 参考特征缓存
+        fi_ref_features_from_inversion = None  # 合并模式：反演时同时缓存的FI特征
         if cfg.use_inversion:
             # 判断是否需要在反演时同时缓存轨迹
             need_trajectory = cfg.trajectory_anchor or cfg.velocity_anchor or cfg.feature_inject
             cache_every_n = cfg.anchor_cache_every_n if need_trajectory else 1
-            eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds_for_diag, ref_trajectory_from_inversion = \
+
+            # 构造 FI 配置（如果启用 feature_inject，在反演时同时缓存 DiT 特征）
+            fi_config_for_inv = None
+            if cfg.feature_inject:
+                transformer = self.pipe.transformer
+                num_layers = len(transformer.blocks) if hasattr(transformer, 'blocks') else 30
+                if cfg.fi_layers == "all":
+                    target_layers = list(range(num_layers))
+                elif cfg.fi_layers == "early":
+                    target_layers = list(range(0, num_layers // 3))
+                elif cfg.fi_layers == "mid":
+                    target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
+                elif cfg.fi_layers in ("last", "late"):
+                    target_layers = list(range(2 * num_layers // 3, num_layers))
+                else:
+                    try:
+                        target_layers = [int(x.strip()) for x in cfg.fi_layers.split(",")]
+                    except ValueError:
+                        target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
+                fi_config_for_inv = {
+                    "target_layers": target_layers,
+                    "cache_mode": cfg.fi_cache_mode,
+                    "gen_num_steps": cfg.num_inference_steps,
+                    "num_layers": num_layers,
+                }
+
+            eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds_for_diag, ref_trajectory_from_inversion, fi_ref_features_from_inversion = \
                 self._compute_noise_prior(
                     ref_video, caption,
                     cache_trajectory=need_trajectory and not cfg.use_midpoint,
                     cache_every_n=cache_every_n,
+                    fi_config=fi_config_for_inv,
                 )
             # 缓存 prompt embedding 供 PODI 使用
             self._prompt_embeds = prompt_embeds_for_diag
@@ -457,7 +394,7 @@ class PFlowPipeline:
                     guidance_scale=1.0,
                     device=self.device,
                 )
-                _, ref_trajectory = traj_inverter.invert_with_trajectory(
+                _, ref_trajectory, _ = traj_inverter.invert_with_trajectory(
                     ref_lat, p_emb, p_emb,
                     cache_every_n=cfg.anchor_cache_every_n,
                 )
@@ -472,7 +409,7 @@ class PFlowPipeline:
                     guidance_scale=1.0,
                     device=self.device,
                 )
-                _, ref_trajectory = traj_inverter.invert_with_trajectory(
+                _, ref_trajectory, _ = traj_inverter.invert_with_trajectory(
                     ref_lat, p_emb, p_emb,
                     cache_every_n=cfg.anchor_cache_every_n,
                 )
@@ -488,12 +425,25 @@ class PFlowPipeline:
             #   关键: 重置 generator seed，使生成阶段的随机状态与 baseline 完全一致。
             #   时间开销: 只多花 inversion 的时间（~1.5min），生成阶段不重复。
             # 注意: VDA 模式下跳过此硬门控, VDA 有自己的软门控 (vda_quality_scale)
-            # Feature Injection: 需要反演时缓存 DiT 特征
+            # Feature Injection: 优先复用反演时 inline 缓存的特征
             fi_ref_features = None
-            if cfg.feature_inject and ref_trajectory_from_inversion is not None:
-                fi_ref_features = self._cache_fi_ref_features(
-                    ref_trajectory_from_inversion, prompt_embeds_for_diag
-                )
+            if cfg.feature_inject:
+                if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
+                    # 方案2: 反演时已 inline 缓存，零额外开销
+                    fi_ref_features = fi_ref_features_from_inversion
+                    logger.info(
+                        f"  [FI] ✅ 复用反演时 inline 缓存的特征 "
+                        f"({len([k for k in fi_ref_features if k != '_meta'])} steps)"
+                    )
+                # elif ref_trajectory_from_inversion is not None:
+                #     # [已注释] 旧方案: 事后重新前向缓存 (多耗时 ~77s)
+                #     fi_ref_features = self._cache_fi_ref_features(
+                #         ref_trajectory_from_inversion, prompt_embeds_for_diag
+                #     )
+                else:
+                    logger.warning(
+                        "  [FI] ⚠️ feature_inject=True 但无反演轨迹，FI 将不生效"
+                    )
 
             if cfg.anchor_quality_gate and eta_temporal is not None and not cfg.velocity_anchor:
                 eta_gate = eta_temporal
@@ -693,6 +643,7 @@ class PFlowPipeline:
     def _compute_noise_prior(
         self, ref_video: torch.Tensor, prompt: str,
         cache_trajectory: bool = False, cache_every_n: int = 1,
+        fi_config: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """
         改动点: Inversion + SVD → η_temporal (V2)
@@ -709,10 +660,11 @@ class PFlowPipeline:
             prompt: 文本描述
             cache_trajectory: 是否在反演时同时缓存轨迹（用于 VDA / Trajectory Anchor）
             cache_every_n: 轨迹缓存间隔
+            fi_config: Feature Injection 配置 (传入则在反演时同时缓存特征)
 
         Returns:
-            (eta_temporal, eta_inv_raw, z0, prompt_embeds, trajectory):
-            SVD滤波后的噪声, 原始反演噪声(保留接口), VAE编码latent, prompt embedding, 轨迹字典
+            (eta_temporal, eta_inv_raw, z0, prompt_embeds, trajectory, fi_ref_features):
+            SVD滤波后的噪声, 原始反演噪声(保留接口), VAE编码latent, prompt embedding, 轨迹字典, FI特征缓存
         """
         logger.info("  [Inversion] encoding reference → latent...")
         ref_norm = normalize_video(ref_video).unsqueeze(0)
@@ -728,17 +680,19 @@ class PFlowPipeline:
         )
 
         trajectory = None
+        fi_ref_features = None
         if self.config.use_midpoint:
             logger.info("  [Inversion] midpoint (2nd-order)...")
             eta_inv = inverter.invert_midpoint(
                 ref_latents, prompt_embeds, prompt_embeds
             )
         elif cache_trajectory:
-            # 合并模式：反演 + 轨迹缓存一步完成
+            # 合并模式：反演 + 轨迹缓存 + (可选)FI特征缓存 一步完成
             logger.info("  [Inversion] euler (1st-order) + trajectory caching...")
-            eta_inv, trajectory = inverter.invert_with_trajectory(
+            eta_inv, trajectory, fi_ref_features = inverter.invert_with_trajectory(
                 ref_latents, prompt_embeds, prompt_embeds,
                 cache_every_n=cache_every_n,
+                fi_config=fi_config,
             )
         else:
             logger.info("  [Inversion] euler (1st-order)...")
@@ -792,7 +746,7 @@ class PFlowPipeline:
         logger.info(
             f"  η_temporal: mean={eta_temporal.mean():.4f}, std={eta_temporal.std():.4f}"
         )
-        return eta_temporal, eta_inv_raw, ref_latents, prompt_embeds, trajectory
+        return eta_temporal, eta_inv_raw, ref_latents, prompt_embeds, trajectory, fi_ref_features
 
     def _resolve_negative_prompt(self, sample_id: int) -> str:
         """
@@ -1883,24 +1837,6 @@ class PFlowPipeline:
             f"(last 5): {[f'{b:.4f}' for b in beta_values[-5:]]}"
         )
 
-        # ── 方案 2: cos-proportional β (L2+L3 融合) ──
-        # 当 latents 非 None（经过 SVD blend），启用 cos-proportional 模式：
-        #   effective_β = β_t × max(0, cos(gen, ref))
-        # 力度正比于对齐度，不存在阈值跳变，不需要 cos_threshold
-        # 纯 L3 (latents=None) 不启用此模式，保持原有行为
-        use_cos_proportional = (latents is not None) and cfg.anchor_cos_threshold > 0
-        if use_cos_proportional:
-            logger.info(
-                f"  [Trajectory Anchor] cos-proportional β 模式已启用 "
-                f"(检测到 SVD-blended latents, effective_β = β_t × cos(gen,ref))"
-            )
-        else:
-            logger.info(
-                f"  [Trajectory Anchor] 标准模式 "
-                f"(latents={'None→diffusers随机' if latents is None else 'provided'}, "
-                f"cos_proportional={'OFF' if not use_cos_proportional else 'ON'})"
-            )
-
         # ── 诊断: z_T 与 ref_trajectory 起点的对齐度 ──
         # ref_trajectory 来自 inversion(ref_latent → eta_inv)
         # L2 模式下 z_T = SVD-blended，和 eta_inv 不同
@@ -1964,14 +1900,8 @@ class PFlowPipeline:
                     z_ref.flatten().unsqueeze(0),
                 ).item()
 
-                # ── 方案 2: cos-proportional β ──
-                # effective_β = β_t × max(0, cos(gen, ref))
-                # 力度正比于对齐度: cos 低→几乎不拉, cos 高→正常拉
-                # 纯 L3 模式不启用此逻辑，保持原始 β_t
-                if use_cos_proportional:
-                    effective_beta = beta_t * max(0.0, cos_gen_ref)
-                else:
-                    effective_beta = beta_t
+                # effective_β
+                effective_beta = beta_t
 
                 # effective_β 过小时跳过（节省计算）
                 if effective_beta < 1e-5:
@@ -2054,7 +1984,7 @@ class PFlowPipeline:
         logger.info(f"  [Trajectory Anchor] 生成完成总结:")
         logger.info(
             f"    applied={n_applied}, skipped={n_skipped} "
-            f"({'cos-proportional' if use_cos_proportional else 'standard'}), "
+            f"(standard), "
             f"total={n_applied+n_skipped}/{num_steps}"
         )
         logger.info(
