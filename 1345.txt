@@ -1,0 +1,721 @@
+root@autodl-container-a4d74c9dd1-31db82ab:~/xixihaha/P-Flow# rm -rf /root/xixihaha/P-Flow/data/captions_v10
+export DASHSCOPE_API_KEY="sk-890e59c9b4bf462d80a0f615b2507675"
+cd /root/xixihaha/P-Flow && python scripts/rewrite_minimal.py \
+    --input-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir data/captions_v10 \
+    --video-dir data/videos \
+    --backend dashscope --model qwen-plus \
+    --vlm-provider local --vlm-model-path /root/models/Qwen2.5-VL-7B-Instruct \
+    --sample-ids 7 17 21 31 32 33 34 43 46 47
+cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir data/captions_v10 \
+    --output_dir outputs/v10_SVD_FI_10samples \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --inversion --svd --blend --alpha 0.004 \
+    --feature_inject --fi_layers mid --fi_lambda 0.05 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
+    --seed 42 --verbose
+cd /root/xixihaha/P-Flow && python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/v10_SVD_FI_10samples \
+    --caption-dir data/captions_v10 \
+    --output-dir outputs/v10_SVD_FI_10samples/eval_clip
+21:02:02 [INFO] ============================================================
+21:02:02 [INFO] v10-headtail-correction: LLM head/tail replace -> VLM factual correction
+21:02:02 [INFO] ============================================================
+21:02:02 [INFO] Samples: 10
+21:02:02 [INFO] LLM: dashscope/qwen-plus, temp=0.2
+21:02:02 [INFO] VLM: local/qwen-vl-max
+21:02:02 [INFO] Input: /root/xixihaha/test-v200/test-v200/captions
+21:02:02 [INFO] Output: data/captions_v10
+21:02:02 [INFO] Pipeline: Step1(LLM structured head/tail replace + code splice) -> Step2(VLM max-3 factual corrections)
+21:02:03 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:02:03 [INFO]   Step1 splice: preamble_end=4, ending_start=108, opening='The video depicts a...', ending='...'
+21:02:03 [INFO]   [1/10] 7 Step1: 108->108 words (delta +0)
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+21:02:08 [INFO] Loading local VLM from /root/models/Qwen2.5-VL-7B-Instruct ...
+21:02:08 [INFO] We will use 90% of the memory on device 0 for storing the model, and 10% for the buffer to avoid OOM. You can set `max_memory` in to a higher value to use more memory (at your own risk).
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.33it/s]
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+21:02:13 [INFO] Local VLM loaded in 4.7s (quantization=None)
+21:02:46 [WARNING]   [Step2 retry 1] VLM output starts with preamble
+21:03:19 [WARNING]   [Step2 retry 2] VLM output starts with preamble
+21:03:51 [WARNING]   [Step2 retry 3] VLM output starts with preamble
+21:03:51 [WARNING]   Step2 all VLM attempts failed, using Step1 result
+21:03:51 [INFO]   [1/10] 7 Step2: 108->108 words (corrections applied)
+21:03:51 [WARNING]   [1/10] 7 validation warnings: ['still starts with preamble']
+21:03:51 [INFO]   [1/10] 7 DONE: 108->108->108 words (x1.00)
+21:03:53 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:03:53 [INFO]   Step1 splice: preamble_end=4, ending_start=82, opening='SUV driving on a white dusty...', ending='clear blue sky, dust trail...'
+21:03:53 [INFO]   [2/10] 17 Step1: 94->89 words (delta -5)
+21:04:24 [WARNING]   [Step2 retry 1] VLM deleted too many words: 80 < 89*0.90
+21:04:56 [WARNING]   [Step2 retry 2] VLM deleted too many words: 80 < 89*0.90
+21:05:27 [WARNING]   [Step2 retry 3] VLM deleted too many words: 80 < 89*0.90
+21:05:27 [WARNING]   Step2 all VLM attempts failed, using Step1 result
+21:05:27 [INFO]   [2/10] 17 Step2: 89->80 words (corrections applied)
+21:05:27 [INFO]   [2/10] 17 DONE: 94->89->80 words (x0.85)
+21:05:28 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:05:28 [INFO]   Step1 splice: preamble_end=4, ending_start=109, opening='Paper airplanes flying through a lush...', ending='...'
+21:05:28 [INFO]   [3/10] 21 Step1: 109->111 words (delta +2)
+21:06:02 [INFO]   [3/10] 21 Step2: 111->110 words (corrections applied)
+21:06:02 [INFO]   [3/10] 21 DONE: 109->111->110 words (x1.01)
+21:06:03 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:06:03 [INFO]   Step1 splice: preamble_end=4, ending_start=103, opening='Whale swimming through submerged street...', ending='...'
+21:06:03 [INFO]   [4/10] 31 Step1: 103->104 words (delta +1)
+21:06:36 [INFO]   [4/10] 31 Step2: 104->104 words (corrections applied)
+21:06:36 [INFO]   [4/10] 31 DONE: 103->104->104 words (x1.01)
+21:06:37 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:06:37 [INFO]   Step1 splice: preamble_end=3, ending_start=101, opening='Puppies playing joyfully in a snowy...', ending='...'
+21:06:37 [INFO]   [5/10] 32 Step1: 101->104 words (delta +3)
+21:07:10 [INFO]   [5/10] 32 Step2: 104->104 words (corrections applied)
+21:07:10 [INFO]   [5/10] 32 DONE: 101->104->104 words (x1.03)
+21:07:11 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:07:11 [INFO]   Step1 splice: preamble_end=4, ending_start=77, opening='Person running against a plain...', ending='...'
+21:07:11 [INFO]   [6/10] 33 Step1: 77->78 words (delta +1)
+21:07:42 [INFO]   [6/10] 33 Step2: 78->73 words (corrections applied)
+21:07:42 [INFO]   [6/10] 33 DONE: 77->78->73 words (x0.95)
+21:07:44 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:07:44 [INFO]   Step1 splice: preamble_end=3, ending_start=88, opening='Puppies running and interacting on a gra...', ending='...'
+21:07:44 [INFO]   [7/10] 34 Step1: 88->92 words (delta +4)
+21:08:16 [INFO]   [7/10] 34 Step2: 92->92 words (corrections applied)
+21:08:16 [INFO]   [7/10] 34 DONE: 88->92->92 words (x1.05)
+21:08:17 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:08:17 [INFO]   Step1 splice: preamble_end=4, ending_start=94, opening='Cat walking along an orange and white...', ending='...'
+21:08:17 [INFO]   [8/10] 43 Step1: 94->97 words (delta +3)
+21:08:50 [INFO]   [8/10] 43 Step2: 97->97 words (corrections applied)
+21:08:50 [INFO]   [8/10] 43 DONE: 94->97->97 words (x1.03)
+21:08:51 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:08:51 [INFO]   Step1 splice: preamble_end=4, ending_start=103, opening='Volcano erupting with dark smoke...', ending='lush green mountains, calm ocean...'
+21:08:51 [INFO]   [9/10] 46 Step1: 118->109 words (delta -9)
+21:09:24 [INFO]   [9/10] 46 Step2: 109->109 words (corrections applied)
+21:09:24 [INFO]   [9/10] 46 DONE: 118->109->109 words (x0.92)
+21:09:25 [INFO] HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+21:09:25 [INFO]   Step1 splice: preamble_end=3, ending_start=93, opening='Dogs running side by side across a refle...', ending='...'
+21:09:25 [INFO]   [10/10] 47 Step1: 93->98 words (delta +5)
+21:09:56 [WARNING]   [Step2 retry 1] VLM deleted too many words: 76 < 98*0.90
+21:10:29 [INFO]   [10/10] 47 Step2: 98->98 words (corrections applied)
+21:10:29 [INFO]   [10/10] 47 DONE: 93->98->98 words (x1.05)
+21:10:29 [INFO] 
+============================================================
+21:10:29 [INFO] Done! success=10, failed=0, skipped=0, total=10
+21:10:29 [INFO] Output: data/captions_v10
+21:10:29 [INFO] Avg Step1 ratio: 1.01, Avg final ratio: 0.99 (target ~1.0, v10 minimal edit)
+21:10:29 [INFO] Log saved: data/captions_v10/rewrite_log.json
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-16 21:10:32,607 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/v10_SVD_FI_10samples/run_log.txt
+P-Flow | pflow_inversion_svd_blend_feature_inject
+  Flags: ['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+  alpha=0.004, rho_s=0.1, rho_m=0.9
+  [FI] λ=0.05, layers=mid, schedule=middle_peak, mode=attention, adaptive(temp=5.0)
+
+2026-06-16 21:10:32,623 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 10 个样本
+实验: pflow_inversion_svd_blend_feature_inject
+Flags: ['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+
+  [1/10] 处理 7...
+2026-06-16 21:10:32,625 [INFO] [P-Flow] sample=7, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:10:35,542 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-16 21:10:35,542 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████████████| 2/2 [00:01<00:00,  1.48it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.41it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████████████| 5/5 [00:05<00:00,  1.15s/it]
+2026-06-16 21:10:48,190 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-16 21:10:48,191 [INFO]   GPU 0: 13.8GB allocated, 14.1GB reserved
+2026-06-16 21:10:48,191 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:10:50,781 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:10:50,782 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:10:50,782 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:24<01:54,  2.79s/it]2026-06-16 21:11:18,288 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0884, std=0.5312, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:51<01:23,  2.70s/it]2026-06-16 21:11:45,158 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.1074, std=0.6562, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:18<00:57,  2.73s/it]2026-06-16 21:12:12,387 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.1309, std=0.8086, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:46<00:30,  2.74s/it]2026-06-16 21:12:39,776 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.1582, std=0.9883, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:14<00:02,  2.86s/it]2026-06-16 21:13:07,550 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.1855, std=1.1797, cached=51 points
+2026-06-16 21:13:07,551 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.1855, std=1.1797                       
+2026-06-16 21:13:07,551 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:13:07,574 [INFO]   [Inversion Quality] η_inv: std=1.1797, mean=-0.1855, range=[-3.578, 3.750], cos_sim(η_inv, random)=0.0002, cos_sim(η_inv, z0)=0.9844
+2026-06-16 21:13:07,574 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:13:07,855 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-16 21:13:07,866 [DEBUG]   [Stage2] Temporal: kept top-8/21 components
+2026-06-16 21:13:07,867 [INFO]   η_temporal: mean=0.0013, std=0.3730
+2026-06-16 21:13:07,867 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:13:07,867 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:13:07,867 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:13:07,867 [INFO]   iter 1/1: The video depicts a close-up view of a cup filled with dark ...
+2026-06-16 21:13:07,868 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3730, η_mixed std=0.9961, mean=0.0005
+2026-06-16 21:13:07,868 [INFO]   [Blend Diag] cos(temporal, random)=0.0002, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0242
+2026-06-16 21:13:07,868 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024517 (越大越说明 temporal 有影响)
+2026-06-16 21:13:07,869 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:13:07,869 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:13:07,869 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:13:07,869 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:13:07,871 [INFO]   [Quality Scale] mean_cos=0.0567, threshold=0.05, scale=0.5801 (weak)
+2026-06-16 21:13:07,871 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5801, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:13:07,871 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:23<01:35,  3.99s/it]2026-06-16 21:13:32,351 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5781, gate=0.4036, λ=0.01495→0.00604
+2026-06-16 21:13:34,255 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5703, gate=0.4130, λ=0.01495→0.00618
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:44<01:17,  4.11s/it]2026-06-16 21:13:52,980 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6445, gate=0.3268, λ=0.02563→0.00838
+2026-06-16 21:13:54,884 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6367, gate=0.3355, λ=0.02563→0.00860
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:04<00:57,  4.13s/it]2026-06-16 21:14:13,647 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6914, gate=0.2775, λ=0.02896→0.00804
+2026-06-16 21:14:15,553 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6836, gate=0.2854, λ=0.02896→0.00827
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:25<00:37,  4.15s/it]2026-06-16 21:14:34,386 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7266, gate=0.2436, λ=0.02401→0.00585
+2026-06-16 21:14:36,293 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7227, gate=0.2473, λ=0.02401→0.00594
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:46<00:16,  4.14s/it]2026-06-16 21:14:55,082 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7617, gate=0.2127, λ=0.01218→0.00259
+2026-06-16 21:14:56,990 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7617, gate=0.2127, λ=0.01218→0.00259
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:02<00:00,  4.10s/it]
+2026-06-16 21:15:14,431 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:15:14,431 [INFO]   [FI] 生成完成总结
+2026-06-16 21:15:14,431 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:15:14,431 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:15:16,872 [INFO] [P-Flow] Done in 284.2s → outputs/v10_SVD_FI_10samples/sample_7/7.mp4
+2026-06-16 21:15:16,872 [INFO]   [SAMPLE SUMMARY] sample_id=7
+2026-06-16 21:15:16,872 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a close-up view of a cup filled with dark liquid, likely coffee or tea, with two small toy sailboats floating on its surface. The sailboats have white sails and wooden hulls, and they appear to be miniature models. The liquid in the cup is smooth, with some ripples around the boats, suggesting a gentle movement. The lighting highlights the reflective surface of the liquid, creating subtle reflections of the boats. The background is slightly blurred, focusing attention on the cup and the boats. The overall scene has a serene and whimsical feel, as if the boats are sailing on a miniature sea within the cup.
+2026-06-16 21:15:16,872 [INFO]   [SAMPLE SUMMARY] caption_length=630 chars, word_count=108
+2026-06-16 21:15:16,872 [INFO]   [SAMPLE SUMMARY] elapsed=284.2s, output=outputs/v10_SVD_FI_10samples/sample_7/7.mp4
+  [2/10] 处理 17...
+2026-06-16 21:15:18,379 [INFO] [P-Flow] sample=17, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:15:20,790 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:15:23,107 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:15:23,108 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:15:23,108 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:23<01:52,  2.73s/it]2026-06-16 21:15:49,506 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0649, std=0.4219, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:52<01:28,  2.86s/it]2026-06-16 21:16:17,795 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0762, std=0.5195, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:19<00:58,  2.78s/it]2026-06-16 21:16:45,548 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0898, std=0.6406, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:47<00:30,  2.78s/it]2026-06-16 21:17:13,286 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.1060, std=0.7930, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:13<00:02,  2.56s/it]2026-06-16 21:17:38,694 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.1240, std=0.9688, cached=51 points
+2026-06-16 21:17:38,695 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.1240, std=0.9688                        
+2026-06-16 21:17:38,695 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:17:38,701 [INFO]   [Inversion Quality] η_inv: std=0.9688, mean=0.1240, range=[-3.469, 4.312], cos_sim(η_inv, random)=-0.0006, cos_sim(η_inv, z0)=0.9688
+2026-06-16 21:17:38,701 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:17:38,713 [DEBUG]   [Stage1] Spatial: removed top-16 components
+2026-06-16 21:17:38,717 [DEBUG]   [Stage2] Temporal: kept top-11/21 components
+2026-06-16 21:17:38,718 [INFO]   η_temporal: mean=-0.0001, std=0.3320
+2026-06-16 21:17:38,718 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:17:38,718 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:17:38,718 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:17:38,718 [INFO]   iter 1/1: SUV driving on a dusty, unpaved road through a forested area...
+2026-06-16 21:17:38,719 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3320, η_mixed std=0.9961, mean=-0.0004
+2026-06-16 21:17:38,719 [INFO]   [Blend Diag] cos(temporal, random)=0.0004, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0216
+2026-06-16 21:17:38,719 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021927 (越大越说明 temporal 有影响)
+2026-06-16 21:17:38,719 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:17:38,719 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:17:38,719 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:17:38,720 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:17:38,722 [INFO]   [Quality Scale] mean_cos=-0.0173, threshold=0.05, scale=0.2858 (minimal)
+2026-06-16 21:17:38,722 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.2858, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:17:38,722 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:23<01:37,  4.05s/it]2026-06-16 21:18:03,465 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6289, gate=0.3442, λ=0.00737→0.00254
+2026-06-16 21:18:05,367 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6289, gate=0.3442, λ=0.00737→0.00254
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:44<01:18,  4.11s/it]2026-06-16 21:18:24,073 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6562, gate=0.3141, λ=0.01262→0.00396
+2026-06-16 21:18:25,978 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6523, gate=0.3183, λ=0.01262→0.00402
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:05<00:57,  4.12s/it]2026-06-16 21:18:44,683 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6836, gate=0.2854, λ=0.01427→0.00407
+2026-06-16 21:18:46,590 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6797, gate=0.2894, λ=0.01427→0.00413
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:25<00:37,  4.12s/it]2026-06-16 21:19:05,293 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7109, gate=0.2583, λ=0.01183→0.00306
+2026-06-16 21:19:07,198 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7070, gate=0.2621, λ=0.01183→0.00310
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:46<00:16,  4.13s/it]2026-06-16 21:19:25,938 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7422, gate=0.2295, λ=0.00600→0.00138
+2026-06-16 21:19:27,845 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7383, gate=0.2330, λ=0.00600→0.00140
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:02<00:00,  4.10s/it]
+2026-06-16 21:19:45,286 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:19:45,286 [INFO]   [FI] 生成完成总结
+2026-06-16 21:19:45,286 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:19:45,286 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:19:47,868 [INFO] [P-Flow] Done in 269.5s → outputs/v10_SVD_FI_10samples/sample_17/17.mp4
+2026-06-16 21:19:47,868 [INFO]   [SAMPLE SUMMARY] sample_id=17
+2026-06-16 21:19:47,868 [INFO]   [SAMPLE SUMMARY] full_caption=SUV driving on a dusty, unpaved road through a forested area. The vehicle is equipped with roof racks carrying luggage or gear, suggesting it might be on a journey or adventure. As the SUV moves forward, it kicks up a cloud of dust behind it, indicating the dryness of the terrain and the speed at which it is traveling. The surrounding environment features tall pine trees and a scenic view of distant mountains under a clear blue sky, dust trail
+2026-06-16 21:19:47,868 [INFO]   [SAMPLE SUMMARY] caption_length=447 chars, word_count=80
+2026-06-16 21:19:47,868 [INFO]   [SAMPLE SUMMARY] elapsed=269.5s, output=outputs/v10_SVD_FI_10samples/sample_17/17.mp4
+  [3/10] 处理 21...
+2026-06-16 21:19:49,381 [INFO] [P-Flow] sample=21, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:19:52,005 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:19:54,322 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:19:54,323 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:19:54,323 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:22<01:41,  2.47s/it]2026-06-16 21:20:19,011 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0337, std=0.4102, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:46<01:17,  2.48s/it]2026-06-16 21:20:43,718 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0396, std=0.5039, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:12<00:53,  2.54s/it]2026-06-16 21:21:08,990 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0464, std=0.6172, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:37<00:27,  2.47s/it]2026-06-16 21:21:33,808 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0542, std=0.7578, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:02<00:02,  2.52s/it]2026-06-16 21:21:58,853 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0635, std=0.9258, cached=51 points
+2026-06-16 21:21:58,854 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0635, std=0.9258                        
+2026-06-16 21:21:58,854 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:21:58,859 [INFO]   [Inversion Quality] η_inv: std=0.9258, mean=0.0635, range=[-3.812, 3.688], cos_sim(η_inv, random)=0.0008, cos_sim(η_inv, z0)=0.9727
+2026-06-16 21:21:58,860 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:21:58,872 [DEBUG]   [Stage1] Spatial: removed top-19 components
+2026-06-16 21:21:58,876 [DEBUG]   [Stage2] Temporal: kept top-14/21 components
+2026-06-16 21:21:58,877 [INFO]   η_temporal: mean=0.0001, std=0.3281
+2026-06-16 21:21:58,877 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:21:58,877 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:21:58,877 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:21:58,877 [INFO]   iter 1/1: Paper airplanes flying through a lush, dense jungle with tal...
+2026-06-16 21:21:58,877 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3281, η_mixed std=0.9961, mean=-0.0000
+2026-06-16 21:21:58,878 [INFO]   [Blend Diag] cos(temporal, random)=0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0215
+2026-06-16 21:21:58,878 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021668 (越大越说明 temporal 有影响)
+2026-06-16 21:21:58,878 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:21:58,878 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:21:58,878 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:21:58,878 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:21:58,880 [INFO]   [Quality Scale] mean_cos=0.0611, threshold=0.05, scale=0.5995 (weak)
+2026-06-16 21:21:58,881 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5995, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:21:58,881 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:24<01:38,  4.09s/it]2026-06-16 21:22:23,912 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6367, gate=0.3355, λ=0.01545→0.00518
+2026-06-16 21:22:25,822 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6328, gate=0.3398, λ=0.01545→0.00525
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:44<01:18,  4.14s/it]2026-06-16 21:22:44,624 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6562, gate=0.3141, λ=0.02648→0.00832
+2026-06-16 21:22:46,531 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6562, gate=0.3141, λ=0.02648→0.00832
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:05<00:57,  4.13s/it]2026-06-16 21:23:05,253 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6836, gate=0.2854, λ=0.02993→0.00854
+2026-06-16 21:23:07,161 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6797, gate=0.2894, λ=0.02993→0.00866
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:26<00:37,  4.13s/it]2026-06-16 21:23:25,900 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7070, gate=0.2621, λ=0.02481→0.00650
+2026-06-16 21:23:27,808 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7070, gate=0.2621, λ=0.02481→0.00650
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:46<00:16,  4.13s/it]2026-06-16 21:23:46,573 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7383, gate=0.2330, λ=0.01259→0.00293
+2026-06-16 21:23:48,481 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7383, gate=0.2330, λ=0.01259→0.00293
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:03<00:00,  4.12s/it]
+2026-06-16 21:24:05,948 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:24:05,948 [INFO]   [FI] 生成完成总结
+2026-06-16 21:24:05,948 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:24:05,948 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:24:08,435 [INFO] [P-Flow] Done in 259.1s → outputs/v10_SVD_FI_10samples/sample_21/21.mp4
+2026-06-16 21:24:08,435 [INFO]   [SAMPLE SUMMARY] sample_id=21
+2026-06-16 21:24:08,435 [INFO]   [SAMPLE SUMMARY] full_caption=Paper airplanes flying through a lush, dense jungle with tall trees and thick foliage. The scene is vibrant with various shades of green from the leaves and plants. Throughout the video, numerous paper airplanes are seen flying through the air, appearing to be tossed or released into the environment. These airplanes come in different colors, including white, pink, purple, and yellow, adding a playful and whimsical element to the natural setting. The movement of the airplanes contrasts with the stillness of the surrounding jungle, creating a dynamic visual experience. The lighting suggests it might be daytime, as sunlight filters through the canopy above, casting dappled shadows on the ground below.
+2026-06-16 21:24:08,435 [INFO]   [SAMPLE SUMMARY] caption_length=707 chars, word_count=110
+2026-06-16 21:24:08,435 [INFO]   [SAMPLE SUMMARY] elapsed=259.1s, output=outputs/v10_SVD_FI_10samples/sample_21/21.mp4
+  [4/10] 处理 31...
+2026-06-16 21:24:09,924 [INFO] [P-Flow] sample=31, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:24:12,310 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:24:14,623 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:24:14,624 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:24:14,624 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:22<01:42,  2.51s/it]2026-06-16 21:24:39,419 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0238, std=0.4395, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:47<01:20,  2.59s/it]2026-06-16 21:25:04,888 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0247, std=0.5391, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:15<00:58,  2.81s/it]2026-06-16 21:25:33,056 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0254, std=0.6641, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:43<00:30,  2.80s/it]2026-06-16 21:26:01,196 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0258, std=0.8203, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:11<00:02,  2.81s/it]2026-06-16 21:26:28,904 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0264, std=1.0000, cached=51 points
+2026-06-16 21:26:28,905 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0264, std=1.0000                        
+2026-06-16 21:26:28,905 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:26:28,910 [INFO]   [Inversion Quality] η_inv: std=1.0000, mean=0.0264, range=[-3.719, 3.688], cos_sim(η_inv, random)=-0.0002, cos_sim(η_inv, z0)=0.9805
+2026-06-16 21:26:28,910 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:26:28,923 [DEBUG]   [Stage1] Spatial: removed top-11 components
+2026-06-16 21:26:28,927 [DEBUG]   [Stage2] Temporal: kept top-13/21 components
+2026-06-16 21:26:28,928 [INFO]   η_temporal: mean=0.0015, std=0.3398
+2026-06-16 21:26:28,928 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:26:28,928 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:26:28,928 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:26:28,928 [INFO]   iter 1/1: Whale swimming through submerged street underwater scene whe...
+2026-06-16 21:26:28,928 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3398, η_mixed std=0.9922, mean=-0.0005
+2026-06-16 21:26:28,929 [INFO]   [Blend Diag] cos(temporal, random)=-0.0009, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0209
+2026-06-16 21:26:28,929 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022445 (越大越说明 temporal 有影响)
+2026-06-16 21:26:28,929 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:26:28,929 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:26:28,929 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:26:28,929 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:26:28,931 [INFO]   [Quality Scale] mean_cos=0.0450, threshold=0.05, scale=0.5276 (weak)
+2026-06-16 21:26:28,931 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5276, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:26:28,931 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:24<01:38,  4.10s/it]2026-06-16 21:26:54,098 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6289, gate=0.3442, λ=0.01360→0.00468
+2026-06-16 21:26:56,000 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6211, gate=0.3531, λ=0.01360→0.00480
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:44<01:18,  4.11s/it]2026-06-16 21:27:14,688 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6484, gate=0.3225, λ=0.02331→0.00752
+2026-06-16 21:27:16,589 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6445, gate=0.3268, λ=0.02331→0.00762
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:05<00:57,  4.14s/it]2026-06-16 21:27:35,418 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6758, gate=0.2934, λ=0.02634→0.00773
+2026-06-16 21:27:37,321 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6719, gate=0.2975, λ=0.02634→0.00784
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:26<00:37,  4.14s/it]2026-06-16 21:27:56,140 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7031, gate=0.2659, λ=0.02184→0.00581
+2026-06-16 21:27:58,048 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6953, gate=0.2736, λ=0.02184→0.00597
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:47<00:16,  4.15s/it]2026-06-16 21:28:16,894 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7266, gate=0.2436, λ=0.01108→0.00270
+2026-06-16 21:28:18,799 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7266, gate=0.2436, λ=0.01108→0.00270
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:03<00:00,  4.13s/it]
+2026-06-16 21:28:36,332 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:28:36,333 [INFO]   [FI] 生成完成总结
+2026-06-16 21:28:36,333 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:28:36,333 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:28:38,859 [INFO] [P-Flow] Done in 268.9s → outputs/v10_SVD_FI_10samples/sample_31/31.mp4
+2026-06-16 21:28:38,859 [INFO]   [SAMPLE SUMMARY] sample_id=31
+2026-06-16 21:28:38,859 [INFO]   [SAMPLE SUMMARY] full_caption=Whale swimming through submerged street underwater scene where a city has been submerged, creating a surreal and fantastical environment. The buildings, streets, and vehicles are now underwater, with sunlight filtering through the water from above, casting a blue hue over the entire scene. A large whale swims gracefully through the middle of the street, surrounded by smaller fish that appear to be swimming freely among the debris. The cityscape is eerily quiet, with no visible signs of human activity, adding to the otherworldly atmosphere. The overall mood is one of calmness and mystery, as if the city has been taken over by marine life.
+2026-06-16 21:28:38,859 [INFO]   [SAMPLE SUMMARY] caption_length=645 chars, word_count=104
+2026-06-16 21:28:38,859 [INFO]   [SAMPLE SUMMARY] elapsed=268.9s, output=outputs/v10_SVD_FI_10samples/sample_31/31.mp4
+  [5/10] 处理 32...
+2026-06-16 21:28:40,405 [INFO] [P-Flow] sample=32, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:28:42,949 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:28:45,260 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:28:45,261 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:28:45,261 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:23<01:53,  2.77s/it]2026-06-16 21:29:11,924 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0728, std=0.4707, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:51<01:23,  2.69s/it]2026-06-16 21:29:39,502 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0884, std=0.5781, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:16<00:52,  2.49s/it]2026-06-16 21:30:04,201 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.1069, std=0.7188, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:41<00:27,  2.52s/it]2026-06-16 21:30:29,416 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.1279, std=0.8867, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:07<00:02,  2.61s/it]2026-06-16 21:30:55,167 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.1523, std=1.0938, cached=51 points
+2026-06-16 21:30:55,168 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.1523, std=1.0938                        
+2026-06-16 21:30:55,168 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:30:55,174 [INFO]   [Inversion Quality] η_inv: std=1.0938, mean=0.1523, range=[-3.531, 3.547], cos_sim(η_inv, random)=-0.0007, cos_sim(η_inv, z0)=0.9766
+2026-06-16 21:30:55,174 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:30:55,187 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-16 21:30:55,191 [DEBUG]   [Stage2] Temporal: kept top-7/21 components
+2026-06-16 21:30:55,191 [INFO]   η_temporal: mean=0.0002, std=0.3633
+2026-06-16 21:30:55,192 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:30:55,192 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:30:55,192 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:30:55,192 [INFO]   iter 1/1: Puppies playing joyfully in a snowy two adorable golden retr...
+2026-06-16 21:30:55,192 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3633, η_mixed std=0.9961, mean=-0.0014
+2026-06-16 21:30:55,193 [INFO]   [Blend Diag] cos(temporal, random)=-0.0015, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0217
+2026-06-16 21:30:55,193 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.023826 (越大越说明 temporal 有影响)
+2026-06-16 21:30:55,193 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:30:55,193 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:30:55,193 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:30:55,193 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:30:55,196 [INFO]   [Quality Scale] mean_cos=-0.0553, threshold=0.05, scale=0.1977 (minimal)
+2026-06-16 21:30:55,196 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.1977, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:30:55,196 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:24<01:38,  4.12s/it]2026-06-16 21:31:20,643 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6406, gate=0.3311, λ=0.00510→0.00169
+2026-06-16 21:31:22,551 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6289, gate=0.3442, λ=0.00510→0.00175
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:45<01:18,  4.12s/it]2026-06-16 21:31:41,265 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6680, gate=0.3016, λ=0.00873→0.00263
+2026-06-16 21:31:43,169 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6602, gate=0.3099, λ=0.00873→0.00271
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:05<00:57,  4.13s/it]2026-06-16 21:32:01,904 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6953, gate=0.2736, λ=0.00987→0.00270
+2026-06-16 21:32:03,814 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6875, gate=0.2814, λ=0.00987→0.00278
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:26<00:37,  4.13s/it]2026-06-16 21:32:22,591 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7227, gate=0.2473, λ=0.00818→0.00202
+2026-06-16 21:32:24,495 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7148, gate=0.2546, λ=0.00818→0.00208
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:47<00:16,  4.13s/it]2026-06-16 21:32:43,238 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7500, gate=0.2227, λ=0.00415→0.00092
+2026-06-16 21:32:45,142 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7461, gate=0.2261, λ=0.00415→0.00094
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:03<00:00,  4.13s/it]
+2026-06-16 21:33:02,673 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:33:02,674 [INFO]   [FI] 生成完成总结
+2026-06-16 21:33:02,674 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:33:02,674 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:33:05,164 [INFO] [P-Flow] Done in 264.8s → outputs/v10_SVD_FI_10samples/sample_32/32.mp4
+2026-06-16 21:33:05,164 [INFO]   [SAMPLE SUMMARY] sample_id=32
+2026-06-16 21:33:05,164 [INFO]   [SAMPLE SUMMARY] full_caption=Puppies playing joyfully in a snowy two adorable golden retriever puppies playing joyfully in a snowy landscape. The scene is set during what appears to be late afternoon, as indicated by the warm, soft light casting long shadows on the snow. The puppies are covered in fluffy, golden fur and are energetically moving through the snow, their paws kicking up small clouds of snow as they play. Their tails are wagging, and their expressions convey a sense of excitement and happiness. The background shows a serene winter setting with snow-covered ground and bare trees, adding to the picturesque and cozy atmosphere of the video.
+2026-06-16 21:33:05,164 [INFO]   [SAMPLE SUMMARY] caption_length=629 chars, word_count=104
+2026-06-16 21:33:05,164 [INFO]   [SAMPLE SUMMARY] elapsed=264.8s, output=outputs/v10_SVD_FI_10samples/sample_32/32.mp4
+  [6/10] 处理 33...
+2026-06-16 21:33:06,751 [INFO] [P-Flow] sample=33, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:33:09,206 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:33:11,515 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:33:11,516 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:33:11,516 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:25<01:51,  2.71s/it]2026-06-16 21:33:39,037 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0102, std=0.5664, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:50<01:17,  2.50s/it]2026-06-16 21:34:04,114 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0107, std=0.6953, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:15<00:52,  2.52s/it]2026-06-16 21:34:29,330 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0098, std=0.8516, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:40<00:28,  2.60s/it]2026-06-16 21:34:54,716 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0075, std=1.0469, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:05<00:02,  2.55s/it]2026-06-16 21:35:19,723 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0037, std=1.2734, cached=51 points
+2026-06-16 21:35:19,723 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0037, std=1.2734                        
+2026-06-16 21:35:19,723 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:35:19,730 [INFO]   [Inversion Quality] η_inv: std=1.2734, mean=0.0037, range=[-3.719, 4.094], cos_sim(η_inv, random)=-0.0014, cos_sim(η_inv, z0)=0.9844
+2026-06-16 21:35:19,730 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:35:19,742 [DEBUG]   [Stage1] Spatial: removed top-2 components
+2026-06-16 21:35:19,746 [DEBUG]   [Stage2] Temporal: kept top-7/21 components
+2026-06-16 21:35:19,746 [INFO]   η_temporal: mean=0.0167, std=0.4121
+2026-06-16 21:35:19,746 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:35:19,746 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:35:19,746 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:35:19,746 [INFO]   iter 1/1: Person running against a plain, light-colored background. Th...
+2026-06-16 21:35:19,747 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.4121, η_mixed std=0.9961, mean=0.0007
+2026-06-16 21:35:19,747 [INFO]   [Blend Diag] cos(temporal, random)=0.0002, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0265
+2026-06-16 21:35:19,748 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.026761 (越大越说明 temporal 有影响)
+2026-06-16 21:35:19,748 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:35:19,748 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:35:19,748 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:35:19,748 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:35:19,750 [INFO]   [Quality Scale] mean_cos=0.0668, threshold=0.05, scale=0.6248 (weak)
+2026-06-16 21:35:19,750 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.6248, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:35:19,750 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:23<01:35,  3.98s/it]2026-06-16 21:35:44,118 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6406, gate=0.3311, λ=0.01611→0.00533
+2026-06-16 21:35:46,021 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6406, gate=0.3311, λ=0.01611→0.00533
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:44<01:17,  4.10s/it]2026-06-16 21:36:04,720 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6914, gate=0.2775, λ=0.02760→0.00766
+2026-06-16 21:36:06,625 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6836, gate=0.2854, λ=0.02760→0.00788
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:04<00:57,  4.12s/it]2026-06-16 21:36:25,337 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.7227, gate=0.2473, λ=0.03119→0.00771
+2026-06-16 21:36:27,240 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.7227, gate=0.2473, λ=0.03119→0.00771
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:25<00:37,  4.13s/it]2026-06-16 21:36:45,978 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7500, gate=0.2227, λ=0.02586→0.00576
+2026-06-16 21:36:47,884 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7461, gate=0.2261, λ=0.02586→0.00585
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:46<00:16,  4.14s/it]2026-06-16 21:37:06,702 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7734, gate=0.2031, λ=0.01312→0.00266
+2026-06-16 21:37:08,604 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7734, gate=0.2031, λ=0.01312→0.00266
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:02<00:00,  4.09s/it]
+2026-06-16 21:37:25,983 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:37:25,983 [INFO]   [FI] 生成完成总结
+2026-06-16 21:37:25,983 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:37:25,983 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:37:28,432 [INFO] [P-Flow] Done in 261.7s → outputs/v10_SVD_FI_10samples/sample_33/33.mp4
+2026-06-16 21:37:28,432 [INFO]   [SAMPLE SUMMARY] sample_id=33
+2026-06-16 21:37:28,432 [INFO]   [SAMPLE SUMMARY] full_caption=Person running against a plain, light-colored background. The individual is wearing a white tank top and black shorts, which highlight their athletic build. The lighting is soft and even, casting minimal shadows and emphasizing the runner's movement. The person appears to be jogging at a steady pace, with their arms swinging naturally as they run. The overall atmosphere of the video is focused on the physical activity and the simplicity of the setting.
+2026-06-16 21:37:28,432 [INFO]   [SAMPLE SUMMARY] caption_length=456 chars, word_count=73
+2026-06-16 21:37:28,432 [INFO]   [SAMPLE SUMMARY] elapsed=261.7s, output=outputs/v10_SVD_FI_10samples/sample_33/33.mp4
+  [7/10] 处理 34...
+2026-06-16 21:37:29,940 [INFO] [P-Flow] sample=34, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:37:32,412 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:37:34,722 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:37:34,723 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:37:34,723 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:22<01:41,  2.49s/it]2026-06-16 21:37:59,525 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0510, std=0.3594, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:47<01:16,  2.46s/it]2026-06-16 21:38:24,219 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0598, std=0.4434, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:11<00:52,  2.49s/it]2026-06-16 21:38:48,913 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0698, std=0.5469, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:36<00:27,  2.53s/it]2026-06-16 21:39:13,927 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0820, std=0.6758, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:01<00:02,  2.46s/it]2026-06-16 21:39:38,645 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0952, std=0.8320, cached=51 points
+2026-06-16 21:39:38,646 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0952, std=0.8320                        
+2026-06-16 21:39:38,646 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:39:38,652 [INFO]   [Inversion Quality] η_inv: std=0.8320, mean=0.0952, range=[-3.500, 3.562], cos_sim(η_inv, random)=0.0008, cos_sim(η_inv, z0)=0.9688
+2026-06-16 21:39:38,652 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:39:38,664 [DEBUG]   [Stage1] Spatial: removed top-14 components
+2026-06-16 21:39:38,668 [DEBUG]   [Stage2] Temporal: kept top-9/21 components
+2026-06-16 21:39:38,668 [INFO]   η_temporal: mean=0.0000, std=0.2793
+2026-06-16 21:39:38,669 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:39:38,669 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:39:38,669 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:39:38,669 [INFO]   iter 1/1: Puppies running and interacting on a gravel four playful pup...
+2026-06-16 21:39:38,669 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.2793, η_mixed std=0.9961, mean=-0.0005
+2026-06-16 21:39:38,670 [INFO]   [Blend Diag] cos(temporal, random)=-0.0012, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0166
+2026-06-16 21:39:38,670 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.018733 (越大越说明 temporal 有影响)
+2026-06-16 21:39:38,670 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:39:38,670 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:39:38,670 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:39:38,670 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:39:38,672 [INFO]   [Quality Scale] mean_cos=0.0232, threshold=0.05, scale=0.4321 (weak)
+2026-06-16 21:39:38,672 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.4321, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:39:38,672 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:24<01:38,  4.09s/it]2026-06-16 21:40:03,822 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6602, gate=0.3099, λ=0.01114→0.00345
+2026-06-16 21:40:05,725 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6523, gate=0.3183, λ=0.01114→0.00355
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:44<01:18,  4.11s/it]2026-06-16 21:40:24,369 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6797, gate=0.2894, λ=0.01909→0.00552
+2026-06-16 21:40:26,274 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6758, gate=0.2934, λ=0.01909→0.00560
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:05<00:57,  4.12s/it]2026-06-16 21:40:44,970 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.7031, gate=0.2659, λ=0.02157→0.00574
+2026-06-16 21:40:46,883 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6992, gate=0.2697, λ=0.02157→0.00582
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:26<00:37,  4.12s/it]2026-06-16 21:41:05,556 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7227, gate=0.2473, λ=0.01788→0.00442
+2026-06-16 21:41:07,460 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7227, gate=0.2473, λ=0.01788→0.00442
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:46<00:16,  4.13s/it]2026-06-16 21:41:26,199 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7500, gate=0.2227, λ=0.00907→0.00202
+2026-06-16 21:41:28,103 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7500, gate=0.2227, λ=0.00907→0.00202
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:03<00:00,  4.11s/it]
+2026-06-16 21:41:45,564 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:41:45,565 [INFO]   [FI] 生成完成总结
+2026-06-16 21:41:45,565 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:41:45,565 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:41:48,039 [INFO] [P-Flow] Done in 258.1s → outputs/v10_SVD_FI_10samples/sample_34/34.mp4
+2026-06-16 21:41:48,039 [INFO]   [SAMPLE SUMMARY] sample_id=34
+2026-06-16 21:41:48,039 [INFO]   [SAMPLE SUMMARY] full_caption=Puppies running and interacting on a gravel four playful puppies running and interacting on a gravel road. The setting is an open, grassy area with rolling hills in the background under a clear blue sky. The puppies appear to be of a similar breed, possibly huskies or a similar Arctic dog type, with white fur and some gray markings. They are energetically moving around each other, sometimes chasing one another and playfully biting at each other's tails and paws. The scene captures their lively and joyful behavior as they explore their surroundings.
+2026-06-16 21:41:48,039 [INFO]   [SAMPLE SUMMARY] caption_length=554 chars, word_count=92
+2026-06-16 21:41:48,039 [INFO]   [SAMPLE SUMMARY] elapsed=258.1s, output=outputs/v10_SVD_FI_10samples/sample_34/34.mp4
+  [8/10] 处理 43...
+2026-06-16 21:41:49,543 [INFO] [P-Flow] sample=43, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:41:52,007 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:41:54,317 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:41:54,318 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:41:54,318 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:22<01:43,  2.53s/it]2026-06-16 21:42:19,411 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0106, std=0.4902, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:48<01:20,  2.59s/it]2026-06-16 21:42:44,941 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0113, std=0.6055, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:13<00:52,  2.51s/it]2026-06-16 21:43:09,850 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0117, std=0.7461, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:38<00:27,  2.50s/it]2026-06-16 21:43:35,001 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0119, std=0.9141, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:02<00:02,  2.45s/it]2026-06-16 21:43:59,611 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0129, std=1.1094, cached=51 points
+2026-06-16 21:43:59,612 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0129, std=1.1094                        
+2026-06-16 21:43:59,612 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:43:59,618 [INFO]   [Inversion Quality] η_inv: std=1.1094, mean=0.0129, range=[-4.312, 4.250], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-16 21:43:59,618 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:43:59,630 [DEBUG]   [Stage1] Spatial: removed top-26 components
+2026-06-16 21:43:59,634 [DEBUG]   [Stage2] Temporal: kept top-9/21 components
+2026-06-16 21:43:59,635 [INFO]   η_temporal: mean=-0.0002, std=0.3945
+2026-06-16 21:43:59,635 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:43:59,635 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:43:59,635 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:43:59,635 [INFO]   iter 1/1: Cat walking along an orange and white charming scene of an o...
+2026-06-16 21:43:59,635 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3945, η_mixed std=0.9961, mean=-0.0010
+2026-06-16 21:43:59,636 [INFO]   [Blend Diag] cos(temporal, random)=-0.0001, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0250
+2026-06-16 21:43:59,636 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.025725 (越大越说明 temporal 有影响)
+2026-06-16 21:43:59,636 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:43:59,636 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:43:59,636 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:43:59,636 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:43:59,638 [INFO]   [Quality Scale] mean_cos=0.0645, threshold=0.05, scale=0.6147 (weak)
+2026-06-16 21:43:59,638 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.6147, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:43:59,638 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:24<01:38,  4.10s/it]2026-06-16 21:44:24,991 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5820, gate=0.3989, λ=0.01585→0.00632
+2026-06-16 21:44:26,898 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5703, gate=0.4130, λ=0.01585→0.00654
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:45<01:18,  4.12s/it]2026-06-16 21:44:45,594 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6172, gate=0.3576, λ=0.02715→0.00971
+2026-06-16 21:44:47,502 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6055, gate=0.3711, λ=0.02715→0.01008
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:05<00:57,  4.12s/it]2026-06-16 21:45:06,188 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6484, gate=0.3225, λ=0.03069→0.00990
+2026-06-16 21:45:08,095 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6484, gate=0.3225, λ=0.03069→0.00990
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:26<00:37,  4.14s/it]2026-06-16 21:45:26,878 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6797, gate=0.2894, λ=0.02544→0.00736
+2026-06-16 21:45:28,783 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6758, gate=0.2934, λ=0.02544→0.00746
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:47<00:16,  4.14s/it]2026-06-16 21:45:47,606 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7148, gate=0.2546, λ=0.01291→0.00329
+2026-06-16 21:45:49,512 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7109, gate=0.2583, λ=0.01291→0.00333
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:03<00:00,  4.13s/it]
+2026-06-16 21:46:06,995 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:46:06,995 [INFO]   [FI] 生成完成总结
+2026-06-16 21:46:06,995 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:46:06,995 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:46:09,425 [INFO] [P-Flow] Done in 259.9s → outputs/v10_SVD_FI_10samples/sample_43/43.mp4
+2026-06-16 21:46:09,425 [INFO]   [SAMPLE SUMMARY] sample_id=43
+2026-06-16 21:46:09,425 [INFO]   [SAMPLE SUMMARY] full_caption=Cat walking along an orange and white charming scene of an orange and white cat walking along a garden path. The path is lined with lush greenery, vibrant flowers, and colorful blooms in shades of pink, yellow, and red. The cat, with its bright eyes and fluffy tail, moves gracefully towards the camera, its ears perked up as it explores the surroundings. The background is softly blurred, emphasizing the cat's movement and the vivid colors of the garden. The overall atmosphere is serene and picturesque, capturing the beauty of nature and the playful spirit of the cat.
+2026-06-16 21:46:09,425 [INFO]   [SAMPLE SUMMARY] caption_length=572 chars, word_count=97
+2026-06-16 21:46:09,425 [INFO]   [SAMPLE SUMMARY] elapsed=259.9s, output=outputs/v10_SVD_FI_10samples/sample_43/43.mp4
+  [9/10] 处理 46...
+2026-06-16 21:46:10,931 [INFO] [P-Flow] sample=46, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:46:13,394 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:46:15,705 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:46:15,706 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:46:15,706 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:23<01:45,  2.57s/it]2026-06-16 21:46:41,336 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0082, std=0.4746, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:47<01:17,  2.49s/it]2026-06-16 21:47:06,015 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0056, std=0.5898, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:12<00:51,  2.47s/it]2026-06-16 21:47:30,608 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0030, std=0.7305, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:37<00:27,  2.49s/it]2026-06-16 21:47:55,336 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0001, std=0.8984, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:02<00:02,  2.57s/it]2026-06-16 21:48:21,029 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0026, std=1.0938, cached=51 points
+2026-06-16 21:48:21,029 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0026, std=1.0938                       
+2026-06-16 21:48:21,030 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:48:21,036 [INFO]   [Inversion Quality] η_inv: std=1.0938, mean=-0.0026, range=[-3.781, 3.562], cos_sim(η_inv, random)=-0.0011, cos_sim(η_inv, z0)=0.9766
+2026-06-16 21:48:21,036 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:48:21,048 [DEBUG]   [Stage1] Spatial: removed top-14 components
+2026-06-16 21:48:21,052 [DEBUG]   [Stage2] Temporal: kept top-15/21 components
+2026-06-16 21:48:21,052 [INFO]   η_temporal: mean=0.0007, std=0.3770
+2026-06-16 21:48:21,053 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:48:21,053 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:48:21,053 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:48:21,053 [INFO]   iter 1/1: Volcano erupting with dark smoke dramatic volcanic eruption ...
+2026-06-16 21:48:21,053 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3770, η_mixed std=0.9961, mean=-0.0003
+2026-06-16 21:48:21,054 [INFO]   [Blend Diag] cos(temporal, random)=0.0015, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0256
+2026-06-16 21:48:21,054 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024689 (越大越说明 temporal 有影响)
+2026-06-16 21:48:21,054 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:48:21,054 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:48:21,054 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:48:21,054 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:48:21,056 [INFO]   [Quality Scale] mean_cos=0.0020, threshold=0.05, scale=0.3493 (weak)
+2026-06-16 21:48:21,056 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.3493, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:48:21,056 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:24<01:38,  4.10s/it]2026-06-16 21:48:46,361 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6016, gate=0.3757, λ=0.00900→0.00338
+2026-06-16 21:48:48,266 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5938, gate=0.3849, λ=0.00900→0.00347
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:45<01:18,  4.12s/it]2026-06-16 21:49:06,962 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6367, gate=0.3355, λ=0.01543→0.00518
+2026-06-16 21:49:08,866 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6289, gate=0.3442, λ=0.01543→0.00531
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:05<00:57,  4.13s/it]2026-06-16 21:49:27,630 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6719, gate=0.2975, λ=0.01744→0.00519
+2026-06-16 21:49:29,533 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6641, gate=0.3057, λ=0.01744→0.00533
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:26<00:37,  4.14s/it]2026-06-16 21:49:48,300 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7109, gate=0.2583, λ=0.01445→0.00373
+2026-06-16 21:49:50,207 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7031, gate=0.2659, λ=0.01445→0.00384
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:47<00:16,  4.13s/it]2026-06-16 21:50:08,978 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7461, gate=0.2261, λ=0.00733→0.00166
+2026-06-16 21:50:10,882 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7461, gate=0.2261, λ=0.00733→0.00166
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:03<00:00,  4.12s/it]
+2026-06-16 21:50:28,336 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:50:28,337 [INFO]   [FI] 生成完成总结
+2026-06-16 21:50:28,337 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:50:28,337 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:50:30,764 [INFO] [P-Flow] Done in 259.8s → outputs/v10_SVD_FI_10samples/sample_46/46.mp4
+2026-06-16 21:50:30,764 [INFO]   [SAMPLE SUMMARY] sample_id=46
+2026-06-16 21:50:30,764 [INFO]   [SAMPLE SUMMARY] full_caption=Volcano erupting with dark smoke dramatic volcanic eruption set against a backdrop of lush green mountains and a body of water. The sequence begins with a large plume of dark smoke and ash rising into the sky, accompanied by bright blue lightning bolts that strike through the cloud. As the frames progress, the cloud of smoke becomes denser and more voluminous, expanding upwards and outwards. The surrounding landscape is bathed in a dim light, suggesting either early morning or late evening, adding to the ominous atmosphere of the scene. The ocean in the background remains calm, contrasting sharply with the intense activity of the lush green mountains, calm ocean
+2026-06-16 21:50:30,764 [INFO]   [SAMPLE SUMMARY] caption_length=670 chars, word_count=109
+2026-06-16 21:50:30,764 [INFO]   [SAMPLE SUMMARY] elapsed=259.8s, output=outputs/v10_SVD_FI_10samples/sample_46/46.mp4
+  [10/10] 处理 47...
+2026-06-16 21:50:32,329 [INFO] [P-Flow] sample=47, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-16 21:50:34,691 [INFO]   [Inversion] encoding reference → latent...
+2026-06-16 21:50:37,003 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-16 21:50:37,004 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-16 21:50:37,004 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|██████████████                                                                | 9/50 [00:22<01:45,  2.58s/it]2026-06-16 21:51:02,355 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0025, std=0.5391, cached=11 points
+Inversion + Trajectory:  38%|█████████████████████████████▎                                               | 19/50 [00:48<01:18,  2.54s/it]2026-06-16 21:51:27,932 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.0055, std=0.6602, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████████▋                                | 29/50 [01:13<00:51,  2.47s/it]2026-06-16 21:51:52,751 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0095, std=0.8125, cached=31 points
+Inversion + Trajectory:  78%|████████████████████████████████████████████████████████████                 | 39/50 [01:38<00:27,  2.48s/it]2026-06-16 21:52:17,660 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0129, std=0.9805, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████████████▍ | 49/50 [02:03<00:02,  2.53s/it]2026-06-16 21:52:42,909 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0143, std=1.1641, cached=51 points
+2026-06-16 21:52:42,910 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0143, std=1.1641                       
+2026-06-16 21:52:42,910 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-16 21:52:42,915 [INFO]   [Inversion Quality] η_inv: std=1.1641, mean=-0.0143, range=[-3.594, 4.281], cos_sim(η_inv, random)=-0.0010, cos_sim(η_inv, z0)=0.9766
+2026-06-16 21:52:42,915 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-16 21:52:42,928 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-16 21:52:42,932 [DEBUG]   [Stage2] Temporal: kept top-9/21 components
+2026-06-16 21:52:42,932 [INFO]   η_temporal: mean=-0.0003, std=0.3965
+2026-06-16 21:52:42,932 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-16 21:52:42,932 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-16 21:52:42,932 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-16 21:52:42,932 [INFO]   iter 1/1: Dogs running side by side across a reflective two animated d...
+2026-06-16 21:52:42,933 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3965, η_mixed std=0.9961, mean=-0.0001
+2026-06-16 21:52:42,933 [INFO]   [Blend Diag] cos(temporal, random)=-0.0004, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0249
+2026-06-16 21:52:42,933 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.025898 (越大越说明 temporal 有影响)
+2026-06-16 21:52:42,933 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:52:42,934 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-16 21:52:42,934 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:52:42,934 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:52:42,936 [INFO]   [Quality Scale] mean_cos=0.0575, threshold=0.05, scale=0.5836 (weak)
+2026-06-16 21:52:42,936 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5836, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-16 21:52:42,936 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|████████████████████▍                                                                                 | 6/30 [00:24<01:38,  4.12s/it]2026-06-16 21:53:08,145 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5469, gate=0.4417, λ=0.01504→0.00664
+2026-06-16 21:53:10,051 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5391, gate=0.4513, λ=0.01504→0.00679
+ 37%|█████████████████████████████████████                                                                | 11/30 [00:45<01:18,  4.15s/it]2026-06-16 21:53:28,933 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.5898, gate=0.3895, λ=0.02578→0.01004
+2026-06-16 21:53:30,840 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.5820, gate=0.3989, λ=0.02578→0.01028
+ 53%|█████████████████████████████████████████████████████▊                                               | 16/30 [01:05<00:57,  4.14s/it]2026-06-16 21:53:49,615 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6328, gate=0.3398, λ=0.02914→0.00990
+2026-06-16 21:53:51,526 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6289, gate=0.3442, λ=0.02914→0.01003
+ 70%|██████████████████████████████████████████████████████████████████████▋                              | 21/30 [01:26<00:37,  4.15s/it]2026-06-16 21:54:10,397 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6680, gate=0.3016, λ=0.02415→0.00728
+2026-06-16 21:54:12,306 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6602, gate=0.3099, λ=0.02415→0.00748
+ 87%|███████████████████████████████████████████████████████████████████████████████████████▌             | 26/30 [01:47<00:16,  4.15s/it]2026-06-16 21:54:31,149 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.6992, gate=0.2697, λ=0.01225→0.00330
+2026-06-16 21:54:33,059 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.6953, gate=0.2736, λ=0.01225→0.00335
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:03<00:00,  4.13s/it]
+2026-06-16 21:54:50,422 [INFO]   ═══════════════════════════════════════════════
+2026-06-16 21:54:50,423 [INFO]   [FI] 生成完成总结
+2026-06-16 21:54:50,423 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-16 21:54:50,423 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-16 21:54:52,948 [INFO] [P-Flow] Done in 260.6s → outputs/v10_SVD_FI_10samples/sample_47/47.mp4
+2026-06-16 21:54:52,948 [INFO]   [SAMPLE SUMMARY] sample_id=47
+2026-06-16 21:54:52,948 [INFO]   [SAMPLE SUMMARY] full_caption=Dogs running side by side across a reflective two animated dogs, one white and fluffy, and the other golden with a medium coat, running side by side across a reflective surface. The background is a futuristic cityscape with tall, transparent buildings outlined in blue and purple neon lights, creating a vibrant and modern atmosphere. The dogs appear to be enjoying themselves as they run, with their tails wagging and mouths open, suggesting they are happy or excited. The scene has a playful and dynamic feel, enhanced by the smooth motion of the dogs and the glowing city backdrop.
+2026-06-16 21:54:52,948 [INFO]   [SAMPLE SUMMARY] caption_length=584 chars, word_count=98
+2026-06-16 21:54:52,948 [INFO]   [SAMPLE SUMMARY] elapsed=260.6s, output=outputs/v10_SVD_FI_10samples/sample_47/47.mp4
+
+批量完成! 输出: outputs/v10_SVD_FI_10samples
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Found 10 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/10] 7 CLIP(o-t=0.3816, g-t=0.3762, o-g=0.9372) XCLIP(o-t=0.2661, g-t=0.2917, o-g=0.7681)
+[2/10] 17 CLIP(o-t=0.3145, g-t=0.3183, o-g=0.9227) XCLIP(o-t=0.2912, g-t=0.2498, o-g=0.8711)
+[3/10] 21 CLIP(o-t=0.3870, g-t=0.3783, o-g=0.9293) XCLIP(o-t=0.3032, g-t=0.2717, o-g=0.8253)
+[4/10] 31 CLIP(o-t=0.3096, g-t=0.2822, o-g=0.8697) XCLIP(o-t=0.2491, g-t=0.2510, o-g=0.6124)
+[5/10] 32 CLIP(o-t=0.3325, g-t=0.3423, o-g=0.9138) XCLIP(o-t=0.2750, g-t=0.3121, o-g=0.8076)
+[6/10] 33 CLIP(o-t=0.3258, g-t=0.3391, o-g=0.8555) XCLIP(o-t=0.1935, g-t=0.1921, o-g=0.8526)
+[7/10] 34 CLIP(o-t=0.3589, g-t=0.3559, o-g=0.9249) XCLIP(o-t=0.3060, g-t=0.2732, o-g=0.8791)
+[8/10] 43 CLIP(o-t=0.3566, g-t=0.3636, o-g=0.9652) XCLIP(o-t=0.2635, g-t=0.2500, o-g=0.9216)
+[9/10] 46 CLIP(o-t=0.2822, g-t=0.2553, o-g=0.8798) XCLIP(o-t=0.2426, g-t=0.2087, o-g=0.6967)
+[10/10] 47 CLIP(o-t=0.3929, g-t=0.3642, o-g=0.8905) XCLIP(o-t=0.3215, g-t=0.2848, o-g=0.8299)
+
+Evaluation complete!
+  Samples: 10
+  orig_gen_clip mean:  0.908856
+  orig_gen_xclip mean: 0.806449
+  CSV: outputs/v10_SVD_FI_10samples/eval_clip/clip_xclip_results.csv
+  Summary: outputs/v10_SVD_FI_10samples/eval_clip/eval_summary.md
+root@autodl-container-a4d74c9dd1-31db82ab:~/xixihaha/P-Flow# 

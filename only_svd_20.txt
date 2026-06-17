@@ -1,0 +1,567 @@
+root@autodl-container-a4d74c9dd1-31db82ab:~/xixihaha/P-Flow# cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/SVD_only_20samples \
+    --sample_ids 50 70 72 73 74 76 78 79 80 81 82 83 84 85 88 99 104 105 106 111 \
+    --inversion --svd --blend --alpha 0.004 \
+    --seed 42 --verbose --resume
+cd /root/xixihaha/P-Flow && python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/SVD_only_20samples \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/SVD_only_20samples/eval_clip
+2026-06-17 11:55:23,933 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_only_20samples/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.004)']
+  alpha=0.004, rho_s=0.1, rho_m=0.9
+
+2026-06-17 11:55:23,949 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 20 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.004)']
+
+  [1/20] 处理 50...
+2026-06-17 11:55:23,952 [INFO] [P-Flow] sample=50, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 11:55:26,060 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:55:26,076 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-17 11:55:26,076 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+Loading checkpoint shards: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5/5 [00:01<00:00,  3.66it/s]
+Loading checkpoint shards: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  7.05it/s]
+Loading pipeline components...: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  2.08it/s]
+2026-06-17 11:55:34,532 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-17 11:55:34,532 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-17 11:55:37,436 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 11:57:11,436 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=0.0078, range=[-3.703, 4.156], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805               
+2026-06-17 11:57:11,436 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:57:11,517 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-17 11:57:11,526 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-17 11:57:11,527 [INFO]   η_temporal: mean=-0.0004, std=0.3809
+2026-06-17 11:57:11,527 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:57:11,527 [INFO]   iter 1/1: The video features a white cat sitting inside the passenger ...
+2026-06-17 11:57:11,528 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3809, η_mixed std=0.9961, mean=0.0000
+2026-06-17 11:57:11,528 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0249
+2026-06-17 11:57:11,529 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024862 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 11:59:10,451 [INFO] [P-Flow] Done in 226.5s → outputs/SVD_only_20samples/sample_50/50.mp4
+2026-06-17 11:59:10,451 [INFO]   [SAMPLE SUMMARY] sample_id=50
+2026-06-17 11:59:10,451 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a white cat sitting inside the passenger seat of a car with the window open. The cat is wearing a blue collar and appears to be looking out of the window, observing the surroundings. The background shows a busy urban street with people walking by, some holding umbrellas, suggesting it might be a rainy day. The setting includes buildings with storefronts and signs, adding to the city atmosphere. The cat's expression seems calm and curious as it gazes outside.
+2026-06-17 11:59:10,451 [INFO]   [SAMPLE SUMMARY] caption_length=481 chars, word_count=82
+2026-06-17 11:59:10,451 [INFO]   [SAMPLE SUMMARY] elapsed=226.5s, output=outputs/SVD_only_20samples/sample_50/50.mp4
+  [2/20] 处理 70...
+2026-06-17 11:59:10,456 [INFO] [P-Flow] sample=70, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 11:59:12,359 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:59:14,689 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:00:49,155 [INFO]   [Inversion Quality] η_inv: std=1.0859, mean=0.0023, range=[-3.672, 4.188], cos_sim(η_inv, random)=-0.0011, cos_sim(η_inv, z0)=0.9805              
+2026-06-17 12:00:49,156 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:00:49,169 [DEBUG]   [Stage1] Spatial: removed top-20 components
+2026-06-17 12:00:49,174 [DEBUG]   [Stage2] Temporal: kept top-8/21 components
+2026-06-17 12:00:49,174 [INFO]   η_temporal: mean=-0.0004, std=0.3613
+2026-06-17 12:00:49,174 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:00:49,174 [INFO]   iter 1/1: The video features a person standing inside what appears to ...
+2026-06-17 12:00:49,175 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3613, η_mixed std=0.9961, mean=0.0017
+2026-06-17 12:00:49,175 [INFO]   [Blend Diag] cos(temporal, random)=0.0001, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0231
+2026-06-17 12:00:49,175 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.023653 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:02:48,226 [INFO] [P-Flow] Done in 217.8s → outputs/SVD_only_20samples/sample_70/70.mp4
+2026-06-17 12:02:48,226 [INFO]   [SAMPLE SUMMARY] sample_id=70
+2026-06-17 12:02:48,226 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a person standing inside what appears to be a train or subway car, as indicated by the blurred background and the window through which the scene is captured. The individual is wearing a white blouse and has long dark hair. The lighting suggests it might be evening or night, with artificial lights illuminating the interior of the vehicle. The background outside the window shows a cityscape with various lights and signs, indicating an urban environment. The overall atmosphere of the video conveys a sense of movement and travel, with the blurred motion of the background suggesting that the train is in motion.
+2026-06-17 12:02:48,226 [INFO]   [SAMPLE SUMMARY] caption_length=632 chars, word_count=105
+2026-06-17 12:02:48,226 [INFO]   [SAMPLE SUMMARY] elapsed=217.8s, output=outputs/SVD_only_20samples/sample_70/70.mp4
+  [3/20] 处理 72...
+2026-06-17 12:02:48,231 [INFO] [P-Flow] sample=72, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:02:50,152 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:02:52,491 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:04:27,130 [INFO]   [Inversion Quality] η_inv: std=0.8477, mean=0.1494, range=[-3.641, 3.828], cos_sim(η_inv, random)=-0.0000, cos_sim(η_inv, z0)=0.9609              
+2026-06-17 12:04:27,130 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:04:27,143 [DEBUG]   [Stage1] Spatial: removed top-28 components
+2026-06-17 12:04:27,148 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-17 12:04:27,148 [INFO]   η_temporal: mean=-0.0001, std=0.3145
+2026-06-17 12:04:27,148 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:04:27,148 [INFO]   iter 1/1: The video depicts an underwater scene that appears to be a s...
+2026-06-17 12:04:27,148 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3145, η_mixed std=0.9961, mean=0.0009
+2026-06-17 12:04:27,149 [INFO]   [Blend Diag] cos(temporal, random)=-0.0003, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0198
+2026-06-17 12:04:27,149 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.020805 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:06:26,195 [INFO] [P-Flow] Done in 218.0s → outputs/SVD_only_20samples/sample_72/72.mp4
+2026-06-17 12:06:26,195 [INFO]   [SAMPLE SUMMARY] sample_id=72
+2026-06-17 12:06:26,195 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts an underwater scene that appears to be a surreal and imaginative depiction of a coastal town submerged beneath the ocean's surface. The environment is rich with vibrant coral formations in various colors, including reds, oranges, pinks, and purples, which contrast beautifully against the sandy ocean floor. The water is clear, allowing for a view of the colorful corals and the sandy bottom.
+
+In the background, there are buildings that resemble houses or small structures, painted in pastel colors such as blue, pink, and yellow. These structures have white railings and windows, giving them a quaint and charming appearance. The buildings are partially submerged, with their upper parts visible above the waterline, creating an illusion that they are floating or emerging from the sea.
+
+The overall atmosphere is serene and whimsical, blending elements of a typical coastal town with the natural beauty of an underwater world. The lighting suggests it might be daytime, with sunlight filtering through the water, casting a soft glow on the scene. The video captures a unique and fantastical vision of a submerged community, where nature and human-made structures coexist in a dreamlike setting.
+2026-06-17 12:06:26,195 [INFO]   [SAMPLE SUMMARY] caption_length=1215 chars, word_count=190
+2026-06-17 12:06:26,195 [INFO]   [SAMPLE SUMMARY] elapsed=218.0s, output=outputs/SVD_only_20samples/sample_72/72.mp4
+  [4/20] 处理 73...
+2026-06-17 12:06:26,199 [INFO] [P-Flow] sample=73, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:06:28,105 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:06:30,439 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:08:05,037 [INFO]   [Inversion Quality] η_inv: std=0.8984, mean=0.0447, range=[-3.766, 3.281], cos_sim(η_inv, random)=-0.0003, cos_sim(η_inv, z0)=0.9727              
+2026-06-17 12:08:05,037 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:08:05,050 [DEBUG]   [Stage1] Spatial: removed top-15 components
+2026-06-17 12:08:05,055 [DEBUG]   [Stage2] Temporal: kept top-16/21 components
+2026-06-17 12:08:05,055 [INFO]   η_temporal: mean=0.0006, std=0.3105
+2026-06-17 12:08:05,055 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:08:05,055 [INFO]   iter 1/1: The video depicts an expansive, empty warehouse with high ce...
+2026-06-17 12:08:05,056 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3105, η_mixed std=0.9961, mean=0.0005
+2026-06-17 12:08:05,056 [INFO]   [Blend Diag] cos(temporal, random)=0.0008, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0206
+2026-06-17 12:08:05,056 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.020632 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:10:04,083 [INFO] [P-Flow] Done in 217.9s → outputs/SVD_only_20samples/sample_73/73.mp4
+2026-06-17 12:10:04,083 [INFO]   [SAMPLE SUMMARY] sample_id=73
+2026-06-17 12:10:04,083 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts an expansive, empty warehouse with high ceilings and large windows allowing natural light to flood in. The floor is clean and marked with yellow lines, suggesting it might be used for storage or industrial purposes. As the camera moves forward, the focus shifts from the empty space to a vibrant, lush garden that gradually fills the center of the frame. The garden is teeming with a variety of green plants, flowers, and foliage, creating a stark contrast against the industrial backdrop. The plants appear healthy and well-maintained, adding a touch of nature and tranquility to the otherwise stark environment. The transition from the barren warehouse to the thriving garden symbolizes growth, transformation, or the potential for nature to reclaim even the most urban spaces.
+2026-06-17 12:10:04,083 [INFO]   [SAMPLE SUMMARY] caption_length=797 chars, word_count=127
+2026-06-17 12:10:04,083 [INFO]   [SAMPLE SUMMARY] elapsed=217.9s, output=outputs/SVD_only_20samples/sample_73/73.mp4
+  [5/20] 处理 74...
+2026-06-17 12:10:04,088 [INFO] [P-Flow] sample=74, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:10:05,922 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:10:08,252 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:11:42,715 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=-0.0640, range=[-4.000, 4.844], cos_sim(η_inv, random)=0.0005, cos_sim(η_inv, z0)=0.9766              
+2026-06-17 12:11:42,715 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:11:42,728 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-17 12:11:42,733 [DEBUG]   [Stage2] Temporal: kept top-7/21 components
+2026-06-17 12:11:42,733 [INFO]   η_temporal: mean=0.0003, std=0.3594
+2026-06-17 12:11:42,733 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:11:42,733 [INFO]   iter 1/1: The video appears to depict a vibrant and lively scene, poss...
+2026-06-17 12:11:42,734 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3594, η_mixed std=0.9922, mean=0.0005
+2026-06-17 12:11:42,734 [INFO]   [Blend Diag] cos(temporal, random)=-0.0003, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0227
+2026-06-17 12:11:42,734 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.023653 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:13:41,741 [INFO] [P-Flow] Done in 217.7s → outputs/SVD_only_20samples/sample_74/74.mp4
+2026-06-17 12:13:41,741 [INFO]   [SAMPLE SUMMARY] sample_id=74
+2026-06-17 12:13:41,741 [INFO]   [SAMPLE SUMMARY] full_caption=The video appears to depict a vibrant and lively scene, possibly at a festive or celebratory event. The first frame shows a blurred image of what seems to be a street or alleyway adorned with red lanterns, suggesting a cultural or traditional setting, perhaps during a festival like Chinese New Year. The colorful lights and bokeh effect create a warm and festive atmosphere.
+
+In the subsequent frames, the focus shifts to a close-up of a flame, which is likely from a torch or firework. The flame is dynamic and vivid, with bright orange and yellow hues, indicating movement and intensity. The background remains out of focus, emphasizing the flame as the central element. This suggests that the video might be capturing a moment of excitement or celebration, possibly involving fire performances or fireworks.
+
+Overall, the video conveys a sense of energy and festivity through its use of light, color, and motion.
+2026-06-17 12:13:41,741 [INFO]   [SAMPLE SUMMARY] caption_length=916 chars, word_count=151
+2026-06-17 12:13:41,741 [INFO]   [SAMPLE SUMMARY] elapsed=217.7s, output=outputs/SVD_only_20samples/sample_74/74.mp4
+  [6/20] 处理 76...
+2026-06-17 12:13:41,746 [INFO] [P-Flow] sample=76, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:13:43,618 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:13:45,950 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:15:20,557 [INFO]   [Inversion Quality] η_inv: std=0.9961, mean=0.0830, range=[-3.500, 4.781], cos_sim(η_inv, random)=0.0010, cos_sim(η_inv, z0)=0.9766               
+2026-06-17 12:15:20,558 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:15:20,571 [DEBUG]   [Stage1] Spatial: removed top-11 components
+2026-06-17 12:15:20,575 [DEBUG]   [Stage2] Temporal: kept top-10/21 components
+2026-06-17 12:15:20,576 [INFO]   η_temporal: mean=0.0009, std=0.3379
+2026-06-17 12:15:20,576 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:15:20,576 [INFO]   iter 1/1: The video showcases an underwater scene featuring a vibrant ...
+2026-06-17 12:15:20,576 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3379, η_mixed std=0.9961, mean=0.0003
+2026-06-17 12:15:20,577 [INFO]   [Blend Diag] cos(temporal, random)=-0.0000, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0215
+2026-06-17 12:15:20,577 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022272 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:17:19,645 [INFO] [P-Flow] Done in 217.9s → outputs/SVD_only_20samples/sample_76/76.mp4
+2026-06-17 12:17:19,645 [INFO]   [SAMPLE SUMMARY] sample_id=76
+2026-06-17 12:17:19,645 [INFO]   [SAMPLE SUMMARY] full_caption=The video showcases an underwater scene featuring a vibrant and colorful coral reef tunnel. The tunnel is illuminated by natural light filtering through from above, creating a mesmerizing play of colors on the sandy floor and the textured walls of the reef. The walls are adorned with various types of coral, showcasing a rich palette of reds, yellows, oranges, and pinks. 
+
+In the foreground, there is a large, translucent pink structure that appears to be part of the reef or possibly a man-made object, adding an element of intrigue to the scene. Several fish swim gracefully through the tunnel, their movements smooth and fluid. The water is clear, allowing for a detailed view of the underwater environment.
+
+The overall atmosphere is serene and captivating, highlighting the beauty and diversity of marine life and the intricate ecosystem of the coral reef. The video captures the essence of an underwater world teeming with life and color.
+2026-06-17 12:17:19,645 [INFO]   [SAMPLE SUMMARY] caption_length=946 chars, word_count=154
+2026-06-17 12:17:19,645 [INFO]   [SAMPLE SUMMARY] elapsed=217.9s, output=outputs/SVD_only_20samples/sample_76/76.mp4
+  [7/20] 处理 78...
+2026-06-17 12:17:19,650 [INFO] [P-Flow] sample=78, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:17:21,530 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:17:23,861 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:18:58,479 [INFO]   [Inversion Quality] η_inv: std=1.1875, mean=-0.0006, range=[-3.984, 4.469], cos_sim(η_inv, random)=-0.0003, cos_sim(η_inv, z0)=0.9805             
+2026-06-17 12:18:58,479 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:18:58,493 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-17 12:18:58,498 [DEBUG]   [Stage2] Temporal: kept top-11/21 components
+2026-06-17 12:18:58,498 [INFO]   η_temporal: mean=0.0008, std=0.3965
+2026-06-17 12:18:58,498 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:18:58,498 [INFO]   iter 1/1: The video depicts a tunnel that has been transformed into a ...
+2026-06-17 12:18:58,499 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3965, η_mixed std=0.9922, mean=-0.0006
+2026-06-17 12:18:58,499 [INFO]   [Blend Diag] cos(temporal, random)=-0.0002, cos(mixed, random)=0.9961, cos(mixed, temporal)=0.0251
+2026-06-17 12:18:58,500 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.025898 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:20:57,456 [INFO] [P-Flow] Done in 217.8s → outputs/SVD_only_20samples/sample_78/78.mp4
+2026-06-17 12:20:57,456 [INFO]   [SAMPLE SUMMARY] sample_id=78
+2026-06-17 12:20:57,456 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a tunnel that has been transformed into a lush, green passageway. The walls of the tunnel are covered with dense foliage, creating a natural archway over the path. The ground inside the tunnel is paved and marked with white lines, suggesting it might be used for pedestrian or bicycle traffic. As the camera moves forward, the tunnel opens up to reveal a bright, sunlit area outside, where more greenery and trees can be seen. The transition from the enclosed, shadowy tunnel to the open, sunny exit creates a striking contrast in both light and atmosphere. The overall effect is serene and inviting, as if the tunnel has become a hidden passage into nature.
+2026-06-17 12:20:57,456 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=116
+2026-06-17 12:20:57,456 [INFO]   [SAMPLE SUMMARY] elapsed=217.8s, output=outputs/SVD_only_20samples/sample_78/78.mp4
+  [8/20] 处理 79...
+2026-06-17 12:20:57,461 [INFO] [P-Flow] sample=79, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:20:59,297 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:21:01,633 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:22:36,181 [INFO]   [Inversion Quality] η_inv: std=0.9883, mean=-0.0049, range=[-3.609, 4.438], cos_sim(η_inv, random)=-0.0010, cos_sim(η_inv, z0)=0.9766             
+2026-06-17 12:22:36,182 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:22:36,195 [DEBUG]   [Stage1] Spatial: removed top-18 components
+2026-06-17 12:22:36,199 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-17 12:22:36,200 [INFO]   η_temporal: mean=0.0001, std=0.3242
+2026-06-17 12:22:36,200 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:22:36,200 [INFO]   iter 1/1: The video depicts a vintage steam locomotive traveling throu...
+2026-06-17 12:22:36,200 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3242, η_mixed std=0.9961, mean=-0.0002
+2026-06-17 12:22:36,201 [INFO]   [Blend Diag] cos(temporal, random)=0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0211
+2026-06-17 12:22:36,201 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021409 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:24:35,222 [INFO] [P-Flow] Done in 217.8s → outputs/SVD_only_20samples/sample_79/79.mp4
+2026-06-17 12:24:35,222 [INFO]   [SAMPLE SUMMARY] sample_id=79
+2026-06-17 12:24:35,222 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a vintage steam locomotive traveling through a narrow, historic street flanked by old stone buildings. The train is black with a prominent front headlight and a circular design on its front, giving it a classic appearance. The surrounding architecture features aged walls with ivy climbing up some of them, adding to the historical ambiance. The street is paved with cobblestones, and there are lampposts lining the sides, suggesting an older urban setting. The train moves steadily along the tracks, which curve gently as they pass between the buildings. The lighting suggests it might be late afternoon or early evening, casting long shadows and creating a warm, nostalgic atmosphere.
+2026-06-17 12:24:35,223 [INFO]   [SAMPLE SUMMARY] caption_length=704 chars, word_count=111
+2026-06-17 12:24:35,223 [INFO]   [SAMPLE SUMMARY] elapsed=217.8s, output=outputs/SVD_only_20samples/sample_79/79.mp4
+  [9/20] 处理 80...
+2026-06-17 12:24:35,227 [INFO] [P-Flow] sample=80, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:24:37,093 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:24:39,428 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:26:14,052 [INFO]   [Inversion Quality] η_inv: std=1.1250, mean=0.0386, range=[-4.656, 4.156], cos_sim(η_inv, random)=0.0013, cos_sim(η_inv, z0)=0.9805               
+2026-06-17 12:26:14,053 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:26:14,066 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-17 12:26:14,070 [DEBUG]   [Stage2] Temporal: kept top-17/21 components
+2026-06-17 12:26:14,071 [INFO]   η_temporal: mean=-0.0004, std=0.3691
+2026-06-17 12:26:14,071 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:26:14,071 [INFO]   iter 1/1: The video features a close-up view of a dandelion seed head,...
+2026-06-17 12:26:14,071 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3691, η_mixed std=0.9961, mean=-0.0003
+2026-06-17 12:26:14,072 [INFO]   [Blend Diag] cos(temporal, random)=-0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0231
+2026-06-17 12:26:14,072 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024171 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:28:13,140 [INFO] [P-Flow] Done in 217.9s → outputs/SVD_only_20samples/sample_80/80.mp4
+2026-06-17 12:28:13,140 [INFO]   [SAMPLE SUMMARY] sample_id=80
+2026-06-17 12:28:13,140 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a close-up view of a dandelion seed head, showcasing its intricate structure and delicate white seeds. The camera remains stationary throughout the sequence, focusing on the central part of the seed head where the seeds are attached to thin, feathery stems. The background is a dark green, which contrasts sharply with the light color of the seeds, making them stand out prominently. The lighting highlights the texture and fine details of the seeds, giving a sense of depth and dimension to the image. There is no movement or action other than the subtle changes in focus that slightly alter the clarity and sharpness of the seeds as the camera adjusts its focus.
+2026-06-17 12:28:13,140 [INFO]   [SAMPLE SUMMARY] caption_length=683 chars, word_count=115
+2026-06-17 12:28:13,141 [INFO]   [SAMPLE SUMMARY] elapsed=217.9s, output=outputs/SVD_only_20samples/sample_80/80.mp4
+  [10/20] 处理 81...
+2026-06-17 12:28:13,145 [INFO] [P-Flow] sample=81, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:28:15,049 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:28:17,381 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:29:51,989 [INFO]   [Inversion Quality] η_inv: std=0.9727, mean=-0.0282, range=[-3.438, 3.781], cos_sim(η_inv, random)=0.0001, cos_sim(η_inv, z0)=0.9766              
+2026-06-17 12:29:51,989 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:29:52,003 [DEBUG]   [Stage1] Spatial: removed top-22 components
+2026-06-17 12:29:52,007 [DEBUG]   [Stage2] Temporal: kept top-14/21 components
+2026-06-17 12:29:52,007 [INFO]   η_temporal: mean=-0.0001, std=0.3359
+2026-06-17 12:29:52,007 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:29:52,007 [INFO]   iter 1/1: The video depicts the interior of a moving train or subway c...
+2026-06-17 12:29:52,008 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3359, η_mixed std=0.9961, mean=-0.0011
+2026-06-17 12:29:52,008 [INFO]   [Blend Diag] cos(temporal, random)=-0.0000, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0215
+2026-06-17 12:29:52,008 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022272 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:31:51,203 [INFO] [P-Flow] Done in 218.1s → outputs/SVD_only_20samples/sample_81/81.mp4
+2026-06-17 12:31:51,203 [INFO]   [SAMPLE SUMMARY] sample_id=81
+2026-06-17 12:31:51,203 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts the interior of a moving train or subway car. The seats are dark-colored, and there are metal handrails along the sides. Through the windows, the outside scenery is blurred due to the motion of the train, indicating that it is in transit. The lighting inside the train appears natural, likely coming from the windows, and gives the scene a slightly muted tone. There are a few passengers visible, including one person sitting towards the back of the car. The overall atmosphere suggests a typical commute with a focus on the movement and the environment within the train.
+2026-06-17 12:31:51,203 [INFO]   [SAMPLE SUMMARY] caption_length=589 chars, word_count=100
+2026-06-17 12:31:51,203 [INFO]   [SAMPLE SUMMARY] elapsed=218.1s, output=outputs/SVD_only_20samples/sample_81/81.mp4
+  [11/20] 处理 82...
+2026-06-17 12:31:51,208 [INFO] [P-Flow] sample=82, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:31:53,156 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:31:55,489 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:33:30,110 [INFO]   [Inversion Quality] η_inv: std=0.9727, mean=-0.0820, range=[-3.844, 3.812], cos_sim(η_inv, random)=0.0002, cos_sim(η_inv, z0)=0.9805              
+2026-06-17 12:33:30,110 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:33:30,123 [DEBUG]   [Stage1] Spatial: removed top-15 components
+2026-06-17 12:33:30,128 [DEBUG]   [Stage2] Temporal: kept top-13/21 components
+2026-06-17 12:33:30,128 [INFO]   η_temporal: mean=-0.0002, std=0.3262
+2026-06-17 12:33:30,128 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:33:30,128 [INFO]   iter 1/1: The video depicts a dimly lit alleyway at night, illuminated...
+2026-06-17 12:33:30,129 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3262, η_mixed std=0.9961, mean=0.0007
+2026-06-17 12:33:30,129 [INFO]   [Blend Diag] cos(temporal, random)=0.0002, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0210
+2026-06-17 12:33:30,129 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021581 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:35:29,110 [INFO] [P-Flow] Done in 217.9s → outputs/SVD_only_20samples/sample_82/82.mp4
+2026-06-17 12:35:29,110 [INFO]   [SAMPLE SUMMARY] sample_id=82
+2026-06-17 12:35:29,110 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a dimly lit alleyway at night, illuminated by a single light source that casts a warm glow over the scene. The walls of the alley are weathered and show signs of wear, with peeling paint and graffiti. One wall prominently features the word "Runway" written in bold, black spray paint, which appears to be dripping down slightly. The alley is narrow, with buildings on either side, and the ground looks uneven and littered with debris. As the camera moves forward, it captures more of the graffiti-covered walls and the overall desolate atmosphere of the area. The lighting creates long shadows and enhances the eerie ambiance of the setting.
+2026-06-17 12:35:29,111 [INFO]   [SAMPLE SUMMARY] caption_length=659 chars, word_count=111
+2026-06-17 12:35:29,111 [INFO]   [SAMPLE SUMMARY] elapsed=217.9s, output=outputs/SVD_only_20samples/sample_82/82.mp4
+  [12/20] 处理 83...
+2026-06-17 12:35:29,115 [INFO] [P-Flow] sample=83, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:35:30,981 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:35:33,311 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:37:07,754 [INFO]   [Inversion Quality] η_inv: std=1.2344, mean=0.0233, range=[-3.891, 4.031], cos_sim(η_inv, random)=0.0006, cos_sim(η_inv, z0)=0.9883               
+2026-06-17 12:37:07,754 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:37:07,768 [DEBUG]   [Stage1] Spatial: removed top-2 components
+2026-06-17 12:37:07,772 [DEBUG]   [Stage2] Temporal: kept top-8/21 components
+2026-06-17 12:37:07,772 [INFO]   η_temporal: mean=0.0188, std=0.4258
+2026-06-17 12:37:07,772 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:37:07,772 [INFO]   iter 1/1: The video depicts a person standing on a snowy mountain peak...
+2026-06-17 12:37:07,773 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.4258, η_mixed std=0.9961, mean=0.0001
+2026-06-17 12:37:07,773 [INFO]   [Blend Diag] cos(temporal, random)=-0.0008, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0265
+2026-06-17 12:37:07,773 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.027624 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:39:06,711 [INFO] [P-Flow] Done in 217.6s → outputs/SVD_only_20samples/sample_83/83.mp4
+2026-06-17 12:39:06,711 [INFO]   [SAMPLE SUMMARY] sample_id=83
+2026-06-17 12:39:06,711 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a person standing on a snowy mountain peak under a clear blue sky. The individual is dressed in winter gear, including an orange jacket, dark pants, gloves, and a beanie, suggesting they are prepared for cold weather. They have a backpack on their back, indicating they might be on a hike or expedition. The sun is shining brightly in the sky, casting shadows on the snow-covered landscape. The surrounding area features expansive snowfields with gentle slopes and distant mountain peaks, creating a serene and majestic alpine setting. The person appears to be enjoying the view, as they raise their arms outstretched in one of the frames, possibly celebrating or simply taking in the beauty of the surroundings. The overall atmosphere is one of adventure and tranquility in a remote, high-altitude environment.
+2026-06-17 12:39:06,711 [INFO]   [SAMPLE SUMMARY] caption_length=829 chars, word_count=134
+2026-06-17 12:39:06,711 [INFO]   [SAMPLE SUMMARY] elapsed=217.6s, output=outputs/SVD_only_20samples/sample_83/83.mp4
+  [13/20] 处理 84...
+2026-06-17 12:39:06,716 [INFO] [P-Flow] sample=84, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:39:08,542 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:39:10,874 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:40:45,422 [INFO]   [Inversion Quality] η_inv: std=1.2109, mean=-0.0442, range=[-4.219, 4.438], cos_sim(η_inv, random)=-0.0002, cos_sim(η_inv, z0)=0.9766             
+2026-06-17 12:40:45,422 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:40:45,435 [DEBUG]   [Stage1] Spatial: removed top-16 components
+2026-06-17 12:40:45,440 [DEBUG]   [Stage2] Temporal: kept top-9/21 components
+2026-06-17 12:40:45,440 [INFO]   η_temporal: mean=-0.0000, std=0.3945
+2026-06-17 12:40:45,440 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:40:45,440 [INFO]   iter 1/1: The video begins with a view through an open doorway, reveal...
+2026-06-17 12:40:45,440 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3945, η_mixed std=0.9961, mean=0.0000
+2026-06-17 12:40:45,441 [INFO]   [Blend Diag] cos(temporal, random)=0.0004, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0256
+2026-06-17 12:40:45,441 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.025725 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:42:44,502 [INFO] [P-Flow] Done in 217.8s → outputs/SVD_only_20samples/sample_84/84.mp4
+2026-06-17 12:42:44,503 [INFO]   [SAMPLE SUMMARY] sample_id=84
+2026-06-17 12:42:44,503 [INFO]   [SAMPLE SUMMARY] full_caption=The video begins with a view through an open doorway, revealing a serene outdoor scene featuring a waterfall cascading down a rocky cliff into a tranquil pool of water. The surrounding area is lush with greenery, and the sky above is bright, suggesting a sunny day. The camera then transitions to the interior of a room, showing a modern living space with wooden flooring and large windows that frame the natural landscape outside. The room is minimally furnished with a few pieces of contemporary furniture, including a sofa and a coffee table. The lighting inside the room is warm and inviting, creating a cozy atmosphere. The camera pans around the room, capturing the details of the interior design and the view through the windows. The overall ambiance of the video is peaceful and relaxing, blending indoor comfort with the beauty of nature.
+2026-06-17 12:42:44,503 [INFO]   [SAMPLE SUMMARY] caption_length=847 chars, word_count=142
+2026-06-17 12:42:44,503 [INFO]   [SAMPLE SUMMARY] elapsed=217.8s, output=outputs/SVD_only_20samples/sample_84/84.mp4
+  [14/20] 处理 85...
+2026-06-17 12:42:44,507 [INFO] [P-Flow] sample=85, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:42:46,423 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:42:48,757 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:44:23,149 [INFO]   [Inversion Quality] η_inv: std=1.0859, mean=-0.0874, range=[-3.750, 4.125], cos_sim(η_inv, random)=0.0001, cos_sim(η_inv, z0)=0.9766              
+2026-06-17 12:44:23,150 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:44:23,163 [DEBUG]   [Stage1] Spatial: removed top-19 components
+2026-06-17 12:44:23,167 [DEBUG]   [Stage2] Temporal: kept top-7/21 components
+2026-06-17 12:44:23,167 [INFO]   η_temporal: mean=0.0001, std=0.3496
+2026-06-17 12:44:23,168 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:44:23,168 [INFO]   iter 1/1: The video appears to be a first-person perspective sequence,...
+2026-06-17 12:44:23,168 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3496, η_mixed std=0.9961, mean=-0.0005
+2026-06-17 12:44:23,168 [INFO]   [Blend Diag] cos(temporal, random)=-0.0004, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0220
+2026-06-17 12:44:23,169 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022963 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:46:22,146 [INFO] [P-Flow] Done in 217.6s → outputs/SVD_only_20samples/sample_85/85.mp4
+2026-06-17 12:46:22,147 [INFO]   [SAMPLE SUMMARY] sample_id=85
+2026-06-17 12:46:22,147 [INFO]   [SAMPLE SUMMARY] full_caption=The video appears to be a first-person perspective sequence, likely from a video game or simulation. The scenes transition through various environments:
+
+1. **Initial Scene**: The video begins with a dimly lit room where a person is typing on a keyboard. The lighting is low, and the focus is on the hands and the keyboard, suggesting a setting that could be a home office or a quiet workspace.
+
+2. **Transition to a Doorway**: The scene shifts to a doorway, where the person seems to be exiting a building. The lighting changes to a warmer tone, indicating a different time of day or a change in environment. The person's hand is visible as they open the door, and the camera follows them outside.
+
+3. **Outdoor Scene**: The person steps out into what looks like a residential area during daylight hours. The surroundings include a house with siding, a porch, and some greenery. The person walks quickly, and the camera movement suggests urgency or haste. The outdoor environment is well-lit, contrasting with the previous indoor scene.
+
+4. **Final Scene**: The video ends with the person running down a grassy path, possibly in a suburban neighborhood. The motion blur indicates rapid movement, and the background shows houses and trees, reinforcing the suburban setting. The person continues running towards an open area, possibly a driveway or street, with the camera following their movement closely.
+
+Overall, the video captures a sequence of actions that suggest a narrative of someone moving from an indoor space to an outdoor environment, possibly in a hurry or escaping something.
+2026-06-17 12:46:22,147 [INFO]   [SAMPLE SUMMARY] caption_length=1590 chars, word_count=260
+2026-06-17 12:46:22,147 [INFO]   [SAMPLE SUMMARY] elapsed=217.6s, output=outputs/SVD_only_20samples/sample_85/85.mp4
+  [15/20] 处理 88...
+2026-06-17 12:46:22,151 [INFO] [P-Flow] sample=88, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:46:24,014 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:46:26,348 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:48:01,001 [INFO]   [Inversion Quality] η_inv: std=0.8477, mean=-0.0142, range=[-2.969, 3.891], cos_sim(η_inv, random)=0.0001, cos_sim(η_inv, z0)=0.9648              
+2026-06-17 12:48:01,001 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:48:01,014 [DEBUG]   [Stage1] Spatial: removed top-20 components
+2026-06-17 12:48:01,018 [DEBUG]   [Stage2] Temporal: kept top-11/21 components
+2026-06-17 12:48:01,019 [INFO]   η_temporal: mean=0.0003, std=0.2910
+2026-06-17 12:48:01,019 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:48:01,019 [INFO]   iter 1/1: The video depicts a narrow alleyway between old, weathered b...
+2026-06-17 12:48:01,019 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.2910, η_mixed std=0.9961, mean=0.0009
+2026-06-17 12:48:01,020 [INFO]   [Blend Diag] cos(temporal, random)=-0.0001, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0186
+2026-06-17 12:48:01,020 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.019423 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:50:00,093 [INFO] [P-Flow] Done in 217.9s → outputs/SVD_only_20samples/sample_88/88.mp4
+2026-06-17 12:50:00,093 [INFO]   [SAMPLE SUMMARY] sample_id=88
+2026-06-17 12:50:00,093 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a narrow alleyway between old, weathered buildings under a stormy sky. The scene is chaotic and intense, with large waves of water crashing through the alley, creating a sense of urgency and danger. The water appears dirty and turbulent, suggesting it might be a flood or a sudden surge of water. Debris, including pieces of wood and other objects, is scattered along the sides of the alley, adding to the disarray. The sky is filled with dark, ominous clouds, enhancing the dramatic and foreboding atmosphere of the scene. The overall mood is one of destruction and the overwhelming power of nature.
+2026-06-17 12:50:00,093 [INFO]   [SAMPLE SUMMARY] caption_length=618 chars, word_count=104
+2026-06-17 12:50:00,094 [INFO]   [SAMPLE SUMMARY] elapsed=217.9s, output=outputs/SVD_only_20samples/sample_88/88.mp4
+  [16/20] 处理 99...
+2026-06-17 12:50:00,098 [INFO] [P-Flow] sample=99, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:50:02,003 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:50:04,340 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:51:39,102 [INFO]   [Inversion Quality] η_inv: std=1.0312, mean=0.0361, range=[-3.672, 3.797], cos_sim(η_inv, random)=0.0001, cos_sim(η_inv, z0)=0.9766               
+2026-06-17 12:51:39,102 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:51:39,115 [DEBUG]   [Stage1] Spatial: removed top-11 components
+2026-06-17 12:51:39,120 [DEBUG]   [Stage2] Temporal: kept top-17/21 components
+2026-06-17 12:51:39,120 [INFO]   η_temporal: mean=0.0005, std=0.3633
+2026-06-17 12:51:39,120 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:51:39,120 [INFO]   iter 1/1: The video depicts a striking and surreal scene set in an urb...
+2026-06-17 12:51:39,120 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3633, η_mixed std=0.9961, mean=0.0002
+2026-06-17 12:51:39,121 [INFO]   [Blend Diag] cos(temporal, random)=-0.0000, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0232
+2026-06-17 12:51:39,121 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.023826 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:53:38,108 [INFO] [P-Flow] Done in 218.0s → outputs/SVD_only_20samples/sample_99/99.mp4
+2026-06-17 12:53:38,108 [INFO]   [SAMPLE SUMMARY] sample_id=99
+2026-06-17 12:53:38,108 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a striking and surreal scene set in an urban environment, likely a city with tall skyscrapers. The central figure is a person dressed entirely in black, including a long cloak that drapes over their head, creating an eerie and mysterious silhouette. The person's face is obscured by the cloak, adding to the enigmatic atmosphere.
+
+As the camera pans around the figure, it captures the towering buildings surrounding them, which appear to be modern high-rise structures with reflective glass facades. The sky above is clear with a few scattered clouds, suggesting a bright day. The overall mood of the video is both dramatic and contemplative, with the figure standing out starkly against the backdrop of the cityscape. The lighting emphasizes the contrast between the dark figure and the bright, sunlit sky, enhancing the visual impact of the scene.
+2026-06-17 12:53:38,108 [INFO]   [SAMPLE SUMMARY] caption_length=867 chars, word_count=140
+2026-06-17 12:53:38,108 [INFO]   [SAMPLE SUMMARY] elapsed=218.0s, output=outputs/SVD_only_20samples/sample_99/99.mp4
+  [17/20] 处理 104...
+2026-06-17 12:53:38,113 [INFO] [P-Flow] sample=104, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:53:40,030 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:53:42,357 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:55:16,647 [INFO]   [Inversion Quality] η_inv: std=1.3828, mean=0.3066, range=[-3.188, 3.422], cos_sim(η_inv, random)=-0.0000, cos_sim(η_inv, z0)=0.9805              
+2026-06-17 12:55:16,647 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:55:16,662 [DEBUG]   [Stage1] Spatial: removed top-1 components
+2026-06-17 12:55:16,667 [DEBUG]   [Stage2] Temporal: kept top-3/21 components
+2026-06-17 12:55:16,667 [INFO]   η_temporal: mean=0.0522, std=0.5156
+2026-06-17 12:55:16,667 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:55:16,667 [INFO]   iter 1/1: The video features a blue, furry creature with a playful and...
+2026-06-17 12:55:16,668 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.5156, η_mixed std=0.9961, mean=0.0037
+2026-06-17 12:55:16,668 [INFO]   [Blend Diag] cos(temporal, random)=-0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0327
+2026-06-17 12:55:16,668 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.033494 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 12:57:15,549 [INFO] [P-Flow] Done in 217.4s → outputs/SVD_only_20samples/sample_104/104.mp4
+2026-06-17 12:57:15,549 [INFO]   [SAMPLE SUMMARY] sample_id=104
+2026-06-17 12:57:15,549 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a blue, furry creature with a playful and animated demeanor. The creature has a round head, large eyes, and a small black nose. It is standing upright on two legs and appears to be dancing or moving rhythmically. Its arms are raised and moving in a lively manner, suggesting it is enjoying itself. The background is a plain light blue color, which helps to highlight the vibrant blue of the creature. The overall atmosphere of the video is cheerful and whimsical.
+2026-06-17 12:57:15,549 [INFO]   [SAMPLE SUMMARY] caption_length=482 chars, word_count=84
+2026-06-17 12:57:15,549 [INFO]   [SAMPLE SUMMARY] elapsed=217.4s, output=outputs/SVD_only_20samples/sample_104/104.mp4
+  [18/20] 处理 105...
+2026-06-17 12:57:15,554 [INFO] [P-Flow] sample=105, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 12:57:17,431 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 12:57:19,766 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 12:58:54,413 [INFO]   [Inversion Quality] η_inv: std=1.1094, mean=0.0170, range=[-3.781, 4.406], cos_sim(η_inv, random)=-0.0014, cos_sim(η_inv, z0)=0.9844              
+2026-06-17 12:58:54,413 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 12:58:54,426 [DEBUG]   [Stage1] Spatial: removed top-10 components
+2026-06-17 12:58:54,431 [DEBUG]   [Stage2] Temporal: kept top-13/21 components
+2026-06-17 12:58:54,431 [INFO]   η_temporal: mean=0.0005, std=0.3750
+2026-06-17 12:58:54,431 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 12:58:54,431 [INFO]   iter 1/1: The video depicts a vibrant, neon-lit forest scene at night....
+2026-06-17 12:58:54,432 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3750, η_mixed std=0.9961, mean=0.0008
+2026-06-17 12:58:54,432 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0247
+2026-06-17 12:58:54,432 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024517 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.77s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 13:00:52,926 [INFO] [P-Flow] Done in 217.4s → outputs/SVD_only_20samples/sample_105/105.mp4
+2026-06-17 13:00:52,927 [INFO]   [SAMPLE SUMMARY] sample_id=105
+2026-06-17 13:00:52,927 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a vibrant, neon-lit forest scene at night. The trees and plants are illuminated with bright, glowing colors such as pink, blue, and green, creating a surreal and otherworldly atmosphere. The ground is covered with a mix of grass and smaller vegetation, also bathed in the same neon hues. The sky above is dark, providing a stark contrast to the vivid colors below. The overall effect is reminiscent of a magical or fantastical environment, possibly from a video game or animated film. The scene is static, with no visible movement or characters present, focusing solely on the striking visual display of the glowing flora.
+2026-06-17 13:00:52,927 [INFO]   [SAMPLE SUMMARY] caption_length=640 chars, word_count=106
+2026-06-17 13:00:52,927 [INFO]   [SAMPLE SUMMARY] elapsed=217.4s, output=outputs/SVD_only_20samples/sample_105/105.mp4
+  [19/20] 处理 106...
+2026-06-17 13:00:52,932 [INFO] [P-Flow] sample=106, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 13:00:54,821 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 13:00:57,165 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 13:02:32,588 [INFO]   [Inversion Quality] η_inv: std=0.9336, mean=0.0466, range=[-3.641, 3.938], cos_sim(η_inv, random)=0.0000, cos_sim(η_inv, z0)=0.9648               
+2026-06-17 13:02:32,589 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 13:02:32,602 [DEBUG]   [Stage1] Spatial: removed top-29 components
+2026-06-17 13:02:32,606 [DEBUG]   [Stage2] Temporal: kept top-11/21 components
+2026-06-17 13:02:32,607 [INFO]   η_temporal: mean=-0.0001, std=0.3203
+2026-06-17 13:02:32,607 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 13:02:32,607 [INFO]   iter 1/1: The video depicts a dynamic and chaotic scene set in an urba...
+2026-06-17 13:02:32,607 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3203, η_mixed std=0.9961, mean=-0.0009
+2026-06-17 13:02:32,608 [INFO]   [Blend Diag] cos(temporal, random)=-0.0010, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0194
+2026-06-17 13:02:32,608 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021150 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:54<00:00,  3.81s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 13:04:31,963 [INFO] [P-Flow] Done in 219.0s → outputs/SVD_only_20samples/sample_106/106.mp4
+2026-06-17 13:04:31,963 [INFO]   [SAMPLE SUMMARY] sample_id=106
+2026-06-17 13:04:31,963 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a dynamic and chaotic scene set in an urban alleyway. The environment is gritty, with walls covered in graffiti and debris scattered on the ground. The focal point of the video is a swirling vortex made up of shattered glass, which appears to be moving rapidly through the alley. The glass fragments are depicted in various shades of blue and green, creating a mesmerizing and somewhat surreal effect as they swirl and disperse. The camera follows the vortex closely, giving the viewer a sense of being pulled into the scene. The overall atmosphere is intense and somewhat unsettling, with the rapid movement and the sharp, jagged edges of the glass adding to the sense of urgency and danger. The lighting is dim, enhancing the dramatic and almost apocalyptic feel of the video.
+2026-06-17 13:04:31,963 [INFO]   [SAMPLE SUMMARY] caption_length=796 chars, word_count=135
+2026-06-17 13:04:31,963 [INFO]   [SAMPLE SUMMARY] elapsed=219.0s, output=outputs/SVD_only_20samples/sample_106/106.mp4
+  [20/20] 处理 111...
+2026-06-17 13:04:31,968 [INFO] [P-Flow] sample=111, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-17 13:04:33,874 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 13:04:36,224 [INFO]   [Inversion] euler (1st-order)...
+2026-06-17 13:06:10,702 [INFO]   [Inversion Quality] η_inv: std=1.0156, mean=-0.0294, range=[-3.453, 3.547], cos_sim(η_inv, random)=-0.0001, cos_sim(η_inv, z0)=0.9766             
+2026-06-17 13:06:10,702 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 13:06:10,715 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-17 13:06:10,720 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-17 13:06:10,720 [INFO]   η_temporal: mean=-0.0004, std=0.3398
+2026-06-17 13:06:10,720 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 13:06:10,720 [INFO]   iter 1/1: The video captures an aerial view of a lush, dense forest te...
+2026-06-17 13:06:10,720 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3398, η_mixed std=0.9922, mean=-0.0008
+2026-06-17 13:06:10,721 [INFO]   [Blend Diag] cos(temporal, random)=-0.0006, cos(mixed, random)=0.9961, cos(mixed, temporal)=0.0211
+2026-06-17 13:06:10,721 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022272 (越大越说明 temporal 有影响)
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.80s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-17 13:08:09,755 [INFO] [P-Flow] Done in 217.8s → outputs/SVD_only_20samples/sample_111/111.mp4
+2026-06-17 13:08:09,755 [INFO]   [SAMPLE SUMMARY] sample_id=111
+2026-06-17 13:08:09,755 [INFO]   [SAMPLE SUMMARY] full_caption=The video captures an aerial view of a lush, dense forest teeming with greenery. The sunlight filters through the canopy, casting dappled shadows on the ground below and creating a vibrant interplay of light and dark. At the center of the frames, a drone is seen flying low over the treetops. The drone appears to be equipped with a camera or sensor, suggesting it might be used for surveillance, mapping, or capturing aerial footage. The surrounding environment is rich with various types of trees, including palm trees, indicating a tropical or subtropical setting. The overall atmosphere is serene and natural, emphasizing the beauty and complexity of the forest ecosystem.
+2026-06-17 13:08:09,755 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=109
+2026-06-17 13:08:09,755 [INFO]   [SAMPLE SUMMARY] elapsed=217.8s, output=outputs/SVD_only_20samples/sample_111/111.mp4
+
+批量完成! 输出: outputs/SVD_only_20samples
+Found 20 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/20] 50 CLIP(o-t=0.3724, g-t=0.3725, o-g=0.8982) XCLIP(o-t=0.3174, g-t=0.3104, o-g=0.8030)
+[2/20] 70 CLIP(o-t=0.3196, g-t=0.3727, o-g=0.8009) XCLIP(o-t=0.1868, g-t=0.1681, o-g=0.6249)
+[3/20] 72 CLIP(o-t=0.3505, g-t=0.3640, o-g=0.9199) XCLIP(o-t=0.2271, g-t=0.2564, o-g=0.8918)
+[4/20] 73 CLIP(o-t=0.3428, g-t=0.3896, o-g=0.8883) XCLIP(o-t=0.1975, g-t=0.1548, o-g=0.6245)
+[5/20] 74 CLIP(o-t=0.3008, g-t=0.3127, o-g=0.9125) XCLIP(o-t=0.1829, g-t=0.1719, o-g=0.5079)
+[6/20] 76 CLIP(o-t=0.3620, g-t=0.3621, o-g=0.8548) XCLIP(o-t=0.2014, g-t=0.2192, o-g=0.5360)
+[7/20] 78 CLIP(o-t=0.3513, g-t=0.3498, o-g=0.9538) XCLIP(o-t=0.2193, g-t=0.1864, o-g=0.8408)
+[8/20] 79 CLIP(o-t=0.3165, g-t=0.3762, o-g=0.8655) XCLIP(o-t=0.2186, g-t=0.2604, o-g=0.7584)
+[9/20] 80 CLIP(o-t=0.3603, g-t=0.3452, o-g=0.9250) XCLIP(o-t=0.2262, g-t=0.1289, o-g=0.6235)
+[10/20] 81 CLIP(o-t=0.3410, g-t=0.3497, o-g=0.9265) XCLIP(o-t=0.2580, g-t=0.2169, o-g=0.7633)
+[11/20] 82 CLIP(o-t=0.3907, g-t=0.3342, o-g=0.9056) XCLIP(o-t=0.2766, g-t=0.2090, o-g=0.7062)
+[12/20] 83 CLIP(o-t=0.3353, g-t=0.3810, o-g=0.8992) XCLIP(o-t=0.2200, g-t=0.2011, o-g=0.8974)
+[13/20] 84 CLIP(o-t=0.3577, g-t=0.4088, o-g=0.8737) XCLIP(o-t=0.2840, g-t=0.2503, o-g=0.6320)
+[14/20] 85 CLIP(o-t=0.2710, g-t=0.2960, o-g=0.9215) XCLIP(o-t=0.0772, g-t=0.1949, o-g=0.5519)
+[15/20] 88 CLIP(o-t=0.3803, g-t=0.3778, o-g=0.8783) XCLIP(o-t=0.2605, g-t=0.2281, o-g=0.6631)
+[16/20] 99 CLIP(o-t=0.3978, g-t=0.3983, o-g=0.8718) XCLIP(o-t=0.2557, g-t=0.2808, o-g=0.7715)
+[17/20] 104 CLIP(o-t=0.3512, g-t=0.3771, o-g=0.8203) XCLIP(o-t=0.1696, g-t=0.2504, o-g=0.6407)
+[18/20] 105 CLIP(o-t=0.3782, g-t=0.3508, o-g=0.9294) XCLIP(o-t=0.2797, g-t=0.1880, o-g=0.6289)
+[19/20] 106 CLIP(o-t=0.3834, g-t=0.3679, o-g=0.8611) XCLIP(o-t=0.2411, g-t=0.1731, o-g=0.5411)
+[20/20] 111 CLIP(o-t=0.3624, g-t=0.3791, o-g=0.9260) XCLIP(o-t=0.2802, g-t=0.3048, o-g=0.8512)
+
+Evaluation complete!
+  Samples: 20
+  orig_gen_clip mean:  0.891619
+  orig_gen_xclip mean: 0.692902
+  CSV: outputs/SVD_only_20samples/eval_clip/clip_xclip_results.csv
+  Summary: outputs/SVD_only_20samples/eval_clip/eval_summary.md
+root@autodl-container-a4d74c9dd1-31db82ab:~/xixihaha/P-Flow# 

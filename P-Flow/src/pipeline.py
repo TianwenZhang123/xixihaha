@@ -1071,6 +1071,10 @@ class PFlowPipeline:
         current_lambda = [0.0]
         injection_stats_per_step = [{}]  # 每步注入统计
 
+        # ── EMA 特征平滑: 跨步参考特征时序平滑 ──
+        ema_decay = 0.7  # 70% 来自上一步平滑值, 30% 来自当前步原始值
+        ema_ref_prev = [None]  # 上一步的 EMA 平滑特征 {layer_idx: tensor}
+
         def make_injection_hook(layer_idx):
             """创建注入 hook: h_injected = (1-λ)*h_current + λ*h_ref"""
             def hook_fn(module, input, output):
@@ -1172,7 +1176,29 @@ class PFlowPipeline:
 
                 for layer_idx in target_layers:
                     if layer_idx in step_features:
-                        current_ref[0][layer_idx] = step_features[layer_idx].to(self.device)
+                        h_ref_raw = step_features[layer_idx].to(self.device)
+
+                        # ── EMA 特征平滑 ──
+                        # 第一步: 直接使用原始参考特征
+                        # 后续步: h_ref_smooth = ema_decay * prev + (1 - ema_decay) * current
+                        if ema_ref_prev[0] is not None and layer_idx in ema_ref_prev[0]:
+                            h_ref_prev = ema_ref_prev[0][layer_idx]
+                            # 确保形状匹配
+                            if h_ref_prev.shape == h_ref_raw.shape:
+                                h_ref_smooth = ema_decay * h_ref_prev + (1.0 - ema_decay) * h_ref_raw
+                            else:
+                                h_ref_smooth = h_ref_raw  # 形状不匹配时回退
+                        else:
+                            h_ref_smooth = h_ref_raw
+
+                        current_ref[0][layer_idx] = h_ref_smooth
+
+                # 更新 EMA 缓存 (detach 避免计算图增长)
+                if current_ref[0]:
+                    ema_ref_prev[0] = {
+                        layer_idx: feat.detach()
+                        for layer_idx, feat in current_ref[0].items()
+                    }
 
                 # 重置注入统计
                 injection_stats_per_step[0] = {}

@@ -1,0 +1,1030 @@
+2026-06-17 10:18:42,820 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_FI_20samples/run_log.txt
+2026-06-17 10:18:42,837 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+2026-06-17 10:18:42,840 [INFO] [P-Flow] sample=50, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:18:45,488 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-17 10:18:45,488 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+2026-06-17 10:18:56,264 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-17 10:18:56,264 [INFO]   GPU 0: 13.8GB allocated, 14.1GB reserved
+2026-06-17 10:18:56,264 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:18:58,829 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:18:58,830 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:18:58,830 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:19:23,740 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0096, std=0.4766, cached=11 points
+2026-06-17 10:19:48,813 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0095, std=0.5898, cached=21 points
+2026-06-17 10:20:13,581 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0089, std=0.7266, cached=31 points
+2026-06-17 10:20:39,099 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0080, std=0.8906, cached=41 points
+2026-06-17 10:21:05,665 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0078, std=1.0781, cached=51 points
+2026-06-17 10:21:05,666 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0078, std=1.0781
+2026-06-17 10:21:05,666 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 10:21:05,689 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=0.0078, range=[-3.703, 4.156], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-17 10:21:05,690 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 10:21:05,747 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-17 10:21:05,757 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-17 10:21:05,758 [INFO]   η_temporal: mean=-0.0004, std=0.3809
+2026-06-17 10:21:05,758 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 10:21:05,758 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 10:21:05,758 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 10:21:05,758 [INFO]   iter 1/1: The video features a white cat sitting inside the passenger ...
+2026-06-17 10:21:05,759 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3809, η_mixed std=0.9961, mean=0.0000
+2026-06-17 10:21:05,759 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0249
+2026-06-17 10:21:05,759 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024862 (越大越说明 temporal 有影响)
+2026-06-17 10:21:05,759 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:21:05,760 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 10:21:05,760 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:21:05,760 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:21:05,762 [INFO]   [Quality Scale] mean_cos=0.0466, threshold=0.05, scale=0.5348 (weak)
+2026-06-17 10:21:05,762 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5348, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 10:21:05,762 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 10:21:31,413 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5898, gate=0.3895, λ=0.01379→0.00537
+2026-06-17 10:21:33,328 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5781, gate=0.4036, λ=0.01379→0.00556
+2026-06-17 10:21:52,190 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6289, gate=0.3442, λ=0.02363→0.00813
+2026-06-17 10:21:54,109 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6211, gate=0.3531, λ=0.02363→0.00834
+2026-06-17 10:22:12,781 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6602, gate=0.3099, λ=0.02670→0.00827
+2026-06-17 10:22:14,699 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6562, gate=0.3141, λ=0.02670→0.00839
+2026-06-17 10:22:33,471 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6836, gate=0.2854, λ=0.02213→0.00632
+2026-06-17 10:22:35,390 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6797, gate=0.2894, λ=0.02213→0.00640
+2026-06-17 10:22:54,143 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7148, gate=0.2546, λ=0.01123→0.00286
+2026-06-17 10:22:56,062 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7148, gate=0.2546, λ=0.01123→0.00286
+2026-06-17 10:23:13,529 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:23:13,530 [INFO]   [FI] 生成完成总结
+2026-06-17 10:23:13,530 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:23:13,530 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:23:16,314 [INFO] [P-Flow] Done in 273.5s → outputs/SVD_FI_20samples/sample_50/50.mp4
+2026-06-17 10:23:16,314 [INFO]   [SAMPLE SUMMARY] sample_id=50
+2026-06-17 10:23:16,314 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a white cat sitting inside the passenger seat of a car with the window open. The cat is wearing a blue collar and appears to be looking out of the window, observing the surroundings. The background shows a busy urban street with people walking by, some holding umbrellas, suggesting it might be a rainy day. The setting includes buildings with storefronts and signs, adding to the city atmosphere. The cat's expression seems calm and curious as it gazes outside.
+2026-06-17 10:23:16,314 [INFO]   [SAMPLE SUMMARY] caption_length=481 chars, word_count=82
+2026-06-17 10:23:16,314 [INFO]   [SAMPLE SUMMARY] elapsed=273.5s, output=outputs/SVD_FI_20samples/sample_50/50.mp4
+2026-06-17 10:23:18,112 [INFO] [P-Flow] sample=70, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:23:20,615 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:23:22,936 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:23:22,937 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:23:22,937 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:23:47,808 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0117, std=0.4766, cached=11 points
+2026-06-17 10:24:12,730 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0110, std=0.5898, cached=21 points
+2026-06-17 10:24:38,730 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0090, std=0.7266, cached=31 points
+2026-06-17 10:25:05,935 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0057, std=0.8945, cached=41 points
+2026-06-17 10:25:32,941 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0023, std=1.0859, cached=51 points
+2026-06-17 10:25:32,942 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0023, std=1.0859
+2026-06-17 10:25:32,942 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 10:25:32,950 [INFO]   [Inversion Quality] η_inv: std=1.0859, mean=0.0023, range=[-3.672, 4.188], cos_sim(η_inv, random)=-0.0011, cos_sim(η_inv, z0)=0.9805
+2026-06-17 10:25:32,950 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 10:25:32,962 [DEBUG]   [Stage1] Spatial: removed top-20 components
+2026-06-17 10:25:32,967 [DEBUG]   [Stage2] Temporal: kept top-8/21 components
+2026-06-17 10:25:32,967 [INFO]   η_temporal: mean=-0.0004, std=0.3613
+2026-06-17 10:25:32,967 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 10:25:32,967 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 10:25:32,967 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 10:25:32,967 [INFO]   iter 1/1: The video features a person standing inside what appears to ...
+2026-06-17 10:25:32,968 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3613, η_mixed std=0.9961, mean=0.0017
+2026-06-17 10:25:32,968 [INFO]   [Blend Diag] cos(temporal, random)=0.0001, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0231
+2026-06-17 10:25:32,969 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.023653 (越大越说明 temporal 有影响)
+2026-06-17 10:25:32,969 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:25:32,969 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 10:25:32,969 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:25:32,969 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:25:32,971 [INFO]   [Quality Scale] mean_cos=0.0573, threshold=0.05, scale=0.5828 (weak)
+2026-06-17 10:25:32,971 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5828, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 10:25:32,971 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 10:25:58,653 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5586, gate=0.4273, λ=0.01502→0.00642
+2026-06-17 10:26:00,567 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5508, gate=0.4369, λ=0.01502→0.00656
+2026-06-17 10:26:19,474 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6016, gate=0.3757, λ=0.02575→0.00967
+2026-06-17 10:26:21,390 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.5977, gate=0.3803, λ=0.02575→0.00979
+2026-06-17 10:26:40,371 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6406, gate=0.3311, λ=0.02910→0.00963
+2026-06-17 10:26:42,289 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6328, gate=0.3398, λ=0.02910→0.00989
+2026-06-17 10:27:01,214 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6758, gate=0.2934, λ=0.02412→0.00708
+2026-06-17 10:27:03,131 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6719, gate=0.2975, λ=0.02412→0.00717
+2026-06-17 10:27:22,173 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7148, gate=0.2546, λ=0.01224→0.00312
+2026-06-17 10:27:24,087 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7148, gate=0.2546, λ=0.01224→0.00312
+2026-06-17 10:27:41,574 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:27:41,574 [INFO]   [FI] 生成完成总结
+2026-06-17 10:27:41,574 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:27:41,574 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:27:44,465 [INFO] [P-Flow] Done in 266.4s → outputs/SVD_FI_20samples/sample_70/70.mp4
+2026-06-17 10:27:44,465 [INFO]   [SAMPLE SUMMARY] sample_id=70
+2026-06-17 10:27:44,465 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a person standing inside what appears to be a train or subway car, as indicated by the blurred background and the window through which the scene is captured. The individual is wearing a white blouse and has long dark hair. The lighting suggests it might be evening or night, with artificial lights illuminating the interior of the vehicle. The background outside the window shows a cityscape with various lights and signs, indicating an urban environment. The overall atmosphere of the video conveys a sense of movement and travel, with the blurred motion of the background suggesting that the train is in motion.
+2026-06-17 10:27:44,465 [INFO]   [SAMPLE SUMMARY] caption_length=632 chars, word_count=105
+2026-06-17 10:27:44,465 [INFO]   [SAMPLE SUMMARY] elapsed=266.4s, output=outputs/SVD_FI_20samples/sample_70/70.mp4
+2026-06-17 10:27:46,273 [INFO] [P-Flow] sample=72, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:27:48,811 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:27:51,136 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:27:51,137 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:27:51,137 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:28:15,831 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0762, std=0.3672, cached=11 points
+2026-06-17 10:28:40,427 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0898, std=0.4512, cached=21 points
+2026-06-17 10:29:05,368 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.1060, std=0.5586, cached=31 points
+2026-06-17 10:29:30,461 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.1250, std=0.6875, cached=41 points
+2026-06-17 10:29:56,013 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.1494, std=0.8477, cached=51 points
+2026-06-17 10:29:56,013 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.1494, std=0.8477
+2026-06-17 10:29:56,014 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 10:29:56,021 [INFO]   [Inversion Quality] η_inv: std=0.8477, mean=0.1494, range=[-3.641, 3.828], cos_sim(η_inv, random)=-0.0000, cos_sim(η_inv, z0)=0.9609
+2026-06-17 10:29:56,021 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 10:29:56,034 [DEBUG]   [Stage1] Spatial: removed top-28 components
+2026-06-17 10:29:56,038 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-17 10:29:56,038 [INFO]   η_temporal: mean=-0.0001, std=0.3145
+2026-06-17 10:29:56,038 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 10:29:56,038 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 10:29:56,038 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 10:29:56,038 [INFO]   iter 1/1: The video depicts an underwater scene that appears to be a s...
+2026-06-17 10:29:56,039 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3145, η_mixed std=0.9961, mean=0.0009
+2026-06-17 10:29:56,039 [INFO]   [Blend Diag] cos(temporal, random)=-0.0003, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0198
+2026-06-17 10:29:56,040 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.020805 (越大越说明 temporal 有影响)
+2026-06-17 10:29:56,040 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:29:56,040 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 10:29:56,040 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:29:56,040 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:29:56,042 [INFO]   [Quality Scale] mean_cos=0.0312, threshold=0.05, scale=0.4666 (weak)
+2026-06-17 10:29:56,042 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.4666, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 10:29:56,042 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 10:30:21,635 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6328, gate=0.3398, λ=0.01203→0.00409
+2026-06-17 10:30:23,549 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6211, gate=0.3531, λ=0.01203→0.00425
+2026-06-17 10:30:42,412 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6484, gate=0.3225, λ=0.02061→0.00665
+2026-06-17 10:30:44,330 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6406, gate=0.3311, λ=0.02061→0.00682
+2026-06-17 10:31:03,240 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6758, gate=0.2934, λ=0.02329→0.00683
+2026-06-17 10:31:05,158 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6719, gate=0.2975, λ=0.02329→0.00693
+2026-06-17 10:31:23,972 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6992, gate=0.2697, λ=0.01931→0.00521
+2026-06-17 10:31:25,888 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6914, gate=0.2775, λ=0.01931→0.00536
+2026-06-17 10:31:44,865 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7305, gate=0.2401, λ=0.00980→0.00235
+2026-06-17 10:31:46,781 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7266, gate=0.2436, λ=0.00980→0.00239
+2026-06-17 10:32:04,246 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:32:04,247 [INFO]   [FI] 生成完成总结
+2026-06-17 10:32:04,247 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:32:04,247 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:32:07,127 [INFO] [P-Flow] Done in 260.9s → outputs/SVD_FI_20samples/sample_72/72.mp4
+2026-06-17 10:32:07,127 [INFO]   [SAMPLE SUMMARY] sample_id=72
+2026-06-17 10:32:07,127 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts an underwater scene that appears to be a surreal and imaginative depiction of a coastal town submerged beneath the ocean's surface. The environment is rich with vibrant coral formations in various colors, including reds, oranges, pinks, and purples, which contrast beautifully against the sandy ocean floor. The water is clear, allowing for a view of the colorful corals and the sandy bottom.
+
+In the background, there are buildings that resemble houses or small structures, painted in pastel colors such as blue, pink, and yellow. These structures have white railings and windows, giving them a quaint and charming appearance. The buildings are partially submerged, with their upper parts visible above the waterline, creating an illusion that they are floating or emerging from the sea.
+
+The overall atmosphere is serene and whimsical, blending elements of a typical coastal town with the natural beauty of an underwater world. The lighting suggests it might be daytime, with sunlight filtering through the water, casting a soft glow on the scene. The video captures a unique and fantastical vision of a submerged community, where nature and human-made structures coexist in a dreamlike setting.
+2026-06-17 10:32:07,127 [INFO]   [SAMPLE SUMMARY] caption_length=1215 chars, word_count=190
+2026-06-17 10:32:07,127 [INFO]   [SAMPLE SUMMARY] elapsed=260.9s, output=outputs/SVD_FI_20samples/sample_72/72.mp4
+2026-06-17 10:32:08,955 [INFO] [P-Flow] sample=73, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:32:11,493 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:32:13,816 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:32:13,817 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:32:13,817 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:32:38,451 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0281, std=0.3984, cached=11 points
+2026-06-17 10:33:03,028 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0317, std=0.4883, cached=21 points
+2026-06-17 10:33:28,258 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0356, std=0.5977, cached=31 points
+2026-06-17 10:33:53,906 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0400, std=0.7344, cached=41 points
+2026-06-17 10:34:19,709 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0447, std=0.8984, cached=51 points
+2026-06-17 10:34:19,710 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0447, std=0.8984
+2026-06-17 10:34:19,710 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 10:34:19,717 [INFO]   [Inversion Quality] η_inv: std=0.8984, mean=0.0447, range=[-3.766, 3.281], cos_sim(η_inv, random)=-0.0003, cos_sim(η_inv, z0)=0.9727
+2026-06-17 10:34:19,717 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 10:34:19,729 [DEBUG]   [Stage1] Spatial: removed top-15 components
+2026-06-17 10:34:19,734 [DEBUG]   [Stage2] Temporal: kept top-16/21 components
+2026-06-17 10:34:19,734 [INFO]   η_temporal: mean=0.0006, std=0.3105
+2026-06-17 10:34:19,734 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 10:34:19,734 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 10:34:19,734 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 10:34:19,734 [INFO]   iter 1/1: The video depicts an expansive, empty warehouse with high ce...
+2026-06-17 10:34:19,735 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3105, η_mixed std=0.9961, mean=0.0005
+2026-06-17 10:34:19,735 [INFO]   [Blend Diag] cos(temporal, random)=0.0008, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0206
+2026-06-17 10:34:19,735 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.020632 (越大越说明 temporal 有影响)
+2026-06-17 10:34:19,736 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:34:19,736 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 10:34:19,736 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:34:19,736 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:34:19,738 [INFO]   [Quality Scale] mean_cos=0.0785, threshold=0.05, scale=0.6748 (weak)
+2026-06-17 10:34:19,738 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.6748, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 10:34:19,738 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 10:34:44,847 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6211, gate=0.3531, λ=0.01739→0.00614
+2026-06-17 10:34:46,763 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6172, gate=0.3576, λ=0.01739→0.00622
+2026-06-17 10:35:05,628 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6523, gate=0.3183, λ=0.02981→0.00949
+2026-06-17 10:35:07,545 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6484, gate=0.3225, λ=0.02981→0.00961
+2026-06-17 10:35:26,549 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6836, gate=0.2854, λ=0.03369→0.00961
+2026-06-17 10:35:28,467 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6836, gate=0.2854, λ=0.03369→0.00961
+2026-06-17 10:35:47,250 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7188, gate=0.2509, λ=0.02793→0.00701
+2026-06-17 10:35:49,164 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7148, gate=0.2546, λ=0.02793→0.00711
+2026-06-17 10:36:07,967 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7539, gate=0.2193, λ=0.01417→0.00311
+2026-06-17 10:36:09,883 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7539, gate=0.2193, λ=0.01417→0.00311
+2026-06-17 10:36:27,368 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:36:27,368 [INFO]   [FI] 生成完成总结
+2026-06-17 10:36:27,368 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:36:27,369 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:36:30,314 [INFO] [P-Flow] Done in 261.4s → outputs/SVD_FI_20samples/sample_73/73.mp4
+2026-06-17 10:36:30,314 [INFO]   [SAMPLE SUMMARY] sample_id=73
+2026-06-17 10:36:30,314 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts an expansive, empty warehouse with high ceilings and large windows allowing natural light to flood in. The floor is clean and marked with yellow lines, suggesting it might be used for storage or industrial purposes. As the camera moves forward, the focus shifts from the empty space to a vibrant, lush garden that gradually fills the center of the frame. The garden is teeming with a variety of green plants, flowers, and foliage, creating a stark contrast against the industrial backdrop. The plants appear healthy and well-maintained, adding a touch of nature and tranquility to the otherwise stark environment. The transition from the barren warehouse to the thriving garden symbolizes growth, transformation, or the potential for nature to reclaim even the most urban spaces.
+2026-06-17 10:36:30,314 [INFO]   [SAMPLE SUMMARY] caption_length=797 chars, word_count=127
+2026-06-17 10:36:30,314 [INFO]   [SAMPLE SUMMARY] elapsed=261.4s, output=outputs/SVD_FI_20samples/sample_73/73.mp4
+2026-06-17 10:36:32,202 [INFO] [P-Flow] sample=74, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:36:34,605 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:36:36,925 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:36:36,925 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:36:36,925 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:37:01,631 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0184, std=0.4785, cached=11 points
+2026-06-17 10:37:26,203 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.0258, std=0.5898, cached=21 points
+2026-06-17 10:37:51,025 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0361, std=0.7266, cached=31 points
+2026-06-17 10:38:16,222 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0496, std=0.8906, cached=41 points
+2026-06-17 10:38:41,779 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0640, std=1.0781, cached=51 points
+2026-06-17 10:38:41,780 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0640, std=1.0781
+2026-06-17 10:38:41,780 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 10:38:41,787 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=-0.0640, range=[-4.000, 4.844], cos_sim(η_inv, random)=0.0005, cos_sim(η_inv, z0)=0.9766
+2026-06-17 10:38:41,787 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 10:38:41,801 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-17 10:38:41,805 [DEBUG]   [Stage2] Temporal: kept top-7/21 components
+2026-06-17 10:38:41,806 [INFO]   η_temporal: mean=0.0003, std=0.3594
+2026-06-17 10:38:41,806 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 10:38:41,806 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 10:38:41,806 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 10:38:41,806 [INFO]   iter 1/1: The video appears to depict a vibrant and lively scene, poss...
+2026-06-17 10:38:41,806 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3594, η_mixed std=0.9922, mean=0.0005
+2026-06-17 10:38:41,807 [INFO]   [Blend Diag] cos(temporal, random)=-0.0003, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0227
+2026-06-17 10:38:41,807 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.023653 (越大越说明 temporal 有影响)
+2026-06-17 10:38:41,807 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:38:41,807 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 10:38:41,807 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:38:41,807 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:38:41,809 [INFO]   [Quality Scale] mean_cos=0.0930, threshold=0.05, scale=0.7322 (strong)
+2026-06-17 10:38:41,809 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.7322, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 10:38:41,809 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 10:39:06,778 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5703, gate=0.4130, λ=0.01888→0.00780
+2026-06-17 10:39:08,696 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5703, gate=0.4130, λ=0.01888→0.00780
+2026-06-17 10:39:27,557 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6211, gate=0.3531, λ=0.03235→0.01142
+2026-06-17 10:39:29,473 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6172, gate=0.3576, λ=0.03235→0.01157
+2026-06-17 10:39:48,347 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6602, gate=0.3099, λ=0.03656→0.01133
+2026-06-17 10:39:50,264 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6562, gate=0.3141, λ=0.03656→0.01148
+2026-06-17 10:40:08,971 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6992, gate=0.2697, λ=0.03030→0.00817
+2026-06-17 10:40:10,889 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6953, gate=0.2736, λ=0.03030→0.00829
+2026-06-17 10:40:29,615 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7344, gate=0.2365, λ=0.01537→0.00364
+2026-06-17 10:40:31,533 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7305, gate=0.2401, λ=0.01537→0.00369
+2026-06-17 10:40:48,976 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:40:48,976 [INFO]   [FI] 生成完成总结
+2026-06-17 10:40:48,976 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:40:48,976 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:40:51,804 [INFO] [P-Flow] Done in 259.6s → outputs/SVD_FI_20samples/sample_74/74.mp4
+2026-06-17 10:40:51,804 [INFO]   [SAMPLE SUMMARY] sample_id=74
+2026-06-17 10:40:51,804 [INFO]   [SAMPLE SUMMARY] full_caption=The video appears to depict a vibrant and lively scene, possibly at a festive or celebratory event. The first frame shows a blurred image of what seems to be a street or alleyway adorned with red lanterns, suggesting a cultural or traditional setting, perhaps during a festival like Chinese New Year. The colorful lights and bokeh effect create a warm and festive atmosphere.
+
+In the subsequent frames, the focus shifts to a close-up of a flame, which is likely from a torch or firework. The flame is dynamic and vivid, with bright orange and yellow hues, indicating movement and intensity. The background remains out of focus, emphasizing the flame as the central element. This suggests that the video might be capturing a moment of excitement or celebration, possibly involving fire performances or fireworks.
+
+Overall, the video conveys a sense of energy and festivity through its use of light, color, and motion.
+2026-06-17 10:40:51,804 [INFO]   [SAMPLE SUMMARY] caption_length=916 chars, word_count=151
+2026-06-17 10:40:51,804 [INFO]   [SAMPLE SUMMARY] elapsed=259.6s, output=outputs/SVD_FI_20samples/sample_74/74.mp4
+2026-06-17 10:40:53,730 [INFO] [P-Flow] sample=76, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:40:56,339 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:40:58,665 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:40:58,666 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:40:58,666 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:41:23,542 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0439, std=0.4355, cached=11 points
+2026-06-17 10:41:48,404 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0510, std=0.5352, cached=21 points
+2026-06-17 10:42:13,143 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0598, std=0.6602, cached=31 points
+2026-06-17 10:42:38,675 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0703, std=0.8125, cached=41 points
+2026-06-17 10:43:04,390 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0830, std=0.9961, cached=51 points
+2026-06-17 10:43:04,391 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0830, std=0.9961
+2026-06-17 10:43:04,391 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 10:43:04,398 [INFO]   [Inversion Quality] η_inv: std=0.9961, mean=0.0830, range=[-3.500, 4.781], cos_sim(η_inv, random)=0.0010, cos_sim(η_inv, z0)=0.9766
+2026-06-17 10:43:04,398 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 10:43:04,411 [DEBUG]   [Stage1] Spatial: removed top-11 components
+2026-06-17 10:43:04,415 [DEBUG]   [Stage2] Temporal: kept top-10/21 components
+2026-06-17 10:43:04,415 [INFO]   η_temporal: mean=0.0009, std=0.3379
+2026-06-17 10:43:04,415 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 10:43:04,415 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 10:43:04,415 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 10:43:04,415 [INFO]   iter 1/1: The video showcases an underwater scene featuring a vibrant ...
+2026-06-17 10:43:04,416 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3379, η_mixed std=0.9961, mean=0.0003
+2026-06-17 10:43:04,416 [INFO]   [Blend Diag] cos(temporal, random)=-0.0000, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0215
+2026-06-17 10:43:04,416 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022272 (越大越说明 temporal 有影响)
+2026-06-17 10:43:04,417 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:43:04,417 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 10:43:04,417 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:43:04,417 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:43:04,419 [INFO]   [Quality Scale] mean_cos=0.0551, threshold=0.05, scale=0.5730 (weak)
+2026-06-17 10:43:04,419 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5730, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 10:43:04,419 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 10:43:28,869 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6172, gate=0.3576, λ=0.01477→0.00528
+2026-06-17 10:43:30,786 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6094, gate=0.3666, λ=0.01477→0.00541
+2026-06-17 10:43:49,645 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6484, gate=0.3225, λ=0.02531→0.00816
+2026-06-17 10:43:51,561 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6367, gate=0.3355, λ=0.02531→0.00849
+2026-06-17 10:44:10,289 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6719, gate=0.2975, λ=0.02861→0.00851
+2026-06-17 10:44:12,204 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6641, gate=0.3057, λ=0.02861→0.00875
+2026-06-17 10:44:30,930 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6914, gate=0.2775, λ=0.02371→0.00658
+2026-06-17 10:44:32,846 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6875, gate=0.2814, λ=0.02371→0.00667
+2026-06-17 10:44:51,614 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7266, gate=0.2436, λ=0.01203→0.00293
+2026-06-17 10:44:53,531 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7227, gate=0.2473, λ=0.01203→0.00297
+2026-06-17 10:45:11,033 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:45:11,033 [INFO]   [FI] 生成完成总结
+2026-06-17 10:45:11,033 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:45:11,033 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:45:13,991 [INFO] [P-Flow] Done in 260.3s → outputs/SVD_FI_20samples/sample_76/76.mp4
+2026-06-17 10:45:13,991 [INFO]   [SAMPLE SUMMARY] sample_id=76
+2026-06-17 10:45:13,991 [INFO]   [SAMPLE SUMMARY] full_caption=The video showcases an underwater scene featuring a vibrant and colorful coral reef tunnel. The tunnel is illuminated by natural light filtering through from above, creating a mesmerizing play of colors on the sandy floor and the textured walls of the reef. The walls are adorned with various types of coral, showcasing a rich palette of reds, yellows, oranges, and pinks. 
+
+In the foreground, there is a large, translucent pink structure that appears to be part of the reef or possibly a man-made object, adding an element of intrigue to the scene. Several fish swim gracefully through the tunnel, their movements smooth and fluid. The water is clear, allowing for a detailed view of the underwater environment.
+
+The overall atmosphere is serene and captivating, highlighting the beauty and diversity of marine life and the intricate ecosystem of the coral reef. The video captures the essence of an underwater world teeming with life and color.
+2026-06-17 10:45:13,991 [INFO]   [SAMPLE SUMMARY] caption_length=946 chars, word_count=154
+2026-06-17 10:45:13,991 [INFO]   [SAMPLE SUMMARY] elapsed=260.3s, output=outputs/SVD_FI_20samples/sample_76/76.mp4
+2026-06-17 10:45:15,862 [INFO] [P-Flow] sample=78, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:45:18,436 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:45:20,760 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:45:20,760 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:45:20,760 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:45:45,440 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0049, std=0.5234, cached=11 points
+2026-06-17 10:46:10,125 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0040, std=0.6445, cached=21 points
+2026-06-17 10:46:35,129 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0025, std=0.7969, cached=31 points
+2026-06-17 10:47:00,363 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0006, std=0.9766, cached=41 points
+2026-06-17 10:47:25,807 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0006, std=1.1875, cached=51 points
+2026-06-17 10:47:25,808 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0006, std=1.1875
+2026-06-17 10:47:25,808 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 10:47:25,815 [INFO]   [Inversion Quality] η_inv: std=1.1875, mean=-0.0006, range=[-3.984, 4.469], cos_sim(η_inv, random)=-0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-17 10:47:25,815 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 10:47:25,828 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-17 10:47:25,832 [DEBUG]   [Stage2] Temporal: kept top-11/21 components
+2026-06-17 10:47:25,832 [INFO]   η_temporal: mean=0.0008, std=0.3965
+2026-06-17 10:47:25,832 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 10:47:25,832 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 10:47:25,832 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 10:47:25,832 [INFO]   iter 1/1: The video depicts a tunnel that has been transformed into a ...
+2026-06-17 10:47:25,833 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3965, η_mixed std=0.9922, mean=-0.0006
+2026-06-17 10:47:25,833 [INFO]   [Blend Diag] cos(temporal, random)=-0.0002, cos(mixed, random)=0.9961, cos(mixed, temporal)=0.0251
+2026-06-17 10:47:25,834 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.025898 (越大越说明 temporal 有影响)
+2026-06-17 10:47:25,834 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:47:25,834 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 10:47:25,834 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:47:25,834 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:47:25,836 [INFO]   [Quality Scale] mean_cos=0.0064, threshold=0.05, scale=0.3652 (weak)
+2026-06-17 10:47:25,836 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.3652, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 10:47:25,836 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 10:47:51,303 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5703, gate=0.4130, λ=0.00941→0.00389
+2026-06-17 10:47:53,218 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5703, gate=0.4130, λ=0.00941→0.00389
+2026-06-17 10:48:12,051 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6016, gate=0.3757, λ=0.01613→0.00606
+2026-06-17 10:48:13,968 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.5977, gate=0.3803, λ=0.01613→0.00614
+2026-06-17 10:48:32,871 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6367, gate=0.3355, λ=0.01823→0.00612
+2026-06-17 10:48:34,786 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6367, gate=0.3355, λ=0.01823→0.00612
+2026-06-17 10:48:53,773 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6602, gate=0.3099, λ=0.01511→0.00468
+2026-06-17 10:48:55,689 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6602, gate=0.3099, λ=0.01511→0.00468
+2026-06-17 10:49:14,657 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.6875, gate=0.2814, λ=0.00767→0.00216
+2026-06-17 10:49:16,572 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.6875, gate=0.2814, λ=0.00767→0.00216
+2026-06-17 10:49:34,231 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:49:34,232 [INFO]   [FI] 生成完成总结
+2026-06-17 10:49:34,232 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:49:34,232 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:49:36,988 [INFO] [P-Flow] Done in 261.1s → outputs/SVD_FI_20samples/sample_78/78.mp4
+2026-06-17 10:49:36,988 [INFO]   [SAMPLE SUMMARY] sample_id=78
+2026-06-17 10:49:36,988 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a tunnel that has been transformed into a lush, green passageway. The walls of the tunnel are covered with dense foliage, creating a natural archway over the path. The ground inside the tunnel is paved and marked with white lines, suggesting it might be used for pedestrian or bicycle traffic. As the camera moves forward, the tunnel opens up to reveal a bright, sunlit area outside, where more greenery and trees can be seen. The transition from the enclosed, shadowy tunnel to the open, sunny exit creates a striking contrast in both light and atmosphere. The overall effect is serene and inviting, as if the tunnel has become a hidden passage into nature.
+2026-06-17 10:49:36,988 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=116
+2026-06-17 10:49:36,988 [INFO]   [SAMPLE SUMMARY] elapsed=261.1s, output=outputs/SVD_FI_20samples/sample_78/78.mp4
+2026-06-17 10:49:38,813 [INFO] [P-Flow] sample=79, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:49:41,329 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:49:43,656 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:49:43,656 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:49:43,656 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:50:08,722 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0008, std=0.4395, cached=11 points
+2026-06-17 10:50:33,632 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0002, std=0.5391, cached=21 points
+2026-06-17 10:50:58,285 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0012, std=0.6680, cached=31 points
+2026-06-17 10:51:23,256 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0032, std=0.8164, cached=41 points
+2026-06-17 10:51:48,509 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0049, std=0.9883, cached=51 points
+2026-06-17 10:51:48,510 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0049, std=0.9883
+2026-06-17 10:51:48,510 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 10:51:48,517 [INFO]   [Inversion Quality] η_inv: std=0.9883, mean=-0.0049, range=[-3.609, 4.438], cos_sim(η_inv, random)=-0.0010, cos_sim(η_inv, z0)=0.9766
+2026-06-17 10:51:48,518 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 10:51:48,530 [DEBUG]   [Stage1] Spatial: removed top-18 components
+2026-06-17 10:51:48,534 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-17 10:51:48,534 [INFO]   η_temporal: mean=0.0001, std=0.3242
+2026-06-17 10:51:48,535 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 10:51:48,535 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 10:51:48,535 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 10:51:48,535 [INFO]   iter 1/1: The video depicts a vintage steam locomotive traveling throu...
+2026-06-17 10:51:48,535 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3242, η_mixed std=0.9961, mean=-0.0002
+2026-06-17 10:51:48,536 [INFO]   [Blend Diag] cos(temporal, random)=0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0211
+2026-06-17 10:51:48,536 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021409 (越大越说明 temporal 有影响)
+2026-06-17 10:51:48,536 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:51:48,536 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 10:51:48,536 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:51:48,536 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:51:48,538 [INFO]   [Quality Scale] mean_cos=0.0192, threshold=0.05, scale=0.4158 (weak)
+2026-06-17 10:51:48,538 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.4158, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 10:51:48,538 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 10:52:13,619 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6055, gate=0.3711, λ=0.01072→0.00398
+2026-06-17 10:52:15,536 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5938, gate=0.3849, λ=0.01072→0.00413
+2026-06-17 10:52:34,282 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6367, gate=0.3355, λ=0.01837→0.00616
+2026-06-17 10:52:36,200 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6250, gate=0.3486, λ=0.01837→0.00640
+2026-06-17 10:52:55,004 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6680, gate=0.3016, λ=0.02076→0.00626
+2026-06-17 10:52:56,922 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6641, gate=0.3057, λ=0.02076→0.00635
+2026-06-17 10:53:15,757 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6992, gate=0.2697, λ=0.01721→0.00464
+2026-06-17 10:53:17,678 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6992, gate=0.2697, λ=0.01721→0.00464
+2026-06-17 10:53:36,564 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7383, gate=0.2330, λ=0.00873→0.00203
+2026-06-17 10:53:38,480 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7344, gate=0.2365, λ=0.00873→0.00206
+2026-06-17 10:53:56,161 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:53:56,161 [INFO]   [FI] 生成完成总结
+2026-06-17 10:53:56,161 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:53:56,161 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:53:58,975 [INFO] [P-Flow] Done in 260.2s → outputs/SVD_FI_20samples/sample_79/79.mp4
+2026-06-17 10:53:58,976 [INFO]   [SAMPLE SUMMARY] sample_id=79
+2026-06-17 10:53:58,976 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a vintage steam locomotive traveling through a narrow, historic street flanked by old stone buildings. The train is black with a prominent front headlight and a circular design on its front, giving it a classic appearance. The surrounding architecture features aged walls with ivy climbing up some of them, adding to the historical ambiance. The street is paved with cobblestones, and there are lampposts lining the sides, suggesting an older urban setting. The train moves steadily along the tracks, which curve gently as they pass between the buildings. The lighting suggests it might be late afternoon or early evening, casting long shadows and creating a warm, nostalgic atmosphere.
+2026-06-17 10:53:58,976 [INFO]   [SAMPLE SUMMARY] caption_length=704 chars, word_count=111
+2026-06-17 10:53:58,976 [INFO]   [SAMPLE SUMMARY] elapsed=260.2s, output=outputs/SVD_FI_20samples/sample_79/79.mp4
+2026-06-17 10:54:00,825 [INFO] [P-Flow] sample=80, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:54:03,435 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:54:05,758 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:54:05,758 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:54:05,758 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:54:30,578 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0200, std=0.5156, cached=11 points
+2026-06-17 10:54:55,293 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0229, std=0.6328, cached=21 points
+2026-06-17 10:55:20,199 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0264, std=0.7773, cached=31 points
+2026-06-17 10:55:45,294 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0312, std=0.9453, cached=41 points
+2026-06-17 10:56:10,492 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0386, std=1.1250, cached=51 points
+2026-06-17 10:56:10,493 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0386, std=1.1250
+2026-06-17 10:56:10,493 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 10:56:10,500 [INFO]   [Inversion Quality] η_inv: std=1.1250, mean=0.0386, range=[-4.656, 4.156], cos_sim(η_inv, random)=0.0013, cos_sim(η_inv, z0)=0.9805
+2026-06-17 10:56:10,500 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 10:56:10,512 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-17 10:56:10,517 [DEBUG]   [Stage2] Temporal: kept top-17/21 components
+2026-06-17 10:56:10,517 [INFO]   η_temporal: mean=-0.0004, std=0.3691
+2026-06-17 10:56:10,517 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 10:56:10,517 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 10:56:10,517 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 10:56:10,517 [INFO]   iter 1/1: The video features a close-up view of a dandelion seed head,...
+2026-06-17 10:56:10,518 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3691, η_mixed std=0.9961, mean=-0.0003
+2026-06-17 10:56:10,518 [INFO]   [Blend Diag] cos(temporal, random)=-0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0231
+2026-06-17 10:56:10,518 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024171 (越大越说明 temporal 有影响)
+2026-06-17 10:56:10,519 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:56:10,519 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 10:56:10,519 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:56:10,519 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:56:10,521 [INFO]   [Quality Scale] mean_cos=0.0952, threshold=0.05, scale=0.7407 (strong)
+2026-06-17 10:56:10,521 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.7407, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 10:56:10,521 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 10:56:36,449 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5742, gate=0.4083, λ=0.01909→0.00780
+2026-06-17 10:56:38,364 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5664, gate=0.4177, λ=0.01909→0.00798
+2026-06-17 10:56:58,483 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6211, gate=0.3531, λ=0.03272→0.01155
+2026-06-17 10:57:00,398 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6133, gate=0.3621, λ=0.03272→0.01185
+2026-06-17 10:57:20,645 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6641, gate=0.3057, λ=0.03698→0.01130
+2026-06-17 10:57:22,561 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6562, gate=0.3141, λ=0.03698→0.01161
+2026-06-17 10:57:42,729 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7031, gate=0.2659, λ=0.03065→0.00815
+2026-06-17 10:57:44,650 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6992, gate=0.2697, λ=0.03065→0.00827
+2026-06-17 10:58:04,849 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7461, gate=0.2261, λ=0.01555→0.00352
+2026-06-17 10:58:06,768 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7422, gate=0.2295, λ=0.01555→0.00357
+2026-06-17 10:58:25,355 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:58:25,355 [INFO]   [FI] 生成完成总结
+2026-06-17 10:58:25,355 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 10:58:25,355 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 10:58:27,756 [INFO] [P-Flow] Done in 266.9s → outputs/SVD_FI_20samples/sample_80/80.mp4
+2026-06-17 10:58:27,756 [INFO]   [SAMPLE SUMMARY] sample_id=80
+2026-06-17 10:58:27,756 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a close-up view of a dandelion seed head, showcasing its intricate structure and delicate white seeds. The camera remains stationary throughout the sequence, focusing on the central part of the seed head where the seeds are attached to thin, feathery stems. The background is a dark green, which contrasts sharply with the light color of the seeds, making them stand out prominently. The lighting highlights the texture and fine details of the seeds, giving a sense of depth and dimension to the image. There is no movement or action other than the subtle changes in focus that slightly alter the clarity and sharpness of the seeds as the camera adjusts its focus.
+2026-06-17 10:58:27,756 [INFO]   [SAMPLE SUMMARY] caption_length=683 chars, word_count=115
+2026-06-17 10:58:27,756 [INFO]   [SAMPLE SUMMARY] elapsed=266.9s, output=outputs/SVD_FI_20samples/sample_80/80.mp4
+2026-06-17 10:58:29,149 [INFO] [P-Flow] sample=81, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 10:58:31,734 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 10:58:34,054 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 10:58:34,055 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 10:58:34,055 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 10:58:58,778 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0037, std=0.4277, cached=11 points
+2026-06-17 10:59:23,503 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.0074, std=0.5273, cached=21 points
+2026-06-17 10:59:48,008 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0127, std=0.6484, cached=31 points
+2026-06-17 11:00:12,046 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0199, std=0.8008, cached=41 points
+2026-06-17 11:00:36,854 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0282, std=0.9727, cached=51 points
+2026-06-17 11:00:36,855 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0282, std=0.9727
+2026-06-17 11:00:36,855 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:00:36,862 [INFO]   [Inversion Quality] η_inv: std=0.9727, mean=-0.0282, range=[-3.438, 3.781], cos_sim(η_inv, random)=0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-17 11:00:36,862 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:00:36,874 [DEBUG]   [Stage1] Spatial: removed top-22 components
+2026-06-17 11:00:36,879 [DEBUG]   [Stage2] Temporal: kept top-14/21 components
+2026-06-17 11:00:36,879 [INFO]   η_temporal: mean=-0.0001, std=0.3359
+2026-06-17 11:00:36,879 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:00:36,879 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:00:36,879 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:00:36,879 [INFO]   iter 1/1: The video depicts the interior of a moving train or subway c...
+2026-06-17 11:00:36,880 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3359, η_mixed std=0.9961, mean=-0.0011
+2026-06-17 11:00:36,880 [INFO]   [Blend Diag] cos(temporal, random)=-0.0000, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0215
+2026-06-17 11:00:36,880 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022272 (越大越说明 temporal 有影响)
+2026-06-17 11:00:36,881 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:00:36,881 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:00:36,881 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:00:36,881 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:00:36,883 [INFO]   [Quality Scale] mean_cos=0.0489, threshold=0.05, scale=0.5451 (weak)
+2026-06-17 11:00:36,883 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5451, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:00:36,883 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:01:03,254 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5742, gate=0.4083, λ=0.01405→0.00574
+2026-06-17 11:01:05,173 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5664, gate=0.4177, λ=0.01405→0.00587
+2026-06-17 11:01:25,287 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6133, gate=0.3621, λ=0.02408→0.00872
+2026-06-17 11:01:27,207 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6094, gate=0.3666, λ=0.02408→0.00883
+2026-06-17 11:01:47,269 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6484, gate=0.3225, λ=0.02722→0.00878
+2026-06-17 11:01:49,188 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6445, gate=0.3268, λ=0.02722→0.00889
+2026-06-17 11:02:09,243 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6797, gate=0.2894, λ=0.02256→0.00653
+2026-06-17 11:02:11,161 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6758, gate=0.2934, λ=0.02256→0.00662
+2026-06-17 11:02:31,304 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7109, gate=0.2583, λ=0.01144→0.00296
+2026-06-17 11:02:33,223 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7070, gate=0.2621, λ=0.01144→0.00300
+2026-06-17 11:02:51,833 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:02:51,833 [INFO]   [FI] 生成完成总结
+2026-06-17 11:02:51,833 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:02:51,833 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:02:54,271 [INFO] [P-Flow] Done in 265.1s → outputs/SVD_FI_20samples/sample_81/81.mp4
+2026-06-17 11:02:54,271 [INFO]   [SAMPLE SUMMARY] sample_id=81
+2026-06-17 11:02:54,271 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts the interior of a moving train or subway car. The seats are dark-colored, and there are metal handrails along the sides. Through the windows, the outside scenery is blurred due to the motion of the train, indicating that it is in transit. The lighting inside the train appears natural, likely coming from the windows, and gives the scene a slightly muted tone. There are a few passengers visible, including one person sitting towards the back of the car. The overall atmosphere suggests a typical commute with a focus on the movement and the environment within the train.
+2026-06-17 11:02:54,272 [INFO]   [SAMPLE SUMMARY] caption_length=589 chars, word_count=100
+2026-06-17 11:02:54,272 [INFO]   [SAMPLE SUMMARY] elapsed=265.1s, output=outputs/SVD_FI_20samples/sample_81/81.mp4
+2026-06-17 11:02:55,657 [INFO] [P-Flow] sample=82, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:02:58,282 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:03:00,610 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:03:00,611 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:03:00,611 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:03:25,403 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0315, std=0.4238, cached=11 points
+2026-06-17 11:03:49,958 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.0403, std=0.5234, cached=21 points
+2026-06-17 11:04:14,560 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0515, std=0.6445, cached=31 points
+2026-06-17 11:04:39,147 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0659, std=0.7969, cached=41 points
+2026-06-17 11:05:03,876 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0820, std=0.9727, cached=51 points
+2026-06-17 11:05:03,877 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0820, std=0.9727
+2026-06-17 11:05:03,877 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:05:03,883 [INFO]   [Inversion Quality] η_inv: std=0.9727, mean=-0.0820, range=[-3.844, 3.812], cos_sim(η_inv, random)=0.0002, cos_sim(η_inv, z0)=0.9805
+2026-06-17 11:05:03,883 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:05:03,895 [DEBUG]   [Stage1] Spatial: removed top-15 components
+2026-06-17 11:05:03,899 [DEBUG]   [Stage2] Temporal: kept top-13/21 components
+2026-06-17 11:05:03,900 [INFO]   η_temporal: mean=-0.0002, std=0.3262
+2026-06-17 11:05:03,900 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:05:03,900 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:05:03,900 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:05:03,900 [INFO]   iter 1/1: The video depicts a dimly lit alleyway at night, illuminated...
+2026-06-17 11:05:03,900 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3262, η_mixed std=0.9961, mean=0.0007
+2026-06-17 11:05:03,901 [INFO]   [Blend Diag] cos(temporal, random)=0.0002, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0210
+2026-06-17 11:05:03,901 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021581 (越大越说明 temporal 有影响)
+2026-06-17 11:05:03,901 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:05:03,901 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:05:03,901 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:05:03,901 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:05:03,903 [INFO]   [Quality Scale] mean_cos=0.0193, threshold=0.05, scale=0.4161 (weak)
+2026-06-17 11:05:03,903 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.4161, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:05:03,903 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:05:30,266 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6055, gate=0.3711, λ=0.01073→0.00398
+2026-06-17 11:05:32,182 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5938, gate=0.3849, λ=0.01073→0.00413
+2026-06-17 11:05:52,270 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6406, gate=0.3311, λ=0.01838→0.00609
+2026-06-17 11:05:54,181 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6367, gate=0.3355, λ=0.01838→0.00617
+2026-06-17 11:06:14,159 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6797, gate=0.2894, λ=0.02078→0.00601
+2026-06-17 11:06:16,074 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6719, gate=0.2975, λ=0.02078→0.00618
+2026-06-17 11:06:36,122 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7031, gate=0.2659, λ=0.01722→0.00458
+2026-06-17 11:06:38,036 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6992, gate=0.2697, λ=0.01722→0.00464
+2026-06-17 11:06:58,183 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7422, gate=0.2295, λ=0.00874→0.00201
+2026-06-17 11:07:00,099 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7383, gate=0.2330, λ=0.00874→0.00204
+2026-06-17 11:07:18,623 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:07:18,623 [INFO]   [FI] 生成完成总结
+2026-06-17 11:07:18,623 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:07:18,623 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:07:21,009 [INFO] [P-Flow] Done in 265.4s → outputs/SVD_FI_20samples/sample_82/82.mp4
+2026-06-17 11:07:21,009 [INFO]   [SAMPLE SUMMARY] sample_id=82
+2026-06-17 11:07:21,009 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a dimly lit alleyway at night, illuminated by a single light source that casts a warm glow over the scene. The walls of the alley are weathered and show signs of wear, with peeling paint and graffiti. One wall prominently features the word "Runway" written in bold, black spray paint, which appears to be dripping down slightly. The alley is narrow, with buildings on either side, and the ground looks uneven and littered with debris. As the camera moves forward, it captures more of the graffiti-covered walls and the overall desolate atmosphere of the area. The lighting creates long shadows and enhances the eerie ambiance of the setting.
+2026-06-17 11:07:21,009 [INFO]   [SAMPLE SUMMARY] caption_length=659 chars, word_count=111
+2026-06-17 11:07:21,009 [INFO]   [SAMPLE SUMMARY] elapsed=265.4s, output=outputs/SVD_FI_20samples/sample_82/82.mp4
+2026-06-17 11:07:22,408 [INFO] [P-Flow] sample=83, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:07:24,889 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:07:27,210 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:07:27,211 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:07:27,211 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:07:51,805 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0173, std=0.5508, cached=11 points
+2026-06-17 11:08:16,239 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0187, std=0.6758, cached=21 points
+2026-06-17 11:08:40,449 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0204, std=0.8281, cached=31 points
+2026-06-17 11:09:04,635 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0222, std=1.0156, cached=41 points
+2026-06-17 11:09:29,193 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0233, std=1.2344, cached=51 points
+2026-06-17 11:09:29,194 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0233, std=1.2344
+2026-06-17 11:09:29,194 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:09:29,200 [INFO]   [Inversion Quality] η_inv: std=1.2344, mean=0.0233, range=[-3.891, 4.031], cos_sim(η_inv, random)=0.0006, cos_sim(η_inv, z0)=0.9883
+2026-06-17 11:09:29,201 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:09:29,213 [DEBUG]   [Stage1] Spatial: removed top-2 components
+2026-06-17 11:09:29,217 [DEBUG]   [Stage2] Temporal: kept top-8/21 components
+2026-06-17 11:09:29,217 [INFO]   η_temporal: mean=0.0188, std=0.4258
+2026-06-17 11:09:29,218 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:09:29,218 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:09:29,218 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:09:29,218 [INFO]   iter 1/1: The video depicts a person standing on a snowy mountain peak...
+2026-06-17 11:09:29,218 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.4258, η_mixed std=0.9961, mean=0.0001
+2026-06-17 11:09:29,218 [INFO]   [Blend Diag] cos(temporal, random)=-0.0008, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0265
+2026-06-17 11:09:29,219 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.027624 (越大越说明 temporal 有影响)
+2026-06-17 11:09:29,219 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:09:29,219 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:09:29,219 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:09:29,219 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:09:29,221 [INFO]   [Quality Scale] mean_cos=0.0418, threshold=0.05, scale=0.5133 (weak)
+2026-06-17 11:09:29,221 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5133, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:09:29,221 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:09:54,987 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6367, gate=0.3355, λ=0.01323→0.00444
+2026-06-17 11:09:56,901 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6328, gate=0.3398, λ=0.01323→0.00450
+2026-06-17 11:10:16,925 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6719, gate=0.2975, λ=0.02267→0.00674
+2026-06-17 11:10:18,839 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6680, gate=0.3016, λ=0.02267→0.00684
+2026-06-17 11:10:38,895 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6953, gate=0.2736, λ=0.02563→0.00701
+2026-06-17 11:10:40,809 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6953, gate=0.2736, λ=0.02563→0.00701
+2026-06-17 11:11:00,883 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7227, gate=0.2473, λ=0.02124→0.00525
+2026-06-17 11:11:02,797 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7188, gate=0.2509, λ=0.02124→0.00533
+2026-06-17 11:11:22,995 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7461, gate=0.2261, λ=0.01078→0.00244
+2026-06-17 11:11:24,907 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7461, gate=0.2261, λ=0.01078→0.00244
+2026-06-17 11:11:43,496 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:11:43,496 [INFO]   [FI] 生成完成总结
+2026-06-17 11:11:43,496 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:11:43,496 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:11:45,920 [INFO] [P-Flow] Done in 263.5s → outputs/SVD_FI_20samples/sample_83/83.mp4
+2026-06-17 11:11:45,921 [INFO]   [SAMPLE SUMMARY] sample_id=83
+2026-06-17 11:11:45,921 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a person standing on a snowy mountain peak under a clear blue sky. The individual is dressed in winter gear, including an orange jacket, dark pants, gloves, and a beanie, suggesting they are prepared for cold weather. They have a backpack on their back, indicating they might be on a hike or expedition. The sun is shining brightly in the sky, casting shadows on the snow-covered landscape. The surrounding area features expansive snowfields with gentle slopes and distant mountain peaks, creating a serene and majestic alpine setting. The person appears to be enjoying the view, as they raise their arms outstretched in one of the frames, possibly celebrating or simply taking in the beauty of the surroundings. The overall atmosphere is one of adventure and tranquility in a remote, high-altitude environment.
+2026-06-17 11:11:45,921 [INFO]   [SAMPLE SUMMARY] caption_length=829 chars, word_count=134
+2026-06-17 11:11:45,921 [INFO]   [SAMPLE SUMMARY] elapsed=263.5s, output=outputs/SVD_FI_20samples/sample_83/83.mp4
+2026-06-17 11:11:47,320 [INFO] [P-Flow] sample=84, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:11:49,779 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:11:52,098 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:11:52,098 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:11:52,098 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:12:16,661 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0129, std=0.5469, cached=11 points
+2026-06-17 11:12:41,305 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.0187, std=0.6758, cached=21 points
+2026-06-17 11:13:05,850 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0265, std=0.8320, cached=31 points
+2026-06-17 11:13:30,437 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0359, std=1.0156, cached=41 points
+2026-06-17 11:13:55,251 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0442, std=1.2109, cached=51 points
+2026-06-17 11:13:55,252 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0442, std=1.2109
+2026-06-17 11:13:55,252 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:13:55,258 [INFO]   [Inversion Quality] η_inv: std=1.2109, mean=-0.0442, range=[-4.219, 4.438], cos_sim(η_inv, random)=-0.0002, cos_sim(η_inv, z0)=0.9766
+2026-06-17 11:13:55,258 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:13:55,270 [DEBUG]   [Stage1] Spatial: removed top-16 components
+2026-06-17 11:13:55,275 [DEBUG]   [Stage2] Temporal: kept top-9/21 components
+2026-06-17 11:13:55,275 [INFO]   η_temporal: mean=-0.0000, std=0.3945
+2026-06-17 11:13:55,275 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:13:55,275 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:13:55,275 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:13:55,275 [INFO]   iter 1/1: The video begins with a view through an open doorway, reveal...
+2026-06-17 11:13:55,276 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3945, η_mixed std=0.9961, mean=0.0000
+2026-06-17 11:13:55,276 [INFO]   [Blend Diag] cos(temporal, random)=0.0004, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0256
+2026-06-17 11:13:55,276 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.025725 (越大越说明 temporal 有影响)
+2026-06-17 11:13:55,276 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:13:55,276 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:13:55,276 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:13:55,276 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:13:55,278 [INFO]   [Quality Scale] mean_cos=0.0826, threshold=0.05, scale=0.6918 (weak)
+2026-06-17 11:13:55,278 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.6918, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:13:55,279 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:14:20,744 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5586, gate=0.4273, λ=0.01783→0.00762
+2026-06-17 11:14:22,662 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5547, gate=0.4321, λ=0.01783→0.00771
+2026-06-17 11:14:42,673 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6094, gate=0.3666, λ=0.03056→0.01120
+2026-06-17 11:14:44,587 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6016, gate=0.3757, λ=0.03056→0.01148
+2026-06-17 11:15:04,602 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6484, gate=0.3225, λ=0.03454→0.01114
+2026-06-17 11:15:06,517 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6445, gate=0.3268, λ=0.03454→0.01129
+2026-06-17 11:15:26,535 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6875, gate=0.2814, λ=0.02863→0.00806
+2026-06-17 11:15:28,450 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6836, gate=0.2854, λ=0.02863→0.00817
+2026-06-17 11:15:48,663 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7266, gate=0.2436, λ=0.01452→0.00354
+2026-06-17 11:15:50,580 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7227, gate=0.2473, λ=0.01452→0.00359
+2026-06-17 11:16:09,123 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:16:09,124 [INFO]   [FI] 生成完成总结
+2026-06-17 11:16:09,124 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:16:09,124 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:16:11,614 [INFO] [P-Flow] Done in 264.3s → outputs/SVD_FI_20samples/sample_84/84.mp4
+2026-06-17 11:16:11,615 [INFO]   [SAMPLE SUMMARY] sample_id=84
+2026-06-17 11:16:11,615 [INFO]   [SAMPLE SUMMARY] full_caption=The video begins with a view through an open doorway, revealing a serene outdoor scene featuring a waterfall cascading down a rocky cliff into a tranquil pool of water. The surrounding area is lush with greenery, and the sky above is bright, suggesting a sunny day. The camera then transitions to the interior of a room, showing a modern living space with wooden flooring and large windows that frame the natural landscape outside. The room is minimally furnished with a few pieces of contemporary furniture, including a sofa and a coffee table. The lighting inside the room is warm and inviting, creating a cozy atmosphere. The camera pans around the room, capturing the details of the interior design and the view through the windows. The overall ambiance of the video is peaceful and relaxing, blending indoor comfort with the beauty of nature.
+2026-06-17 11:16:11,615 [INFO]   [SAMPLE SUMMARY] caption_length=847 chars, word_count=142
+2026-06-17 11:16:11,615 [INFO]   [SAMPLE SUMMARY] elapsed=264.3s, output=outputs/SVD_FI_20samples/sample_84/84.mp4
+2026-06-17 11:16:13,041 [INFO] [P-Flow] sample=85, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:16:15,503 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:16:17,829 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:16:17,830 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:16:17,830 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:16:42,969 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0310, std=0.4805, cached=11 points
+2026-06-17 11:17:07,580 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.0410, std=0.5938, cached=21 points
+2026-06-17 11:17:32,381 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0540, std=0.7305, cached=31 points
+2026-06-17 11:17:57,235 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0703, std=0.8984, cached=41 points
+2026-06-17 11:18:21,432 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0874, std=1.0859, cached=51 points
+2026-06-17 11:18:21,433 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0874, std=1.0859
+2026-06-17 11:18:21,433 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:18:21,438 [INFO]   [Inversion Quality] η_inv: std=1.0859, mean=-0.0874, range=[-3.750, 4.125], cos_sim(η_inv, random)=0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-17 11:18:21,438 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:18:21,450 [DEBUG]   [Stage1] Spatial: removed top-19 components
+2026-06-17 11:18:21,454 [DEBUG]   [Stage2] Temporal: kept top-7/21 components
+2026-06-17 11:18:21,455 [INFO]   η_temporal: mean=0.0001, std=0.3496
+2026-06-17 11:18:21,455 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:18:21,455 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:18:21,455 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:18:21,455 [INFO]   iter 1/1: The video appears to be a first-person perspective sequence,...
+2026-06-17 11:18:21,455 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3496, η_mixed std=0.9961, mean=-0.0005
+2026-06-17 11:18:21,456 [INFO]   [Blend Diag] cos(temporal, random)=-0.0004, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0220
+2026-06-17 11:18:21,456 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022963 (越大越说明 temporal 有影响)
+2026-06-17 11:18:21,456 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:18:21,456 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:18:21,456 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:18:21,456 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:18:21,458 [INFO]   [Quality Scale] mean_cos=0.0696, threshold=0.05, scale=0.6373 (weak)
+2026-06-17 11:18:21,458 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.6373, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:18:21,458 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:18:45,646 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5820, gate=0.3989, λ=0.01643→0.00655
+2026-06-17 11:18:47,560 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5742, gate=0.4083, λ=0.01643→0.00671
+2026-06-17 11:19:05,974 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6172, gate=0.3576, λ=0.02815→0.01007
+2026-06-17 11:19:07,890 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6094, gate=0.3666, λ=0.02815→0.01032
+2026-06-17 11:19:26,707 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6523, gate=0.3183, λ=0.03182→0.01013
+2026-06-17 11:19:28,622 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6484, gate=0.3225, λ=0.03182→0.01026
+2026-06-17 11:19:47,429 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6836, gate=0.2854, λ=0.02637→0.00753
+2026-06-17 11:19:49,344 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6758, gate=0.2934, λ=0.02637→0.00774
+2026-06-17 11:20:08,184 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7188, gate=0.2509, λ=0.01338→0.00336
+2026-06-17 11:20:10,098 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7148, gate=0.2546, λ=0.01338→0.00341
+2026-06-17 11:20:27,577 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:20:27,577 [INFO]   [FI] 生成完成总结
+2026-06-17 11:20:27,577 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:20:27,577 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:20:29,995 [INFO] [P-Flow] Done in 257.0s → outputs/SVD_FI_20samples/sample_85/85.mp4
+2026-06-17 11:20:29,995 [INFO]   [SAMPLE SUMMARY] sample_id=85
+2026-06-17 11:20:29,995 [INFO]   [SAMPLE SUMMARY] full_caption=The video appears to be a first-person perspective sequence, likely from a video game or simulation. The scenes transition through various environments:
+
+1. **Initial Scene**: The video begins with a dimly lit room where a person is typing on a keyboard. The lighting is low, and the focus is on the hands and the keyboard, suggesting a setting that could be a home office or a quiet workspace.
+
+2. **Transition to a Doorway**: The scene shifts to a doorway, where the person seems to be exiting a building. The lighting changes to a warmer tone, indicating a different time of day or a change in environment. The person's hand is visible as they open the door, and the camera follows them outside.
+
+3. **Outdoor Scene**: The person steps out into what looks like a residential area during daylight hours. The surroundings include a house with siding, a porch, and some greenery. The person walks quickly, and the camera movement suggests urgency or haste. The outdoor environment is well-lit, contrasting with the previous indoor scene.
+
+4. **Final Scene**: The video ends with the person running down a grassy path, possibly in a suburban neighborhood. The motion blur indicates rapid movement, and the background shows houses and trees, reinforcing the suburban setting. The person continues running towards an open area, possibly a driveway or street, with the camera following their movement closely.
+
+Overall, the video captures a sequence of actions that suggest a narrative of someone moving from an indoor space to an outdoor environment, possibly in a hurry or escaping something.
+2026-06-17 11:20:29,995 [INFO]   [SAMPLE SUMMARY] caption_length=1590 chars, word_count=260
+2026-06-17 11:20:29,995 [INFO]   [SAMPLE SUMMARY] elapsed=257.0s, output=outputs/SVD_FI_20samples/sample_85/85.mp4
+2026-06-17 11:20:31,378 [INFO] [P-Flow] sample=88, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:20:33,682 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:20:36,007 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:20:36,008 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:20:36,008 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:21:00,354 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0007, std=0.3672, cached=11 points
+2026-06-17 11:21:24,720 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.0013, std=0.4512, cached=21 points
+2026-06-17 11:21:49,063 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0042, std=0.5586, cached=31 points
+2026-06-17 11:22:13,603 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0085, std=0.6875, cached=41 points
+2026-06-17 11:22:38,012 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0142, std=0.8477, cached=51 points
+2026-06-17 11:22:38,012 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0142, std=0.8477
+2026-06-17 11:22:38,012 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:22:38,020 [INFO]   [Inversion Quality] η_inv: std=0.8477, mean=-0.0142, range=[-2.969, 3.891], cos_sim(η_inv, random)=0.0001, cos_sim(η_inv, z0)=0.9648
+2026-06-17 11:22:38,020 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:22:38,032 [DEBUG]   [Stage1] Spatial: removed top-20 components
+2026-06-17 11:22:38,036 [DEBUG]   [Stage2] Temporal: kept top-11/21 components
+2026-06-17 11:22:38,036 [INFO]   η_temporal: mean=0.0003, std=0.2910
+2026-06-17 11:22:38,036 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:22:38,036 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:22:38,037 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:22:38,037 [INFO]   iter 1/1: The video depicts a narrow alleyway between old, weathered b...
+2026-06-17 11:22:38,037 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.2910, η_mixed std=0.9961, mean=0.0009
+2026-06-17 11:22:38,037 [INFO]   [Blend Diag] cos(temporal, random)=-0.0001, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0186
+2026-06-17 11:22:38,038 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.019423 (越大越说明 temporal 有影响)
+2026-06-17 11:22:38,038 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:22:38,038 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:22:38,038 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:22:38,038 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:22:38,040 [INFO]   [Quality Scale] mean_cos=0.0131, threshold=0.05, scale=0.3912 (weak)
+2026-06-17 11:22:38,040 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.3912, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:22:38,040 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:23:03,614 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6328, gate=0.3398, λ=0.01008→0.00343
+2026-06-17 11:23:05,529 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6289, gate=0.3442, λ=0.01008→0.00347
+2026-06-17 11:23:24,788 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6680, gate=0.3016, λ=0.01728→0.00521
+2026-06-17 11:23:26,705 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6641, gate=0.3057, λ=0.01728→0.00528
+2026-06-17 11:23:45,940 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6953, gate=0.2736, λ=0.01953→0.00534
+2026-06-17 11:23:47,856 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6914, gate=0.2775, λ=0.01953→0.00542
+2026-06-17 11:24:06,956 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7266, gate=0.2436, λ=0.01619→0.00394
+2026-06-17 11:24:08,874 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7227, gate=0.2473, λ=0.01619→0.00400
+2026-06-17 11:24:27,684 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7656, gate=0.2095, λ=0.00821→0.00172
+2026-06-17 11:24:29,600 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7656, gate=0.2095, λ=0.00821→0.00172
+2026-06-17 11:24:47,095 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:24:47,095 [INFO]   [FI] 生成完成总结
+2026-06-17 11:24:47,095 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:24:47,095 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:24:49,526 [INFO] [P-Flow] Done in 258.1s → outputs/SVD_FI_20samples/sample_88/88.mp4
+2026-06-17 11:24:49,527 [INFO]   [SAMPLE SUMMARY] sample_id=88
+2026-06-17 11:24:49,527 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a narrow alleyway between old, weathered buildings under a stormy sky. The scene is chaotic and intense, with large waves of water crashing through the alley, creating a sense of urgency and danger. The water appears dirty and turbulent, suggesting it might be a flood or a sudden surge of water. Debris, including pieces of wood and other objects, is scattered along the sides of the alley, adding to the disarray. The sky is filled with dark, ominous clouds, enhancing the dramatic and foreboding atmosphere of the scene. The overall mood is one of destruction and the overwhelming power of nature.
+2026-06-17 11:24:49,527 [INFO]   [SAMPLE SUMMARY] caption_length=618 chars, word_count=104
+2026-06-17 11:24:49,527 [INFO]   [SAMPLE SUMMARY] elapsed=258.1s, output=outputs/SVD_FI_20samples/sample_88/88.mp4
+2026-06-17 11:24:50,911 [INFO] [P-Flow] sample=99, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:24:53,305 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:24:55,630 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:24:55,630 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:24:55,630 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:25:19,938 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0200, std=0.4512, cached=11 points
+2026-06-17 11:25:44,235 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0231, std=0.5586, cached=21 points
+2026-06-17 11:26:08,561 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0266, std=0.6914, cached=31 points
+2026-06-17 11:26:32,830 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0309, std=0.8516, cached=41 points
+2026-06-17 11:26:57,123 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0361, std=1.0312, cached=51 points
+2026-06-17 11:26:57,124 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0361, std=1.0312
+2026-06-17 11:26:57,124 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:26:57,129 [INFO]   [Inversion Quality] η_inv: std=1.0312, mean=0.0361, range=[-3.672, 3.797], cos_sim(η_inv, random)=0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-17 11:26:57,129 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:26:57,141 [DEBUG]   [Stage1] Spatial: removed top-11 components
+2026-06-17 11:26:57,145 [DEBUG]   [Stage2] Temporal: kept top-17/21 components
+2026-06-17 11:26:57,145 [INFO]   η_temporal: mean=0.0005, std=0.3633
+2026-06-17 11:26:57,146 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:26:57,146 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:26:57,146 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:26:57,146 [INFO]   iter 1/1: The video depicts a striking and surreal scene set in an urb...
+2026-06-17 11:26:57,146 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3633, η_mixed std=0.9961, mean=0.0002
+2026-06-17 11:26:57,146 [INFO]   [Blend Diag] cos(temporal, random)=-0.0000, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0232
+2026-06-17 11:26:57,147 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.023826 (越大越说明 temporal 有影响)
+2026-06-17 11:26:57,147 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:26:57,147 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:26:57,147 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:26:57,147 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:26:57,149 [INFO]   [Quality Scale] mean_cos=0.0420, threshold=0.05, scale=0.5139 (weak)
+2026-06-17 11:26:57,149 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5139, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:26:57,149 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:27:21,965 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6055, gate=0.3711, λ=0.01325→0.00492
+2026-06-17 11:27:23,885 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5938, gate=0.3849, λ=0.01325→0.00510
+2026-06-17 11:27:42,940 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6367, gate=0.3355, λ=0.02270→0.00762
+2026-06-17 11:27:44,855 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6328, gate=0.3398, λ=0.02270→0.00771
+2026-06-17 11:28:03,945 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6719, gate=0.2975, λ=0.02566→0.00763
+2026-06-17 11:28:05,863 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6680, gate=0.3016, λ=0.02566→0.00774
+2026-06-17 11:28:24,966 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6992, gate=0.2697, λ=0.02127→0.00574
+2026-06-17 11:28:26,882 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6953, gate=0.2736, λ=0.02127→0.00582
+2026-06-17 11:28:46,053 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7227, gate=0.2473, λ=0.01079→0.00267
+2026-06-17 11:28:47,969 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7227, gate=0.2473, λ=0.01079→0.00267
+2026-06-17 11:29:05,768 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:29:05,768 [INFO]   [FI] 生成完成总结
+2026-06-17 11:29:05,768 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:29:05,769 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:29:08,155 [INFO] [P-Flow] Done in 257.2s → outputs/SVD_FI_20samples/sample_99/99.mp4
+2026-06-17 11:29:08,155 [INFO]   [SAMPLE SUMMARY] sample_id=99
+2026-06-17 11:29:08,155 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a striking and surreal scene set in an urban environment, likely a city with tall skyscrapers. The central figure is a person dressed entirely in black, including a long cloak that drapes over their head, creating an eerie and mysterious silhouette. The person's face is obscured by the cloak, adding to the enigmatic atmosphere.
+
+As the camera pans around the figure, it captures the towering buildings surrounding them, which appear to be modern high-rise structures with reflective glass facades. The sky above is clear with a few scattered clouds, suggesting a bright day. The overall mood of the video is both dramatic and contemplative, with the figure standing out starkly against the backdrop of the cityscape. The lighting emphasizes the contrast between the dark figure and the bright, sunlit sky, enhancing the visual impact of the scene.
+2026-06-17 11:29:08,155 [INFO]   [SAMPLE SUMMARY] caption_length=867 chars, word_count=140
+2026-06-17 11:29:08,155 [INFO]   [SAMPLE SUMMARY] elapsed=257.2s, output=outputs/SVD_FI_20samples/sample_99/99.mp4
+2026-06-17 11:29:09,540 [INFO] [P-Flow] sample=104, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:29:11,923 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:29:14,240 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:29:14,241 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:29:14,241 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:29:38,329 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.1406, std=0.6094, cached=11 points
+2026-06-17 11:30:02,435 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.1738, std=0.7461, cached=21 points
+2026-06-17 11:30:26,520 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.2129, std=0.9219, cached=31 points
+2026-06-17 11:30:50,524 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.2578, std=1.1328, cached=41 points
+2026-06-17 11:31:14,620 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.3066, std=1.3828, cached=51 points
+2026-06-17 11:31:14,620 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.3066, std=1.3828
+2026-06-17 11:31:14,620 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:31:14,625 [INFO]   [Inversion Quality] η_inv: std=1.3828, mean=0.3066, range=[-3.188, 3.422], cos_sim(η_inv, random)=-0.0000, cos_sim(η_inv, z0)=0.9805
+2026-06-17 11:31:14,625 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:31:14,639 [DEBUG]   [Stage1] Spatial: removed top-1 components
+2026-06-17 11:31:14,644 [DEBUG]   [Stage2] Temporal: kept top-3/21 components
+2026-06-17 11:31:14,644 [INFO]   η_temporal: mean=0.0522, std=0.5156
+2026-06-17 11:31:14,644 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:31:14,644 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:31:14,644 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:31:14,644 [INFO]   iter 1/1: The video features a blue, furry creature with a playful and...
+2026-06-17 11:31:14,644 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.5156, η_mixed std=0.9961, mean=0.0037
+2026-06-17 11:31:14,645 [INFO]   [Blend Diag] cos(temporal, random)=-0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0327
+2026-06-17 11:31:14,645 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.033494 (越大越说明 temporal 有影响)
+2026-06-17 11:31:14,645 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:31:14,645 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:31:14,645 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:31:14,645 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:31:14,647 [INFO]   [Quality Scale] mean_cos=0.2121, threshold=0.05, scale=0.9662 (strong)
+2026-06-17 11:31:14,647 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.9662, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:31:14,647 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:31:39,707 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5938, gate=0.3849, λ=0.02491→0.00959
+2026-06-17 11:31:41,623 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5898, gate=0.3895, λ=0.02491→0.00970
+2026-06-17 11:32:00,705 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6523, gate=0.3183, λ=0.04268→0.01358
+2026-06-17 11:32:02,622 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6484, gate=0.3225, λ=0.04268→0.01377
+2026-06-17 11:32:21,747 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6914, gate=0.2775, λ=0.04824→0.01338
+2026-06-17 11:32:23,661 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6875, gate=0.2814, λ=0.04824→0.01357
+2026-06-17 11:32:42,723 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7109, gate=0.2583, λ=0.03998→0.01033
+2026-06-17 11:32:44,639 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7109, gate=0.2583, λ=0.03998→0.01033
+2026-06-17 11:33:03,683 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7344, gate=0.2365, λ=0.02028→0.00480
+2026-06-17 11:33:05,599 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7344, gate=0.2365, λ=0.02028→0.00480
+2026-06-17 11:33:23,290 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:33:23,290 [INFO]   [FI] 生成完成总结
+2026-06-17 11:33:23,290 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:33:23,290 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:33:25,595 [INFO] [P-Flow] Done in 256.1s → outputs/SVD_FI_20samples/sample_104/104.mp4
+2026-06-17 11:33:25,595 [INFO]   [SAMPLE SUMMARY] sample_id=104
+2026-06-17 11:33:25,595 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a blue, furry creature with a playful and animated demeanor. The creature has a round head, large eyes, and a small black nose. It is standing upright on two legs and appears to be dancing or moving rhythmically. Its arms are raised and moving in a lively manner, suggesting it is enjoying itself. The background is a plain light blue color, which helps to highlight the vibrant blue of the creature. The overall atmosphere of the video is cheerful and whimsical.
+2026-06-17 11:33:25,595 [INFO]   [SAMPLE SUMMARY] caption_length=482 chars, word_count=84
+2026-06-17 11:33:25,595 [INFO]   [SAMPLE SUMMARY] elapsed=256.1s, output=outputs/SVD_FI_20samples/sample_104/104.mp4
+2026-06-17 11:33:26,974 [INFO] [P-Flow] sample=105, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:33:29,391 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:33:31,716 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:33:31,716 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:33:31,716 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:33:55,827 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0151, std=0.4961, cached=11 points
+2026-06-17 11:34:20,045 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0149, std=0.6094, cached=21 points
+2026-06-17 11:34:44,235 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0145, std=0.7539, cached=31 points
+2026-06-17 11:35:08,326 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0147, std=0.9219, cached=41 points
+2026-06-17 11:35:32,712 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0170, std=1.1094, cached=51 points
+2026-06-17 11:35:32,713 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0170, std=1.1094
+2026-06-17 11:35:32,713 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:35:32,718 [INFO]   [Inversion Quality] η_inv: std=1.1094, mean=0.0170, range=[-3.781, 4.406], cos_sim(η_inv, random)=-0.0014, cos_sim(η_inv, z0)=0.9844
+2026-06-17 11:35:32,718 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:35:32,730 [DEBUG]   [Stage1] Spatial: removed top-10 components
+2026-06-17 11:35:32,734 [DEBUG]   [Stage2] Temporal: kept top-13/21 components
+2026-06-17 11:35:32,734 [INFO]   η_temporal: mean=0.0005, std=0.3750
+2026-06-17 11:35:32,734 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:35:32,734 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:35:32,734 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:35:32,734 [INFO]   iter 1/1: The video depicts a vibrant, neon-lit forest scene at night....
+2026-06-17 11:35:32,735 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3750, η_mixed std=0.9961, mean=0.0008
+2026-06-17 11:35:32,735 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0247
+2026-06-17 11:35:32,735 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024517 (越大越说明 temporal 有影响)
+2026-06-17 11:35:32,736 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:35:32,736 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:35:32,736 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:35:32,736 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:35:32,738 [INFO]   [Quality Scale] mean_cos=0.0961, threshold=0.05, scale=0.7441 (strong)
+2026-06-17 11:35:32,738 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.7441, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:35:32,738 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:35:58,195 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5938, gate=0.3849, λ=0.01918→0.00738
+2026-06-17 11:36:00,114 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5859, gate=0.3942, λ=0.01918→0.00756
+2026-06-17 11:36:19,237 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6328, gate=0.3398, λ=0.03287→0.01117
+2026-06-17 11:36:21,156 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6289, gate=0.3442, λ=0.03287→0.01131
+2026-06-17 11:36:40,248 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6602, gate=0.3099, λ=0.03715→0.01151
+2026-06-17 11:36:42,164 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6602, gate=0.3099, λ=0.03715→0.01151
+2026-06-17 11:37:01,228 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6953, gate=0.2736, λ=0.03079→0.00842
+2026-06-17 11:37:03,145 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6953, gate=0.2736, λ=0.03079→0.00842
+2026-06-17 11:37:22,221 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7266, gate=0.2436, λ=0.01562→0.00381
+2026-06-17 11:37:24,139 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7266, gate=0.2436, λ=0.01562→0.00381
+2026-06-17 11:37:41,857 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:37:41,857 [INFO]   [FI] 生成完成总结
+2026-06-17 11:37:41,857 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:37:41,857 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:37:44,372 [INFO] [P-Flow] Done in 257.4s → outputs/SVD_FI_20samples/sample_105/105.mp4
+2026-06-17 11:37:44,372 [INFO]   [SAMPLE SUMMARY] sample_id=105
+2026-06-17 11:37:44,372 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a vibrant, neon-lit forest scene at night. The trees and plants are illuminated with bright, glowing colors such as pink, blue, and green, creating a surreal and otherworldly atmosphere. The ground is covered with a mix of grass and smaller vegetation, also bathed in the same neon hues. The sky above is dark, providing a stark contrast to the vivid colors below. The overall effect is reminiscent of a magical or fantastical environment, possibly from a video game or animated film. The scene is static, with no visible movement or characters present, focusing solely on the striking visual display of the glowing flora.
+2026-06-17 11:37:44,372 [INFO]   [SAMPLE SUMMARY] caption_length=640 chars, word_count=106
+2026-06-17 11:37:44,372 [INFO]   [SAMPLE SUMMARY] elapsed=257.4s, output=outputs/SVD_FI_20samples/sample_105/105.mp4
+2026-06-17 11:37:45,756 [INFO] [P-Flow] sample=106, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:37:48,207 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:37:50,531 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:37:50,531 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:37:50,531 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:38:15,068 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0304, std=0.4121, cached=11 points
+2026-06-17 11:38:39,441 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0342, std=0.5078, cached=21 points
+2026-06-17 11:39:03,639 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0378, std=0.6250, cached=31 points
+2026-06-17 11:39:27,852 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0417, std=0.7656, cached=41 points
+2026-06-17 11:39:52,029 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0466, std=0.9336, cached=51 points
+2026-06-17 11:39:52,030 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0466, std=0.9336
+2026-06-17 11:39:52,030 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:39:52,035 [INFO]   [Inversion Quality] η_inv: std=0.9336, mean=0.0466, range=[-3.641, 3.938], cos_sim(η_inv, random)=0.0000, cos_sim(η_inv, z0)=0.9648
+2026-06-17 11:39:52,035 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:39:52,047 [DEBUG]   [Stage1] Spatial: removed top-29 components
+2026-06-17 11:39:52,051 [DEBUG]   [Stage2] Temporal: kept top-11/21 components
+2026-06-17 11:39:52,052 [INFO]   η_temporal: mean=-0.0001, std=0.3203
+2026-06-17 11:39:52,052 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:39:52,052 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:39:52,052 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:39:52,052 [INFO]   iter 1/1: The video depicts a dynamic and chaotic scene set in an urba...
+2026-06-17 11:39:52,052 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3203, η_mixed std=0.9961, mean=-0.0009
+2026-06-17 11:39:52,053 [INFO]   [Blend Diag] cos(temporal, random)=-0.0010, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0194
+2026-06-17 11:39:52,053 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.021150 (越大越说明 temporal 有影响)
+2026-06-17 11:39:52,053 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:39:52,053 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:39:52,053 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:39:52,053 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:39:52,055 [INFO]   [Quality Scale] mean_cos=0.0572, threshold=0.05, scale=0.5824 (weak)
+2026-06-17 11:39:52,055 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5824, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:39:52,055 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:40:17,934 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5977, gate=0.3803, λ=0.01501→0.00571
+2026-06-17 11:40:19,853 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5898, gate=0.3895, λ=0.01501→0.00585
+2026-06-17 11:40:38,938 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6328, gate=0.3398, λ=0.02573→0.00874
+2026-06-17 11:40:40,857 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6328, gate=0.3398, λ=0.02573→0.00874
+2026-06-17 11:40:59,960 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6680, gate=0.3016, λ=0.02908→0.00877
+2026-06-17 11:41:01,878 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6602, gate=0.3099, λ=0.02908→0.00901
+2026-06-17 11:41:20,943 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7031, gate=0.2659, λ=0.02410→0.00641
+2026-06-17 11:41:22,861 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6992, gate=0.2697, λ=0.02410→0.00650
+2026-06-17 11:41:41,952 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7422, gate=0.2295, λ=0.01223→0.00281
+2026-06-17 11:41:43,867 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7422, gate=0.2295, λ=0.01223→0.00281
+2026-06-17 11:42:01,583 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:42:01,584 [INFO]   [FI] 生成完成总结
+2026-06-17 11:42:01,584 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:42:01,584 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:42:03,995 [INFO] [P-Flow] Done in 258.2s → outputs/SVD_FI_20samples/sample_106/106.mp4
+2026-06-17 11:42:03,995 [INFO]   [SAMPLE SUMMARY] sample_id=106
+2026-06-17 11:42:03,995 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts a dynamic and chaotic scene set in an urban alleyway. The environment is gritty, with walls covered in graffiti and debris scattered on the ground. The focal point of the video is a swirling vortex made up of shattered glass, which appears to be moving rapidly through the alley. The glass fragments are depicted in various shades of blue and green, creating a mesmerizing and somewhat surreal effect as they swirl and disperse. The camera follows the vortex closely, giving the viewer a sense of being pulled into the scene. The overall atmosphere is intense and somewhat unsettling, with the rapid movement and the sharp, jagged edges of the glass adding to the sense of urgency and danger. The lighting is dim, enhancing the dramatic and almost apocalyptic feel of the video.
+2026-06-17 11:42:03,995 [INFO]   [SAMPLE SUMMARY] caption_length=796 chars, word_count=135
+2026-06-17 11:42:03,995 [INFO]   [SAMPLE SUMMARY] elapsed=258.2s, output=outputs/SVD_FI_20samples/sample_106/106.mp4
+2026-06-17 11:42:05,363 [INFO] [P-Flow] sample=111, flags=['inversion', 'svd', 'blend(α=0.004)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-17 11:42:07,813 [INFO]   [Inversion] encoding reference → latent...
+2026-06-17 11:42:10,136 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-17 11:42:10,137 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-17 11:42:10,137 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+2026-06-17 11:42:34,948 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0070, std=0.4355, cached=11 points
+2026-06-17 11:42:59,746 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.0103, std=0.5391, cached=21 points
+2026-06-17 11:43:24,588 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0150, std=0.6680, cached=31 points
+2026-06-17 11:43:49,449 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0214, std=0.8242, cached=41 points
+2026-06-17 11:44:14,254 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0294, std=1.0156, cached=51 points
+2026-06-17 11:44:14,255 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0294, std=1.0156
+2026-06-17 11:44:14,255 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-17 11:44:14,261 [INFO]   [Inversion Quality] η_inv: std=1.0156, mean=-0.0294, range=[-3.453, 3.547], cos_sim(η_inv, random)=-0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-17 11:44:14,261 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-17 11:44:14,273 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-17 11:44:14,277 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-17 11:44:14,277 [INFO]   η_temporal: mean=-0.0004, std=0.3398
+2026-06-17 11:44:14,277 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-17 11:44:14,277 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-17 11:44:14,278 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-17 11:44:14,278 [INFO]   iter 1/1: The video captures an aerial view of a lush, dense forest te...
+2026-06-17 11:44:14,278 [INFO]   [Blend] α=0.0040 (√α=0.0632), η_temporal std=0.3398, η_mixed std=0.9922, mean=-0.0008
+2026-06-17 11:44:14,278 [INFO]   [Blend Diag] cos(temporal, random)=-0.0006, cos(mixed, random)=0.9961, cos(mixed, temporal)=0.0211
+2026-06-17 11:44:14,279 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022272 (越大越说明 temporal 有影响)
+2026-06-17 11:44:14,279 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:44:14,279 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-17 11:44:14,279 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:44:14,279 [INFO]   [Schedule] type=middle_peak, max=0.05, steps=30, first 5: ['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5: ['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:44:14,281 [INFO]   [Quality Scale] mean_cos=0.0670, threshold=0.05, scale=0.6260 (weak)
+2026-06-17 11:44:14,281 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.6260, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-17 11:44:14,281 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+2026-06-17 11:44:39,377 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6328, gate=0.3398, λ=0.01614→0.00548
+2026-06-17 11:44:41,291 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6328, gate=0.3398, λ=0.01614→0.00548
+2026-06-17 11:45:00,419 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6602, gate=0.3099, λ=0.02765→0.00857
+2026-06-17 11:45:02,333 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6602, gate=0.3099, λ=0.02765→0.00857
+2026-06-17 11:45:21,497 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6875, gate=0.2814, λ=0.03125→0.00879
+2026-06-17 11:45:23,411 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6836, gate=0.2854, λ=0.03125→0.00892
+2026-06-17 11:45:42,610 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7188, gate=0.2509, λ=0.02590→0.00650
+2026-06-17 11:45:44,527 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7188, gate=0.2509, λ=0.02590→0.00650
+2026-06-17 11:46:03,596 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7578, gate=0.2160, λ=0.01314→0.00284
+2026-06-17 11:46:05,510 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7578, gate=0.2160, λ=0.01314→0.00284
+2026-06-17 11:46:23,264 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:46:23,265 [INFO]   [FI] 生成完成总结
+2026-06-17 11:46:23,265 [INFO]     λ schedule: first 5=['0.0000', '0.0054', '0.0107', '0.0160', '0.0210'], last 5=['0.0210', '0.0160', '0.0107', '0.0054', '0.0000']
+2026-06-17 11:46:23,265 [INFO]   ═══════════════════════════════════════════════
+2026-06-17 11:46:25,720 [INFO] [P-Flow] Done in 260.4s → outputs/SVD_FI_20samples/sample_111/111.mp4
+2026-06-17 11:46:25,720 [INFO]   [SAMPLE SUMMARY] sample_id=111
+2026-06-17 11:46:25,720 [INFO]   [SAMPLE SUMMARY] full_caption=The video captures an aerial view of a lush, dense forest teeming with greenery. The sunlight filters through the canopy, casting dappled shadows on the ground below and creating a vibrant interplay of light and dark. At the center of the frames, a drone is seen flying low over the treetops. The drone appears to be equipped with a camera or sensor, suggesting it might be used for surveillance, mapping, or capturing aerial footage. The surrounding environment is rich with various types of trees, including palm trees, indicating a tropical or subtropical setting. The overall atmosphere is serene and natural, emphasizing the beauty and complexity of the forest ecosystem.
+2026-06-17 11:46:25,720 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=109
+2026-06-17 11:46:25,720 [INFO]   [SAMPLE SUMMARY] elapsed=260.4s, output=outputs/SVD_FI_20samples/sample_111/111.mp4
