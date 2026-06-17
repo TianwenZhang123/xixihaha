@@ -64,6 +64,20 @@ def parse_args():
 
     # ── 参数调节 ──
     p.add_argument("--alpha", type=float, default=0.003, help="噪声混合权重 (推荐 0.001~0.01, P-Flow论文用 0.001)")
+    p.add_argument("--adaptive_alpha", action="store_true",
+                   help="启用 TSR-guided 自适应 α: 根据 Temporal Signal Reliability 自动调节 blend 系数")
+    p.add_argument("--alpha_max", type=float, default=0.003,
+                   help="自适应 α 上限 (TSR=1 时取此值)")
+    p.add_argument("--alpha_min", type=float, default=0.0,
+                   help="自适应 α 下限 (TSR=0 时取此值, 0=完全关闭 SVD blend)")
+    p.add_argument("--tsr_tcr_center", type=float, default=0.1,
+                   help="TCR sigmoid 中心 (TCR < center → 低可靠性, 默认 0.1)")
+    p.add_argument("--tsr_tcr_slope", type=float, default=10.0,
+                   help="TCR sigmoid 斜率 (越大越陡峭, 默认 10.0)")
+    p.add_argument("--beta", type=float, default=0.0,
+                   help="外观分量混合权重 β (推荐 0.0~0.005, 需 α+β<1.0). "
+                        "启用后将 SVD Stage 1 分离的外观/内容分量也注入混合噪声, "
+                        "对'完全复原原视频'场景有用. β=0 时不使用外观分量 (原行为)")
     p.add_argument("--rho_s", type=float, default=0.1, help="空间SVD阈值")
     p.add_argument("--rho_m", type=float, default=0.9, help="时间SVD阈值")
     p.add_argument("--steps", type=int, default=30, help="推理步数")
@@ -148,6 +162,12 @@ def build_config(args) -> PFlowConfig:
         use_midpoint=args.midpoint,
         use_composite=args.composite,
         alpha=args.alpha,
+        adaptive_alpha=args.adaptive_alpha,
+        alpha_max=args.alpha_max,
+        alpha_min=args.alpha_min,
+        tsr_tcr_center=args.tsr_tcr_center,
+        tsr_tcr_slope=args.tsr_tcr_slope,
+        beta=args.beta,
         rho_s=args.rho_s,
         rho_m=args.rho_m,
         inversion_steps=args.inversion_steps,
@@ -273,7 +293,9 @@ def main():
     print(f"P-Flow | {config.experiment_name()}")
     print(f"  Flags: {flags or ['baseline (无改动)']}")
     if config.use_blend:
-        print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
+        alpha_str = f"alpha={config.alpha}" if not config.adaptive_alpha else f"alpha=[{config.alpha_min}~{config.alpha_max}], TSR-guided"
+        beta_str = f", beta={config.beta}" if config.beta > 0 else ""
+        print(f"  {alpha_str}{beta_str}, rho_s={config.rho_s}, rho_m={config.rho_m}")
     if config.feature_inject:
         fi_adapt_str = f", adaptive(temp={config.fi_adaptive_temp})" if config.fi_adaptive_gate else ""
         print(f"  [FI] λ={config.fi_lambda}, layers={config.fi_layers}, schedule={config.fi_schedule}, mode={config.fi_cache_mode}{fi_adapt_str}")

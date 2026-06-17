@@ -38,7 +38,7 @@ import torch
 
 from .distributed import setup_single_gpu, load_model_single_gpu, cleanup_gpu_memory
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
-from .svd_filter import SVDFilter, SVDFilterConfig
+from .svd_filter import SVDFilter, SVDFilterConfig, compute_temporal_signal_reliability
 from .video_utils import (
     load_video, save_video_tensor, normalize_video, denormalize_video,
     create_vertical_composite,
@@ -79,8 +79,17 @@ class PFlowConfig:
     use_midpoint: bool = False     # Midpoint ODE Solver
     use_composite: bool = False    # Vertical Composite for VLM
     # ── Noise Prior 参数 ──
-    alpha: float = 0.003           # 混合权重 (√α·η_temporal + √(1-α)·η_random)
+    alpha: float = 0.003           # 混合权重 (√α·η_temporal + √(1-α-β)·η_random)
                                   # P-Flow论文用 0.001, 推荐搜索范围: 0.001 ~ 0.01
+    adaptive_alpha: bool = False   # 是否启用 TSR-guided 自适应 α
+    alpha_max: float = 0.003       # 自适应 α 的上限 (TSR=1 时取此值)
+    alpha_min: float = 0.0         # 自适应 α 的下限 (TSR=0 时取此值, 0=完全关闭SVD blend)
+    tsr_tcr_center: float = 0.1    # TCR sigmoid 中心 (TCR < center → 低可靠性)
+    tsr_tcr_slope: float = 10.0    # TCR sigmoid 斜率 (越大越陡峭, 区分越锐利)
+    beta: float = 0.0              # 外观分量混合权重 (√β·η_spatial), 0=不使用外观分量
+                                  # 推荐范围: 0.0~0.005, 需 α+β < 1.0
+                                  # η_spatial 是 SVD Stage 1 去掉的外观/内容分量
+                                  # 对"完全复原"场景有用: 低运动视频的运动信号弱时, 外观信号可补充
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
     inversion_steps: int = 50     # 反演ODE步数
@@ -134,7 +143,14 @@ class PFlowConfig:
         if self.use_svd:
             flags.append("svd")
         if self.use_blend:
-            flags.append(f"blend(α={self.alpha})")
+            blend_parts = []
+            if self.adaptive_alpha:
+                blend_parts.append(f"α=[{self.alpha_min}~{self.alpha_max}], TSR-guided")
+            else:
+                blend_parts.append(f"α={self.alpha}")
+            if self.beta > 0:
+                blend_parts.append(f"β={self.beta}")
+            flags.append(f"blend({', '.join(blend_parts)})")
         if self.feature_inject:
             fi_desc = f"feature_inject(λ={self.fi_lambda}, layers={self.fi_layers}, sched={self.fi_schedule}, mode={self.fi_cache_mode}"
             if self.fi_adaptive_gate:
@@ -299,7 +315,7 @@ class PFlowPipeline:
                     "num_layers": num_layers,
                 }
 
-            eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion = \
+            eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion, svd_stats = \
                 self._compute_noise_prior(
                     ref_video, caption,
                     cache_trajectory=need_trajectory and not cfg.use_midpoint,
@@ -397,7 +413,7 @@ class PFlowPipeline:
             logger.info(f"  iter {i}/{num_iters}: {current_prompt[:60]}...")
 
             # 获取噪声
-            latents = self._get_latents(eta_temporal, generator)
+            latents = self._get_latents(eta_temporal, generator, svd_stats=svd_stats)
 
             # 生成视频（FI / 标准）
             if cfg.feature_inject and fi_ref_features is not None:
@@ -540,6 +556,7 @@ class PFlowPipeline:
         eta_inv_raw = eta_inv
 
         # SVD Filtering V2
+        svd_stats = None
         if self.config.use_svd:
             svd_config = SVDFilterConfig(
                 rho_s=self.config.rho_s,
@@ -552,14 +569,29 @@ class PFlowPipeline:
                 f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}"
             )
 
-            eta_temporal = svd_filter.filter(eta_inv)
+            # 使用 return_stats 获取 S_temporal (避免 TSR 计算时重复 SVD)
+            eta_temporal, svd_stats = svd_filter.filter(eta_inv, return_stats=True)
+
+            # 如果启用自适应 α, 计算 TSR
+            if self.config.adaptive_alpha and svd_stats is not None:
+                tsr_result = compute_temporal_signal_reliability(
+                    eta_temporal,
+                    S_temporal=svd_stats.get("S_temporal"),
+                )
+                # 将 TSR 结果存入 svd_stats, 供 _get_latents 使用
+                svd_stats["tsr"] = tsr_result
+                logger.info(
+                    f"  [TSR] TCR={tsr_result['tcr']:.4f}, "
+                    f"TAC={tsr_result['tac']:.4f}, "
+                    f"TSR={tsr_result['tsr']:.4f}"
+                )
         else:
             eta_temporal = eta_inv
 
         logger.info(
             f"  η_temporal: mean={eta_temporal.mean():.4f}, std={eta_temporal.std():.4f}"
         )
-        return eta_temporal, eta_inv_raw, ref_latents, prompt_embeds, trajectory, fi_ref_features
+        return eta_temporal, eta_inv_raw, ref_latents, prompt_embeds, trajectory, fi_ref_features, svd_stats
 
     def _resolve_negative_prompt(self, sample_id: int) -> str:
         """
@@ -590,12 +622,26 @@ class PFlowPipeline:
         self,
         eta_temporal: Optional[torch.Tensor],
         generator: torch.Generator,
+        svd_stats: Optional[Dict[str, Any]] = None,
     ) -> Optional[torch.Tensor]:
         """
         L2: Noise Prior Blending
 
-        混合公式: η = √α · η_temporal + √(1-α) · η_random
-        将 SVD 滤波后的时序噪声与随机噪声做线性混合。
+        基础混合公式 (β=0):
+            η = √α · η_temporal + √(1-α) · η_random
+
+        三路混合公式 (β>0, 启用外观分量):
+            η = √α · η_temporal + √β · η_spatial + √(1-α-β) · η_random
+
+        其中:
+            η_temporal: SVD Stage 2 提取的运动先验 (去外观保运动)
+            η_spatial:  SVD Stage 1 分离的外观/内容分量 (运动迁移时丢弃, 完全复原时有用)
+            η_random:   纯随机噪声
+
+        当 adaptive_alpha=True 时, α 由 TSR (Temporal Signal Reliability) 自适应决定:
+            α_adaptive = α_min + TSR × (α_max - α_min)
+        TSR 越高 → η_temporal 中的运动信号越可靠 → α 越大 → 注入越强
+        TSR 越低 → η_temporal 中的运动信号不可靠 → α 越小 → 注入越弱甚至关闭
         """
         if eta_temporal is None or not self.config.use_blend:
             logger.info(
@@ -612,18 +658,51 @@ class PFlowPipeline:
             generator=generator,
         )
 
-        # ── Linear Blend ──
-        alpha = self.config.alpha
+        # ── Determine α ──
+        cfg = self.config
+        if cfg.adaptive_alpha:
+            # TSR-guided adaptive α
+            tsr_info = svd_stats.get("tsr", {}) if svd_stats else {}
+            tsr = tsr_info.get("tsr", 0.0)
+            alpha = cfg.alpha_min + tsr * (cfg.alpha_max - cfg.alpha_min)
+            logger.info(
+                f"  [Adaptive α] TSR={tsr:.4f} → α={alpha:.6f} "
+                f"(range: [{cfg.alpha_min}, {cfg.alpha_max}])"
+            )
+        else:
+            # Fixed α (原行为)
+            alpha = cfg.alpha
+
+        beta = cfg.beta
+        remaining = max(0.0, 1.0 - alpha - beta)
 
         sqrt_alpha = torch.sqrt(torch.tensor(alpha, device=self.device))
-        sqrt_1_minus_alpha = torch.sqrt(torch.tensor(1.0 - alpha, device=self.device))
+        sqrt_beta = torch.sqrt(torch.tensor(beta, device=self.device))
+        sqrt_remaining = torch.sqrt(torch.tensor(remaining, device=self.device))
 
-        eta = sqrt_alpha * eta_temporal + sqrt_1_minus_alpha * eta_random
+        # ── Three-way blend ──
+        eta = sqrt_alpha * eta_temporal + sqrt_remaining * eta_random
+
+        # 如果 β > 0, 加入外观分量 η_spatial
+        if beta > 0:
+            eta_spatial = svd_stats.get("eta_spatial") if svd_stats else None
+            if eta_spatial is not None:
+                eta = eta + sqrt_beta * eta_spatial
+                logger.info(
+                    f"  [Spatial Blend] β={beta:.4f} (√β={sqrt_beta.item():.4f}), "
+                    f"η_spatial std={eta_spatial.std():.4f}"
+                )
+            else:
+                logger.warning(
+                    f"  [Spatial Blend] β={beta:.4f} 但 eta_spatial 不可用 "
+                    f"(需要 --svd 开启), 忽略外观分量"
+                )
 
         # ── 诊断: Blend 效果 ──
         # 1. 混合后分布
         logger.info(
             f"  [Blend] α={alpha:.4f} (√α={sqrt_alpha.item():.4f}), "
+            f"β={beta:.4f} (√β={sqrt_beta.item():.4f}), "
             f"η_temporal std={eta_temporal.std():.4f}, "
             f"η_mixed std={eta.std():.4f}, mean={eta.mean():.4f}"
         )
