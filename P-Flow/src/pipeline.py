@@ -687,11 +687,23 @@ class PFlowPipeline:
         if beta > 0:
             eta_spatial = svd_stats.get("eta_spatial") if svd_stats else None
             if eta_spatial is not None:
-                eta = eta + sqrt_beta * eta_spatial
+                # ── 关键: η_spatial 量级匹配 ──
+                # η_spatial 的 std (~0.9-1.2) 远大于 η_temporal (~0.28-0.41)
+                # 如果直接注入，β=0.001 的实际贡献会远大于 α=0.004
+                # 解决: renorm η_spatial 使其 std 与 η_temporal 一致，
+                # 这样 β 的语义才与 α 对等（"相同系数=相同贡献"）
+                spatial_std = eta_spatial.std()
+                temporal_std = eta_temporal.std()
+                if spatial_std > 1e-6:
+                    eta_spatial_matched = eta_spatial * (temporal_std / spatial_std)
+                else:
+                    eta_spatial_matched = eta_spatial
                 logger.info(
                     f"  [Spatial Blend] β={beta:.4f} (√β={sqrt_beta.item():.4f}), "
-                    f"η_spatial std={eta_spatial.std():.4f}"
+                    f"η_spatial std={spatial_std:.4f} → renormed to {eta_spatial_matched.std():.4f} "
+                    f"(matched η_temporal std={temporal_std:.4f})"
                 )
+                eta = eta + sqrt_beta * eta_spatial_matched
             else:
                 logger.warning(
                     f"  [Spatial Blend] β={beta:.4f} 但 eta_spatial 不可用 "
