@@ -112,6 +112,14 @@ def parse_args():
     p.add_argument("--fi_adaptive_temp", type=float, default=5.0,
                    help="FI 自适应门控温度 (越大越敏感, 推荐 3~10; 默认 5.0)")
 
+    # ── M_d (Motion Definiteness) 融合门控 ──
+    p.add_argument("--md_file", type=str, default="",
+                   help="M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成). "
+                        "启用后自适应 α 将使用 M_d × TSR 融合门控")
+    p.add_argument("--alpha_floor", type=float, default=0.002,
+                   help="M_d 确认物体运动时的保底 α (默认 0.002). "
+                        "α_eff = max(α_floor * M_d, α_min + f(M_d,TSR) * (α_max - α_min))")
+
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
                    help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
@@ -187,6 +195,9 @@ def build_config(args) -> PFlowConfig:
         fi_cache_mode=args.fi_cache_mode,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
+        # M_d 融合门控
+        md_file=args.md_file,
+        alpha_floor=args.alpha_floor,
     )
 
 
@@ -301,6 +312,8 @@ def main():
         print(f"  [FI] λ={config.fi_lambda}, layers={config.fi_layers}, schedule={config.fi_schedule}, mode={config.fi_cache_mode}{fi_adapt_str}")
     if config.use_iter:
         print(f"  iterations={config.i_max}")
+    if config.md_file:
+        print(f"  [M_d] md_file={config.md_file}, alpha_floor={config.alpha_floor}")
     print()
 
     pipeline = PFlowPipeline(config)

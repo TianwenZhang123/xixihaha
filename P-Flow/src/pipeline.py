@@ -25,6 +25,7 @@ P-Flow Unified Pipeline.
 """
 
 import os
+import csv
 import json
 import time
 import shutil
@@ -32,7 +33,7 @@ import math
 import logging
 from typing import Optional, Dict, List, Any
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 
@@ -132,8 +133,36 @@ class PFlowConfig:
     negative_prompt: str = ""            # 自定义负面 prompt (空=使用默认 NEGATIVE_PROMPT)
     negative_prompt_file: str = ""       # 按样本加载负面 prompt 的目录 (优先级高于 negative_prompt)
 
+    # ── M_d (Motion Definiteness) 融合门控 ──
+    md_file: str = ""                 # M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成)
+    alpha_floor: float = 0.002        # M_d 确认物体运动时的保底 α
+                                     # α_eff = max(α_floor * M_d, α_min + f(M_d,TSR) * (α_max - α_min))
+
     # ── 其他 ──
     seed: int = 42
+
+    # ── 运行时缓存 (非 CLI 参数) ──
+    _md_lookup: Dict[int, float] = field(default_factory=dict, repr=False)
+
+    def load_md_scores(self):
+        """从 CSV 加载 M_d 查表到 _md_lookup。"""
+        if self._md_lookup or not self.md_file:
+            return
+        path = Path(self.md_file)
+        if not path.exists():
+            logger.warning(f"  [M_d] 查表文件不存在: {self.md_file}, M_d 不生效")
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                self._md_lookup[int(row["sample_id"])] = float(row["md_score"])
+        logger.info(f"  [M_d] 已加载 {len(self._md_lookup)} 条评分 from {self.md_file}")
+
+    def get_md(self, sample_id: int) -> float:
+        """获取指定样本的 M_d 值，未找到则返回 1.0 (默认信任 TSR)。"""
+        if self._md_lookup:
+            return self._md_lookup.get(sample_id, 1.0)
+        return 1.0  # 无查表时默认 M_d=1.0，退化为纯 TSR 门控
 
     def active_flags(self) -> List[str]:
         """返回当前启用的改动点列表。"""
@@ -248,6 +277,12 @@ class PFlowPipeline:
         seed = cfg.seed + sample_id
         generator = torch.Generator(device=self.device).manual_seed(seed)
         torch.manual_seed(seed)
+
+        # ── 加载 M_d 查表 (懒加载) ──
+        cfg.load_md_scores()
+        md = cfg.get_md(sample_id)
+        cfg._current_md = md  # 运行时注入，供 _get_latents / _generate_with_fi 使用
+        logger.info(f"  [M_d] sample={sample_id}, M_d={md:.2f}")
 
         flags = cfg.active_flags()
         logger.info(f"[P-Flow] sample={sample_id}, flags={flags or 'baseline'}")
@@ -661,12 +696,24 @@ class PFlowPipeline:
         # ── Determine α ──
         cfg = self.config
         if cfg.adaptive_alpha:
-            # TSR-guided adaptive α
+            # TSR-guided adaptive α (with optional M_d correction)
             tsr_info = svd_stats.get("tsr", {}) if svd_stats else {}
             tsr = tsr_info.get("tsr", 0.0)
-            alpha = cfg.alpha_min + tsr * (cfg.alpha_max - cfg.alpha_min)
+
+            # ── M_d × TSR 融合 ──
+            md = getattr(cfg, '_current_md', 1.0)  # 运行时注入，见 run() 方法
+            f_md_tsr = md * tsr + (1.0 - md) * 0.1 * tsr
+            alpha_fusion = cfg.alpha_min + f_md_tsr * (cfg.alpha_max - cfg.alpha_min)
+
+            # ── α_floor 保底 ──
+            alpha_floor_val = cfg.alpha_floor * md
+            alpha = max(alpha_floor_val, alpha_fusion)
+
             logger.info(
-                f"  [Adaptive α] TSR={tsr:.4f} → α={alpha:.6f} "
+                f"  [Adaptive α] M_d={md:.2f}, TSR={tsr:.4f}, "
+                f"f(M_d,TSR)={f_md_tsr:.4f}, "
+                f"α_fusion={alpha_fusion:.6f}, α_floor={alpha_floor_val:.6f} "
+                f"→ α_eff={alpha:.6f} "
                 f"(range: [{cfg.alpha_min}, {cfg.alpha_max}])"
             )
         else:
@@ -1130,6 +1177,15 @@ class PFlowPipeline:
         quality_scale = 1.0
         if cfg.fi_quality_gate:
             quality_scale = self._compute_quality_scale(eta_temporal)
+            # M_d 修正 Quality Scale: scene 类样本的 QS 也会偏高
+            md = getattr(cfg, '_current_md', 1.0)
+            if md < 1.0:
+                quality_scale_original = quality_scale
+                quality_scale = quality_scale * md
+                logger.info(
+                    f"  [Quality Scale × M_d] QS_orig={quality_scale_original:.4f}, "
+                    f"M_d={md:.2f} → QS_eff={quality_scale:.4f}"
+                )
             if quality_scale < 1e-6:
                 logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
                 return self._generate(prompt, latents, generator, negative_prompt)
