@@ -137,6 +137,9 @@ class PFlowConfig:
     md_file: str = ""                 # M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成)
     alpha_floor: float = 0.001        # M_d 确认物体运动时的保底 α
                                      # α_eff = max(α_floor * M_d, α_min + f(M_d,TSR) * (α_max - α_min))
+    fi_qs_md_floor: float = 0.3       # Quality Scale × M_d 修正的保底下限
+                                     # QS_eff = QS * max(M_d, fi_qs_md_floor)
+                                     # 防止 M_d=0.0 时 FI 被完全关闭
 
     # ── 其他 ──
     seed: int = 42
@@ -1178,13 +1181,18 @@ class PFlowPipeline:
         if cfg.fi_quality_gate:
             quality_scale = self._compute_quality_scale(eta_temporal)
             # M_d 修正 Quality Scale: scene 类样本的 QS 也会偏高
+            # 但不能完全关闭 FI — 即使 M_d=0.0，FI 仍保留保底强度
+            # 修正公式: QS_eff = QS * max(M_d, fi_qs_floor)
             md = getattr(cfg, '_current_md', 1.0)
-            if md < 1.0:
+            fi_qs_floor = getattr(cfg, 'fi_qs_md_floor', 0.3)
+            md_for_qs = max(md, fi_qs_floor)
+            if md_for_qs < 1.0:
                 quality_scale_original = quality_scale
-                quality_scale = quality_scale * md
+                quality_scale = quality_scale * md_for_qs
                 logger.info(
                     f"  [Quality Scale × M_d] QS_orig={quality_scale_original:.4f}, "
-                    f"M_d={md:.2f} → QS_eff={quality_scale:.4f}"
+                    f"M_d={md:.2f}, floor={fi_qs_floor} → M_d_eff={md_for_qs:.2f}, "
+                    f"QS_eff={quality_scale:.4f}"
                 )
             if quality_scale < 1e-6:
                 logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
