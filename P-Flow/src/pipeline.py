@@ -135,7 +135,7 @@ class PFlowConfig:
 
     # ── M_d (Motion Definiteness) 融合门控 ──
     md_file: str = ""                 # M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成)
-    alpha_floor: float = 0.002        # M_d 确认物体运动时的保底 α
+    alpha_floor: float = 0.001        # M_d 确认物体运动时的保底 α
                                      # α_eff = max(α_floor * M_d, α_min + f(M_d,TSR) * (α_max - α_min))
 
     # ── 其他 ──

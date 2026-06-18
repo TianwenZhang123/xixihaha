@@ -116,7 +116,7 @@ def parse_args():
     p.add_argument("--md_file", type=str, default="",
                    help="M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成). "
                         "启用后自适应 α 将使用 M_d × TSR 融合门控")
-    p.add_argument("--alpha_floor", type=float, default=0.002,
+    p.add_argument("--alpha_floor", type=float, default=0.001,
                    help="M_d 确认物体运动时的保底 α (默认 0.002). "
                         "α_eff = max(α_floor * M_d, α_min + f(M_d,TSR) * (α_max - α_min))")
 
