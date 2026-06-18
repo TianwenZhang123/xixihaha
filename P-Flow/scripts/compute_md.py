@@ -44,11 +44,19 @@ MD_SYSTEM_PROMPT = (
     "Your task is to classify the type of motion described in a video caption."
 )
 
-MD_USER_TEMPLATE = """Classify the type of motion described in this video caption:
+MD_USER_TEMPLATE = """Classify the PRIMARY source of motion in this video caption:
 
-1 = No motion (static scene, landscape, still life, architecture, no movement at all)
-2 = Ambient motion only (wind blowing, water ripples, lighting changes, camera movement, subtle drift, background movement while subjects are still)
-3 = Object motion present (people, animals, vehicles, or objects actively moving with clear physical displacement — walking, running, flying, jumping, etc.)
+1 = No motion: static scene, still life, landscape, architecture — nothing moves.
+2 = Camera/scene motion: the VIEWPOINT moves (FPV, drone, tracking shot, zoom, flythrough, hyperlapse), or the SCENE transforms (plants growing, objects morphing, smoke/steam rising, water flowing, objects deforming). The key signal is: no character/subject is locomoting through space under its own power. Even fast camera movement counts here if no subject is independently moving.
+3 = Object/subject motion: a person, animal, vehicle, or physical object is actively moving through space under its own power (walking, running, flying, swimming, chasing, colliding, accelerating). The camera may ALSO move, but the PRIMARY motion source is the subject's own physical displacement.
+
+IMPORTANT: Choose based on the DOMINANT motion SOURCE, not intensity:
+- "FPV drone flying fast" → 2 (camera motion, no subject locomoting)
+- "A cat running through a garden" → 3 (subject locomoting)
+- "Zoom into a dandelion" → 2 (camera zoom, no subject moving)
+- "Sailboats sailing on coffee" → 3 (subjects moving through water)
+- "Warehouse plants exploding from ground" → 2 (scene transformation, not locomotion)
+- "Water splashing in slow motion" → 2 (fluid dynamics, no subject locomoting)
 
 Caption: {caption}
 
