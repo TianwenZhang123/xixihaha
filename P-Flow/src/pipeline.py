@@ -1083,24 +1083,32 @@ class PFlowPipeline:
 
         # ── 计算特征差异 ──
         delta_feat = feat_mixed - feat_random  # η_temporal 带来的特征偏移
-        delta_flat = delta_feat.flatten()
-        eta_flat = eta_temporal.flatten()
 
-        # ── 方法1: 差异范数归一化 (η_temporal 对模型的影响强度) ──
-        delta_norm = delta_flat.norm().item()
-        feat_norm = feat_random.flatten().norm().item()
+        # ── 指标1: 差异范数归一化 (η_temporal 对模型的影响强度) ──
+        delta_norm = delta_feat.norm().item()
+        feat_norm = feat_random.norm().item()
         relative_impact = delta_norm / max(feat_norm, 1e-8)
 
-        # ── 方法2: 差异方向与 η_temporal 的余弦相似度 ──
-        cos_alignment = torch.nn.functional.cosine_similarity(
-            delta_flat.unsqueeze(0), eta_flat.unsqueeze(0)
-        ).item()
+        # ── 指标2: 差异方向的一致性 (各帧/各空间位置的偏移方向是否一致) ──
+        # 如果 η_temporal 有利 → 模型各处偏移方向一致 → cos_sim 高
+        # 如果 η_temporal 有害/噪声 → 偏移方向混乱 → cos_sim 低
+        # 计算: 把特征展平为 (num_elements,) 的向量，然后对半分两段算 cos
+        delta_flat = delta_feat.flatten()
+        n = delta_flat.shape[0]
+        half = n // 2
+        if half > 0:
+            cos_consistency = torch.nn.functional.cosine_similarity(
+                delta_flat[:half].unsqueeze(0),
+                delta_flat[half:2*half].unsqueeze(0)
+            ).item()
+        else:
+            cos_consistency = 0.0
 
-        # ── PNA score = impact × alignment ──
-        # impact 高且 alignment 正 → η_temporal 有利 → PNA 高
-        # impact 高但 alignment 负 → η_temporal 有害 → PNA 低
+        # ── PNA score = impact × consistency ──
+        # impact 高 + consistency 正 → η_temporal 有利 → PNA 高
+        # impact 高 + consistency 负 → η_temporal 有害 → PNA 低
         # impact 低 → η_temporal 影响小 → PNA 中等
-        pna_raw = relative_impact * max(cos_alignment, 0.0)  # 对齐度负时 PNA=0
+        pna_raw = relative_impact * (0.5 + 0.5 * cos_consistency)  # consistency 映射到 [0, 1]
 
         # 映射到 [0, 1] — 用 sigmoid
         # pna_raw 典型值: 0.001 ~ 0.01 (relative_impact 很小)
@@ -1111,7 +1119,7 @@ class PFlowPipeline:
             f"  [PNA] probe_t={t_probe:.2f}, α_test={alpha_test}, "
             f"layer={probe_layer}, "
             f"relative_impact={relative_impact:.6f}, "
-            f"cos_alignment={cos_alignment:.4f}, "
+            f"cos_consistency={cos_consistency:.4f}, "
             f"pna_raw={pna_raw:.6f}, "
             f"PNA_score={pna_score:.4f}"
         )
