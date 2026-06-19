@@ -130,10 +130,6 @@ class PFlowConfig:
     vlm_provider: str = "local"
     vlm_model_path: str = "models/Qwen2.5-VL-7B-Instruct"
 
-    # ── 负面 Prompt ──
-    negative_prompt: str = ""            # 自定义负面 prompt (空=使用默认 NEGATIVE_PROMPT)
-    negative_prompt_file: str = ""       # 按样本加载负面 prompt 的目录 (优先级高于 negative_prompt)
-
     # ── M_d (Motion Definiteness) 融合门控 ──
     md_file: str = ""                 # M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成)
     alpha_floor: float = 0.004        # M_d 确认物体运动时的保底 α (=旧版固定值)
@@ -315,11 +311,6 @@ class PFlowPipeline:
             caption_file = out / "vlm_caption.txt"
             caption_file.write_text(caption, encoding="utf-8")
 
-        # ── Step 2.5: 解析负面 prompt ──
-        neg_prompt = self._resolve_negative_prompt(sample_id)
-        if neg_prompt != NEGATIVE_PROMPT:
-            logger.info(f"  [NegPrompt] 使用自定义负面 prompt: {neg_prompt[:60]}...")
-
         # ── Step 3: 计算噪声先验 (如果启用) ──
         eta_temporal = None
         prompt_embeds = None
@@ -462,11 +453,9 @@ class PFlowPipeline:
                     current_prompt, latents, generator,
                     ref_features=fi_ref_features,
                     eta_temporal=eta_temporal,
-                    negative_prompt=neg_prompt,
                 )
             else:
-                gen_video = self._generate(current_prompt, latents, generator,
-                                           negative_prompt=neg_prompt)
+                gen_video = self._generate(current_prompt, latents, generator)
             video_path_i = str(out / f"iter_{i:02d}.mp4")
             save_video_tensor(gen_video, video_path_i, fps=cfg.fps)
 
@@ -634,31 +623,6 @@ class PFlowPipeline:
         )
         return eta_temporal, eta_inv_raw, ref_latents, prompt_embeds, trajectory, fi_ref_features, svd_stats
 
-    def _resolve_negative_prompt(self, sample_id: int) -> str:
-        """
-        解析负面 prompt，优先级：
-            1. negative_prompt_file 目录下的 {sample_id}.txt
-            2. config.negative_prompt (全局自定义)
-            3. 默认 NEGATIVE_PROMPT (硬编码)
-        """
-        cfg = self.config
-
-        # 优先从按样本的负面 prompt 目录加载
-        if cfg.negative_prompt_file:
-            neg_file = Path(cfg.negative_prompt_file) / f"{sample_id}.txt"
-            if neg_file.exists():
-                content = neg_file.read_text(encoding="utf-8").strip()
-                if content:
-                    return content
-                logger.warning(f"  [NegPrompt] 文件为空: {neg_file}, 使用 fallback")
-
-        # 全局自定义负面 prompt
-        if cfg.negative_prompt:
-            return cfg.negative_prompt
-
-        # 默认
-        return NEGATIVE_PROMPT
-
     def _get_latents(
         self,
         eta_temporal: Optional[torch.Tensor],
@@ -809,13 +773,12 @@ class PFlowPipeline:
         prompt: str,
         latents: Optional[torch.Tensor],
         generator: torch.Generator,
-        negative_prompt: str = "",
     ) -> torch.Tensor:
         """调用 Wan 2.1-1.3B 生成视频。"""
         cfg = self.config
         kwargs = {
             "prompt": prompt,
-            "negative_prompt": negative_prompt or NEGATIVE_PROMPT,
+            "negative_prompt": NEGATIVE_PROMPT,
             "height": cfg.height,
             "width": cfg.width,
             "num_frames": cfg.num_frames,
@@ -1141,7 +1104,6 @@ class PFlowPipeline:
         generator: torch.Generator,
         ref_features: Dict[str, Any],
         eta_temporal: Optional[torch.Tensor] = None,
-        negative_prompt: str = "",
     ) -> torch.Tensor:
         """
         L3 V3: Feature Injection (FI) 生成。
@@ -1164,7 +1126,6 @@ class PFlowPipeline:
             generator: 随机数生成器
             ref_features: 参考特征缓存 {step_index: {layer_idx: tensor}}
             eta_temporal: SVD 滤波后的噪声 (用于质量门控)
-            negative_prompt: 负面 prompt
         """
         cfg = self.config
         num_steps = cfg.num_inference_steps
@@ -1371,12 +1332,12 @@ class PFlowPipeline:
             # ── 构建生成参数 ──
             kwargs = {
                 "prompt": prompt,
-                "negative_prompt": negative_prompt or NEGATIVE_PROMPT,
-                "height": cfg.height,
-                "width": cfg.width,
-                "num_frames": cfg.num_frames,
-                "guidance_scale": cfg.guidance_scale,
-                "num_inference_steps": num_steps,
+            "negative_prompt": NEGATIVE_PROMPT,
+            "height": cfg.height,
+            "width": cfg.width,
+            "num_frames": cfg.num_frames,
+            "guidance_scale": cfg.guidance_scale,
+            "num_inference_steps": num_steps,
                 "generator": generator,
                 "output_type": "pt",
                 "callback_on_step_end": fi_callback,

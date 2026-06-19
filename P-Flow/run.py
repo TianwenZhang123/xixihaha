@@ -136,12 +136,6 @@ def parse_args():
                    help="VLM 模型路径 (默认: 项目内 models/ 目录)")
     p.add_argument("--vlm_provider", type=str, default="local", choices=["local", "dashscope", "mock"])
 
-    # ── 负面 Prompt ──
-    p.add_argument("--negative_prompt", type=str, default="",
-                   help="全局自定义负面 prompt (替代默认硬编码)")
-    p.add_argument("--negative_prompt_dir", type=str, default="",
-                   help="按样本加载负面 prompt 的目录 (含 {id}.txt, 优先级高于 --negative_prompt)")
-
     # ── 执行控制 ──
     p.add_argument("--resume", action="store_true", help="跳过已有输出")
     p.add_argument("--verbose", action="store_true")
@@ -192,9 +186,7 @@ def build_config(args) -> PFlowConfig:
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,
         vlm_model_path=args.vlm_path,
-        negative_prompt=args.negative_prompt,
-        negative_prompt_file=args.negative_prompt_dir,
-        seed=args.seed,
+                   seed=args.seed,
         # L3: Feature Injection
         feature_inject=args.feature_inject,
         fi_layers=args.fi_layers,
