@@ -135,9 +135,9 @@ class PFlowConfig:
 
     # ── M_d (Motion Definiteness) 融合门控 ──
     md_file: str = ""                 # M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成)
-    alpha_floor: float = 0.002        # M_d 确认物体运动时的保底 α
+    alpha_floor: float = 0.003        # M_d 确认物体运动时的保底 α
                                      # α_eff = max(α_floor * max(M_d, alpha_md_floor), α_min + f(M_d,TSR) * (α_max - α_min))
-    alpha_md_floor: float = 0.2       # α 保底中 M_d 的下限，防止 M_d=0 时 α 完全归零
+    alpha_md_floor: float = 0.3       # α 保底中 M_d 的下限，防止 M_d=0 时 α 完全归零
                                      # md_for_alpha = max(M_d, alpha_md_floor)
     fi_qs_md_floor: float = 0.5       # Quality Scale × M_d 修正的保底下限
                                      # QS_eff = QS * max(M_d, fi_qs_md_floor)
@@ -711,7 +711,7 @@ class PFlowPipeline:
             alpha_fusion = cfg.alpha_min + f_md_tsr * (cfg.alpha_max - cfg.alpha_min)
 
             # ── α_floor 保底 (含 alpha_md_floor 下限) ──
-            alpha_md_floor = getattr(cfg, 'alpha_md_floor', 0.2)
+            alpha_md_floor = getattr(cfg, 'alpha_md_floor', 0.3)
             md_for_alpha = max(md, alpha_md_floor)  # 防止 M_d=0 时 α 完全归零
             alpha_floor_val = cfg.alpha_floor * md_for_alpha
             alpha = max(alpha_floor_val, alpha_fusion)

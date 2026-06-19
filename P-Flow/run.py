@@ -119,11 +119,11 @@ def parse_args():
     p.add_argument("--md_file", type=str, default="",
                    help="M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成). "
                         "启用后自适应 α 将使用 M_d × TSR 融合门控")
-    p.add_argument("--alpha_floor", type=float, default=0.002,
-                   help="M_d 确认物体运动时的保底 α (默认 0.002). "
+    p.add_argument("--alpha_floor", type=float, default=0.003,
+                   help="M_d 确认物体运动时的保底 α (默认 0.003). "
                         "α_eff = max(α_floor * max(M_d, alpha_md_floor), α_min + f(M_d,TSR) * (α_max - α_min))")
-    p.add_argument("--alpha_md_floor", type=float, default=0.2,
-                   help="α 保底中 M_d 的下限 (默认 0.2). 防止 M_d=0 时 α 完全归零, "
+    p.add_argument("--alpha_md_floor", type=float, default=0.3,
+                   help="α 保底中 M_d 的下限 (默认 0.3). 防止 M_d=0 时 α 完全归零, "
                         "确保场景类样本仍保留微量注入. md_for_alpha = max(M_d, alpha_md_floor)")
 
     # ── 模型路径 ──
