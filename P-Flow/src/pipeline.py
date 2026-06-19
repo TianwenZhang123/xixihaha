@@ -117,6 +117,7 @@ class PFlowConfig:
     fi_adaptive_gate: bool = True         # 是否启用特征对齐自适应门控
     fi_adaptive_temp: float = 5.0          # 自适应门控温度 (越大越敏感, 推荐 3~10)
     fi_quality_threshold: float = 0.05    # 质量门控阈值 (mean_cos < threshold → 弱引导)
+    fi_md_gate: bool = False              # 是否启用 M_d 对 FI QS 的修正 (消融用, 默认关闭)
     fi_cache_mode: str = "attention"      # 缓存什么特征:
     #   attention: cross-attention 输出 (语义对齐, 推荐)
     #   hidden: 完整 hidden_states (信息丰富但维度大)
@@ -1185,20 +1186,21 @@ class PFlowPipeline:
         quality_scale = 1.0
         if cfg.fi_quality_gate:
             quality_scale = self._compute_quality_scale(eta_temporal)
-            # M_d 修正 Quality Scale: scene 类样本的 QS 也会偏高
-            # 但不能完全关闭 FI — 即使 M_d=0.0，FI 仍保留保底强度
-            # 修正公式: QS_eff = QS * max(M_d, fi_qs_floor)
-            md = getattr(cfg, '_current_md', 1.0)
-            fi_qs_floor = getattr(cfg, 'fi_qs_md_floor', 0.3)
-            md_for_qs = max(md, fi_qs_floor)
-            if md_for_qs < 1.0:
-                quality_scale_original = quality_scale
-                quality_scale = quality_scale * md_for_qs
-                logger.info(
-                    f"  [Quality Scale × M_d] QS_orig={quality_scale_original:.4f}, "
-                    f"M_d={md:.2f}, floor={fi_qs_floor} → M_d_eff={md_for_qs:.2f}, "
-                    f"QS_eff={quality_scale:.4f}"
-                )
+            # M_d 修正 Quality Scale (可选, 默认关闭)
+            # 仅当 fi_md_gate=True 时启用: QS_eff = QS * max(M_d, fi_qs_md_floor)
+            # 消融实验: 先只改 L2 SVD 门控, 不改 L3 FI 门控
+            if getattr(cfg, 'fi_md_gate', False):
+                md = getattr(cfg, '_current_md', 1.0)
+                fi_qs_floor = getattr(cfg, 'fi_qs_md_floor', 0.5)
+                md_for_qs = max(md, fi_qs_floor)
+                if md_for_qs < 1.0:
+                    quality_scale_original = quality_scale
+                    quality_scale = quality_scale * md_for_qs
+                    logger.info(
+                        f"  [Quality Scale × M_d] QS_orig={quality_scale_original:.4f}, "
+                        f"M_d={md:.2f}, floor={fi_qs_floor} → M_d_eff={md_for_qs:.2f}, "
+                        f"QS_eff={quality_scale:.4f}"
+                    )
             if quality_scale < 1e-6:
                 logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
                 return self._generate(prompt, latents, generator, negative_prompt)

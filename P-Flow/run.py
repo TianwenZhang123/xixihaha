@@ -114,6 +114,9 @@ def parse_args():
     p.add_argument("--fi_qs_md_floor", type=float, default=0.5,
                    help="FI Quality Scale 中 M_d 的下限 (默认 0.5). "
                         "M_d=0 时 QS 不会低于 QS * fi_qs_md_floor, 防止 FI 被完全关闭")
+    p.add_argument("--fi_md_gate", action="store_true", default=False,
+                   help="启用 M_d 对 FI QS 的修正 (默认关闭, 消融用). "
+                        "关闭时 L3 FI 不受 M_d 影响, 只测 L2 SVD 门控效果")
 
     # ── M_d (Motion Definiteness) 融合门控 ──
     p.add_argument("--md_file", type=str, default="",
@@ -202,6 +205,7 @@ def build_config(args) -> PFlowConfig:
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
         fi_qs_md_floor=args.fi_qs_md_floor,
+        fi_md_gate=args.fi_md_gate,
         # M_d 融合门控
         md_file=args.md_file,
         alpha_floor=args.alpha_floor,
