@@ -139,7 +139,7 @@ class PFlowConfig:
                                      # α_eff = max(α_floor * max(M_d, alpha_md_floor), α_min + f(M_d,TSR) * (α_max - α_min))
     alpha_md_floor: float = 0.2       # α 保底中 M_d 的下限，防止 M_d=0 时 α 完全归零
                                      # md_for_alpha = max(M_d, alpha_md_floor)
-    fi_qs_md_floor: float = 0.3       # Quality Scale × M_d 修正的保底下限
+    fi_qs_md_floor: float = 0.5       # Quality Scale × M_d 修正的保底下限
                                      # QS_eff = QS * max(M_d, fi_qs_md_floor)
                                      # 防止 M_d=0.0 时 FI 被完全关闭
 

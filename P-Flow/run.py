@@ -111,8 +111,8 @@ def parse_args():
                    help="禁用 FI 自适应门控 (默认开启: 特征越接近参考→注入越少)")
     p.add_argument("--fi_adaptive_temp", type=float, default=5.0,
                    help="FI 自适应门控温度 (越大越敏感, 推荐 3~10; 默认 5.0)")
-    p.add_argument("--fi_qs_md_floor", type=float, default=0.3,
-                   help="FI Quality Scale 中 M_d 的下限 (默认 0.3). "
+    p.add_argument("--fi_qs_md_floor", type=float, default=0.5,
+                   help="FI Quality Scale 中 M_d 的下限 (默认 0.5). "
                         "M_d=0 时 QS 不会低于 QS * fi_qs_md_floor, 防止 FI 被完全关闭")
 
     # ── M_d (Motion Definiteness) 融合门控 ──
