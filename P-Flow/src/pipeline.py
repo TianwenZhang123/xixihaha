@@ -139,6 +139,19 @@ class PFlowConfig:
     fi_qs_md_floor: float = 0.5       # Quality Scale × M_d 修正的保底下限
                                      # QS_eff = QS * max(M_d, fi_qs_md_floor)
                                      # 防止 M_d=0.0 时 FI 被完全关闭
+    fi_alpha_coupling: bool = True    # FI λ 与 L2 α 协同缩放
+                                     # α_eff/α_ref 比例缩放 FI λ_max
+                                     # α_ref=0.004 (SVD+FI 基线固定值)
+                                     # 当 α_eff 低时, FI 注入同步降低
+    fi_alpha_ref: float = 0.004       # α 参考值 (SVD+FI 基线固定 α)
+
+    # ── PNA (Prompt-Noise Alignment) 在线门控 ──
+    pna_probe: bool = False            # 启用 PNA 探测 (在线测量 η_temporal 方向是否有利)
+                                     # 用模型一步前向比较 mixed vs random 噪声
+                                     # 替代 LLM M_d 离线判断，更准确
+    pna_probe_step: float = 0.95       # 探测的 t 值 (接近1.0=纯噪声, 影响最大)
+    pna_alpha_max: float = 0.006        # PNA 门控的 α 上限
+    pna_alpha_min: float = 0.0005       # PNA 门控的 α 下限 (不允许完全为0)
 
     # ── 其他 ──
     seed: int = 42
@@ -354,6 +367,10 @@ class PFlowPipeline:
                     cache_every_n=cache_every_n,
                     fi_config=fi_config_for_inv,
                 )
+
+            # ── 缓存 prompt_embeds 供 PNA 探测使用 ──
+            if prompt_embeds is not None:
+                cfg._current_prompt_embeds = prompt_embeds
 
         # ── Step 3.5: 轨迹/FI特征缓存 ──
         ref_trajectory = None
@@ -666,29 +683,73 @@ class PFlowPipeline:
         # ── Determine α ──
         cfg = self.config
         if cfg.adaptive_alpha:
-            # TSR-guided adaptive α (with optional M_d correction)
-            tsr_info = svd_stats.get("tsr", {}) if svd_stats else {}
-            tsr = tsr_info.get("tsr", 0.0)
+            # ── PNA 在线门控 (替代 M_d × TSR) ──
+            if getattr(cfg, 'pna_probe', False):
+                # 用模型一步前向测量 η_temporal 的方向是否有利
+                prompt_embeds = getattr(cfg, '_current_prompt_embeds', None)
+                if prompt_embeds is not None:
+                    pna_score = self._compute_pna_score(
+                        eta_temporal, prompt_embeds, generator
+                    )
+                    # PNA → α: 直接映射
+                    # PNA 高 (η_temporal 有利) → α 大
+                    # PNA 低 (η_temporal 无利/有害) → α 小
+                    pna_alpha_max = getattr(cfg, 'pna_alpha_max', 0.006)
+                    pna_alpha_min = getattr(cfg, 'pna_alpha_min', 0.0005)
+                    alpha = pna_alpha_min + pna_score * (pna_alpha_max - pna_alpha_min)
 
-            # ── M_d × TSR 融合 ──
-            md = getattr(cfg, '_current_md', 1.0)  # 运行时注入，见 run() 方法
-            f_md_tsr = md * tsr + (1.0 - md) * 0.1 * tsr
-            alpha_fusion = cfg.alpha_min + f_md_tsr * (cfg.alpha_max - cfg.alpha_min)
+                    # 缓存 α_eff 供 FI 协同缩放使用
+                    cfg._current_alpha_eff = alpha
 
-            # ── α_floor 保底 (含 alpha_md_floor 下限) ──
-            alpha_md_floor = getattr(cfg, 'alpha_md_floor', 0.3)
-            md_for_alpha = max(md, alpha_md_floor)  # 防止 M_d=0 时 α 完全归零
-            alpha_floor_val = cfg.alpha_floor * md_for_alpha
-            alpha = max(alpha_floor_val, alpha_fusion)
+                    logger.info(
+                        f"  [PNA-α] PNA_score={pna_score:.4f}, "
+                        f"α_min={pna_alpha_min}, α_max={pna_alpha_max} "
+                        f"→ α_eff={alpha:.6f}"
+                    )
+                else:
+                    # fallback: 用 TSR-guided
+                    logger.warning("  [PNA] prompt_embeds 不可用, fallback 到 TSR-guided α")
+                    tsr_info = svd_stats.get("tsr", {}) if svd_stats else {}
+                    tsr = tsr_info.get("tsr", 0.0)
+                    md = getattr(cfg, '_current_md', 1.0)
+                    f_md_tsr = md * tsr + (1.0 - md) * 0.1 * tsr
+                    alpha_fusion = cfg.alpha_min + f_md_tsr * (cfg.alpha_max - cfg.alpha_min)
+                    alpha_md_floor = getattr(cfg, 'alpha_md_floor', 0.3)
+                    md_for_alpha = max(md, alpha_md_floor)
+                    alpha_floor_val = cfg.alpha_floor * md_for_alpha
+                    alpha = max(alpha_floor_val, alpha_fusion)
+                    cfg._current_alpha_eff = alpha
+                    logger.info(
+                        f"  [Adaptive α (fallback)] M_d={md:.2f}, TSR={tsr:.4f}, "
+                        f"α_eff={alpha:.6f}"
+                    )
+            else:
+                # TSR-guided adaptive α (with optional M_d correction) — 原路径
+                tsr_info = svd_stats.get("tsr", {}) if svd_stats else {}
+                tsr = tsr_info.get("tsr", 0.0)
 
-            logger.info(
-                f"  [Adaptive α] M_d={md:.2f}, alpha_md_floor={alpha_md_floor}, "
-                f"md_for_alpha={md_for_alpha:.2f}, TSR={tsr:.4f}, "
-                f"f(M_d,TSR)={f_md_tsr:.4f}, "
-                f"α_fusion={alpha_fusion:.6f}, α_floor={alpha_floor_val:.6f} "
-                f"→ α_eff={alpha:.6f} "
-                f"(range: [{cfg.alpha_min}, {cfg.alpha_max}])"
-            )
+                # ── M_d × TSR 融合 ──
+                md = getattr(cfg, '_current_md', 1.0)  # 运行时注入，见 run() 方法
+                f_md_tsr = md * tsr + (1.0 - md) * 0.1 * tsr
+                alpha_fusion = cfg.alpha_min + f_md_tsr * (cfg.alpha_max - cfg.alpha_min)
+
+                # ── α_floor 保底 (含 alpha_md_floor 下限) ──
+                alpha_md_floor = getattr(cfg, 'alpha_md_floor', 0.3)
+                md_for_alpha = max(md, alpha_md_floor)  # 防止 M_d=0 时 α 完全归零
+                alpha_floor_val = cfg.alpha_floor * md_for_alpha
+                alpha = max(alpha_floor_val, alpha_fusion)
+
+                # ── 缓存 α_eff 供 FI 协同缩放使用 ──
+                cfg._current_alpha_eff = alpha
+
+                logger.info(
+                    f"  [Adaptive α] M_d={md:.2f}, alpha_md_floor={alpha_md_floor}, "
+                    f"md_for_alpha={md_for_alpha:.2f}, TSR={tsr:.4f}, "
+                    f"f(M_d,TSR)={f_md_tsr:.4f}, "
+                    f"α_fusion={alpha_fusion:.6f}, α_floor={alpha_floor_val:.6f} "
+                    f"→ α_eff={alpha:.6f} "
+                    f"(range: [{cfg.alpha_min}, {cfg.alpha_max}])"
+                )
         else:
             # Fixed α (原行为)
             alpha = cfg.alpha
@@ -925,6 +986,133 @@ class PFlowPipeline:
 
         return scale
 
+    @torch.no_grad()
+    def _compute_pna_score(
+        self,
+        eta_temporal: torch.Tensor,
+        prompt_embeds: torch.Tensor,
+        generator: torch.Generator,
+    ) -> float:
+        """
+        PNA (Prompt-Noise Alignment): 在线测量 η_temporal 方向对模型是否有利。
+
+        核心思想 (类似 FI 的 Adaptive Gate，但在 L2 层面):
+            1. 用混合噪声 (η_mixed) 跑一步模型前向
+            2. 用纯随机噪声 (η_random) 跑一步模型前向
+            3. 比较两者在 mid 层的特征差异
+            4. 差异方向与 η_temporal 的对齐度 → PNA score
+
+        PNA 高 → η_temporal 让模型预测向"正确"方向偏移 → α 可以大
+        PNA 低 → η_temporal 让模型预测向"错误"方向偏移 → α 应该小
+
+        Args:
+            eta_temporal: SVD 滤波后的噪声
+            prompt_embeds: prompt embedding
+            generator: 随机数生成器
+
+        Returns:
+            pna_score: 0~1 的对齐度分数
+        """
+        cfg = self.config
+        transformer = self.pipe.transformer
+
+        # ── 构造两种噪声 ──
+        alpha_test = 0.004  # 试探 α，用基线值
+        eta_random = torch.randn_like(eta_temporal, generator=generator)
+
+        # 混合噪声
+        sqrt_a = math.sqrt(alpha_test)
+        sqrt_1ma = math.sqrt(1.0 - alpha_test)
+        eta_mixed = sqrt_a * eta_temporal + sqrt_1ma * eta_random
+
+        # ── 确定探测步 ──
+        t_probe = cfg.pna_probe_step  # 接近 1.0 = 纯噪声
+        t_tensor = torch.full(
+            (eta_temporal.shape[0],), t_probe,
+            device=self.device, dtype=eta_temporal.dtype
+        )
+
+        # ── 用 mid 层 hook 捕获特征 ──
+        num_layers = len(transformer.blocks) if hasattr(transformer, 'blocks') else 30
+        probe_layer = num_layers // 2  # mid 层
+
+        captured = {}
+
+        def probe_hook(module, input, output):
+            if isinstance(output, tuple):
+                captured['feat'] = output[0].detach()
+            else:
+                captured['feat'] = output.detach()
+
+        handle = transformer.blocks[probe_layer].register_forward_hook(probe_hook)
+
+        try:
+            # ── 前向1: 混合噪声 ──
+            captured.clear()
+            _ = transformer(
+                hidden_states=eta_mixed,
+                timestep=t_tensor,
+                encoder_hidden_states=prompt_embeds,
+                return_dict=False,
+            )
+            feat_mixed = captured.get('feat')
+            if feat_mixed is None:
+                logger.warning("  [PNA] 无法捕获混合噪声特征, 跳过 PNA")
+                return 0.5
+
+            # ── 前向2: 纯随机噪声 ──
+            captured.clear()
+            _ = transformer(
+                hidden_states=eta_random,
+                timestep=t_tensor,
+                encoder_hidden_states=prompt_embeds,
+                return_dict=False,
+            )
+            feat_random = captured.get('feat')
+            if feat_random is None:
+                logger.warning("  [PNA] 无法捕获随机噪声特征, 跳过 PNA")
+                return 0.5
+
+        finally:
+            handle.remove()
+
+        # ── 计算特征差异 ──
+        delta_feat = feat_mixed - feat_random  # η_temporal 带来的特征偏移
+        delta_flat = delta_feat.flatten()
+        eta_flat = eta_temporal.flatten()
+
+        # ── 方法1: 差异范数归一化 (η_temporal 对模型的影响强度) ──
+        delta_norm = delta_flat.norm().item()
+        feat_norm = feat_random.flatten().norm().item()
+        relative_impact = delta_norm / max(feat_norm, 1e-8)
+
+        # ── 方法2: 差异方向与 η_temporal 的余弦相似度 ──
+        cos_alignment = torch.nn.functional.cosine_similarity(
+            delta_flat.unsqueeze(0), eta_flat.unsqueeze(0)
+        ).item()
+
+        # ── PNA score = impact × alignment ──
+        # impact 高且 alignment 正 → η_temporal 有利 → PNA 高
+        # impact 高但 alignment 负 → η_temporal 有害 → PNA 低
+        # impact 低 → η_temporal 影响小 → PNA 中等
+        pna_raw = relative_impact * max(cos_alignment, 0.0)  # 对齐度负时 PNA=0
+
+        # 映射到 [0, 1] — 用 sigmoid
+        # pna_raw 典型值: 0.001 ~ 0.01 (relative_impact 很小)
+        pna_score = 1.0 / (1.0 + math.exp(-500.0 * (pna_raw - 0.003)))
+        pna_score = max(0.0, min(1.0, pna_score))
+
+        logger.info(
+            f"  [PNA] probe_t={t_probe:.2f}, α_test={alpha_test}, "
+            f"layer={probe_layer}, "
+            f"relative_impact={relative_impact:.6f}, "
+            f"cos_alignment={cos_alignment:.4f}, "
+            f"pna_raw={pna_raw:.6f}, "
+            f"PNA_score={pna_score:.4f}"
+        )
+
+        return pna_score
+
     def _cache_fi_ref_features(
         self,
         ref_trajectory: Dict[float, torch.Tensor],
@@ -1138,9 +1326,23 @@ class PFlowPipeline:
         meta = ref_features.get("_meta", {})
         target_layers = meta.get("target_layers", [])
 
-        # ── 预计算 λ 调度 ──
+        # ── L2-L3 协同: 获取当前 α_eff ──
+        alpha_coupling_scale = 1.0  # 默认不缩放
+        if getattr(cfg, 'fi_alpha_coupling', False) and cfg.adaptive_alpha:
+            alpha_eff = getattr(cfg, '_current_alpha_eff', None)
+            if alpha_eff is not None:
+                alpha_ref = getattr(cfg, 'fi_alpha_ref', 0.004)
+                alpha_coupling_scale = max(0.1, alpha_eff / alpha_ref)  # 下限 0.1 防止完全关闭
+                logger.info(
+                    f"  [FI-α Coupling] α_eff={alpha_eff:.6f}, α_ref={alpha_ref:.4f}, "
+                    f"scale={alpha_coupling_scale:.4f} "
+                    f"(λ_max: {cfg.fi_lambda:.4f}→{cfg.fi_lambda * alpha_coupling_scale:.4f})"
+                )
+
+        # ── 预计算 λ 调度 (含 α 协同缩放) ──
+        effective_fi_lambda = cfg.fi_lambda * alpha_coupling_scale
         lambda_values = self._compute_schedule(
-            num_steps, cfg.fi_lambda, cfg.fi_schedule
+            num_steps, effective_fi_lambda, cfg.fi_schedule
         )
 
         # ── 质量门控 ──
@@ -1167,7 +1369,9 @@ class PFlowPipeline:
                 return self._generate(prompt, latents, generator, negative_prompt)
 
         logger.info(
-            f"  [FI] λ_max={cfg.fi_lambda}, schedule={cfg.fi_schedule}, "
+            f"  [FI] λ_max={cfg.fi_lambda}"
+            f"{'→'+f'{effective_fi_lambda:.4f}' if alpha_coupling_scale < 1.0 else ''}, "
+            f"schedule={cfg.fi_schedule}, "
             f"quality_scale={quality_scale:.4f}, "
             f"layers={target_layers}, cache_mode={cfg.fi_cache_mode}"
         )

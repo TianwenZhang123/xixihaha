@@ -117,6 +117,24 @@ def parse_args():
     p.add_argument("--fi_md_gate", action="store_true", default=False,
                    help="启用 M_d 对 FI QS 的修正 (默认关闭, 消融用). "
                         "关闭时 L3 FI 不受 M_d 影响, 只测 L2 SVD 门控效果")
+    p.add_argument("--fi_alpha_coupling", action="store_true", default=False,
+                   help="启用 FI λ 与 L2 α 协同缩放 (默认关闭). "
+                        "α_eff/α_ref 比例缩放 FI λ_max, α 低时 FI 注入同步降低")
+    p.add_argument("--no_fi_alpha_coupling", action="store_true", default=False,
+                   help="显式关闭 FI-α 协同 (当默认开启时使用)")
+    p.add_argument("--fi_alpha_ref", type=float, default=0.004,
+                   help="FI-α 协同的 α 参考值 (默认 0.004, 即 SVD+FI 基线固定 α)")
+
+    # ── PNA (Prompt-Noise Alignment) 在线门控 ──
+    p.add_argument("--pna_probe", action="store_true", default=False,
+                   help="启用 PNA 在线门控 (默认关闭). "
+                        "用模型一步前向测量 η_temporal 方向是否有利，替代 LLM M_d 离线判断")
+    p.add_argument("--pna_probe_step", type=float, default=0.95,
+                   help="PNA 探测的 t 值 (默认 0.95, 接近1.0=纯噪声, 影响最大)")
+    p.add_argument("--pna_alpha_max", type=float, default=0.006,
+                   help="PNA 门控的 α 上限 (默认 0.006)")
+    p.add_argument("--pna_alpha_min", type=float, default=0.0005,
+                   help="PNA 门控的 α 下限 (默认 0.0005, 不允许完全为0)")
 
     # ── M_d (Motion Definiteness) 融合门控 ──
     p.add_argument("--md_file", type=str, default="",
@@ -198,6 +216,13 @@ def build_config(args) -> PFlowConfig:
         fi_adaptive_temp=args.fi_adaptive_temp,
         fi_qs_md_floor=args.fi_qs_md_floor,
         fi_md_gate=args.fi_md_gate,
+        fi_alpha_coupling=args.fi_alpha_coupling and not args.no_fi_alpha_coupling,
+        fi_alpha_ref=args.fi_alpha_ref,
+        # PNA 在线门控
+        pna_probe=args.pna_probe,
+        pna_probe_step=args.pna_probe_step,
+        pna_alpha_max=args.pna_alpha_max,
+        pna_alpha_min=args.pna_alpha_min,
         # M_d 融合门控
         md_file=args.md_file,
         alpha_floor=args.alpha_floor,
