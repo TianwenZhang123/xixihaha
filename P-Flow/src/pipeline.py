@@ -1018,7 +1018,12 @@ class PFlowPipeline:
 
         # ── 构造两种噪声 ──
         alpha_test = 0.004  # 试探 α，用基线值
-        eta_random = torch.randn_like(eta_temporal, generator=generator)
+        eta_random = torch.randn(
+            eta_temporal.shape,
+            dtype=eta_temporal.dtype,
+            device=eta_temporal.device,
+            generator=generator,
+        )
 
         # 混合噪声
         sqrt_a = math.sqrt(alpha_test)
