@@ -66,8 +66,8 @@ def parse_args():
     p.add_argument("--alpha", type=float, default=0.003, help="噪声混合权重 (推荐 0.001~0.01, P-Flow论文用 0.001)")
     p.add_argument("--adaptive_alpha", action="store_true",
                    help="启用 TSR-guided 自适应 α: 根据 Temporal Signal Reliability 自动调节 blend 系数")
-    p.add_argument("--alpha_max", type=float, default=0.003,
-                   help="自适应 α 上限 (TSR=1 时取此值)")
+    p.add_argument("--alpha_max", type=float, default=0.006,
+                   help="自适应 α 上限 (TSR=1 且 M_d=1 时 α_fusion 可达此值)")
     p.add_argument("--alpha_min", type=float, default=0.0,
                    help="自适应 α 下限 (TSR=0 时取此值, 0=完全关闭 SVD blend)")
     p.add_argument("--tsr_tcr_center", type=float, default=0.1,
@@ -116,9 +116,12 @@ def parse_args():
     p.add_argument("--md_file", type=str, default="",
                    help="M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成). "
                         "启用后自适应 α 将使用 M_d × TSR 融合门控")
-    p.add_argument("--alpha_floor", type=float, default=0.001,
+    p.add_argument("--alpha_floor", type=float, default=0.002,
                    help="M_d 确认物体运动时的保底 α (默认 0.002). "
-                        "α_eff = max(α_floor * M_d, α_min + f(M_d,TSR) * (α_max - α_min))")
+                        "α_eff = max(α_floor * max(M_d, alpha_md_floor), α_min + f(M_d,TSR) * (α_max - α_min))")
+    p.add_argument("--alpha_md_floor", type=float, default=0.2,
+                   help="α 保底中 M_d 的下限 (默认 0.2). 防止 M_d=0 时 α 完全归零, "
+                        "确保场景类样本仍保留微量注入. md_for_alpha = max(M_d, alpha_md_floor)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
@@ -198,6 +201,7 @@ def build_config(args) -> PFlowConfig:
         # M_d 融合门控
         md_file=args.md_file,
         alpha_floor=args.alpha_floor,
+        alpha_md_floor=args.alpha_md_floor,
     )
 
 
@@ -313,7 +317,7 @@ def main():
     if config.use_iter:
         print(f"  iterations={config.i_max}")
     if config.md_file:
-        print(f"  [M_d] md_file={config.md_file}, alpha_floor={config.alpha_floor}")
+        print(f"  [M_d] md_file={config.md_file}, alpha_floor={config.alpha_floor}, alpha_md_floor={config.alpha_md_floor}")
     print()
 
     pipeline = PFlowPipeline(config)

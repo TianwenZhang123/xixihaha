@@ -83,7 +83,7 @@ class PFlowConfig:
     alpha: float = 0.003           # 混合权重 (√α·η_temporal + √(1-α-β)·η_random)
                                   # P-Flow论文用 0.001, 推荐搜索范围: 0.001 ~ 0.01
     adaptive_alpha: bool = False   # 是否启用 TSR-guided 自适应 α
-    alpha_max: float = 0.003       # 自适应 α 的上限 (TSR=1 时取此值)
+    alpha_max: float = 0.006       # 自适应 α 的上限 (TSR=1 且 M_d=1 时 α_fusion 可达此值)
     alpha_min: float = 0.0         # 自适应 α 的下限 (TSR=0 时取此值, 0=完全关闭SVD blend)
     tsr_tcr_center: float = 0.1    # TCR sigmoid 中心 (TCR < center → 低可靠性)
     tsr_tcr_slope: float = 10.0    # TCR sigmoid 斜率 (越大越陡峭, 区分越锐利)
@@ -135,8 +135,10 @@ class PFlowConfig:
 
     # ── M_d (Motion Definiteness) 融合门控 ──
     md_file: str = ""                 # M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成)
-    alpha_floor: float = 0.001        # M_d 确认物体运动时的保底 α
-                                     # α_eff = max(α_floor * M_d, α_min + f(M_d,TSR) * (α_max - α_min))
+    alpha_floor: float = 0.002        # M_d 确认物体运动时的保底 α
+                                     # α_eff = max(α_floor * max(M_d, alpha_md_floor), α_min + f(M_d,TSR) * (α_max - α_min))
+    alpha_md_floor: float = 0.2       # α 保底中 M_d 的下限，防止 M_d=0 时 α 完全归零
+                                     # md_for_alpha = max(M_d, alpha_md_floor)
     fi_qs_md_floor: float = 0.3       # Quality Scale × M_d 修正的保底下限
                                      # QS_eff = QS * max(M_d, fi_qs_md_floor)
                                      # 防止 M_d=0.0 时 FI 被完全关闭
@@ -708,12 +710,15 @@ class PFlowPipeline:
             f_md_tsr = md * tsr + (1.0 - md) * 0.1 * tsr
             alpha_fusion = cfg.alpha_min + f_md_tsr * (cfg.alpha_max - cfg.alpha_min)
 
-            # ── α_floor 保底 ──
-            alpha_floor_val = cfg.alpha_floor * md
+            # ── α_floor 保底 (含 alpha_md_floor 下限) ──
+            alpha_md_floor = getattr(cfg, 'alpha_md_floor', 0.2)
+            md_for_alpha = max(md, alpha_md_floor)  # 防止 M_d=0 时 α 完全归零
+            alpha_floor_val = cfg.alpha_floor * md_for_alpha
             alpha = max(alpha_floor_val, alpha_fusion)
 
             logger.info(
-                f"  [Adaptive α] M_d={md:.2f}, TSR={tsr:.4f}, "
+                f"  [Adaptive α] M_d={md:.2f}, alpha_md_floor={alpha_md_floor}, "
+                f"md_for_alpha={md_for_alpha:.2f}, TSR={tsr:.4f}, "
                 f"f(M_d,TSR)={f_md_tsr:.4f}, "
                 f"α_fusion={alpha_fusion:.6f}, α_floor={alpha_floor_val:.6f} "
                 f"→ α_eff={alpha:.6f} "
