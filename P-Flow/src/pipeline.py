@@ -706,7 +706,7 @@ class PFlowPipeline:
                     alpha_tsr = pna_alpha_min + tsr * (pna_alpha_max - pna_alpha_min)
 
                     logger.info(
-                        f"  [PNA-α] 选用方案E(分段temporal修正v4): score={pna_score:.4f}, "
+                        f"  [PNA-α] 选用方案G(连续平滑修正v5): score={pna_score:.4f}, "
                         f"α_eff={alpha:.6f}"
                     )
                     pna_alphas_dict = getattr(cfg, '_pna_alphas', {})
@@ -714,8 +714,9 @@ class PFlowPipeline:
                         f"  [PNA-α 对比] A={pna_alphas_dict.get('A', 0):.6f} | "
                         f"B={pna_alphas_dict.get('B', 0):.6f} | "
                         f"C={pna_alphas_dict.get('C', 0):.6f} | "
-                        f"E(选用)={alpha:.6f} | "
+                        f"E={pna_alphas_dict.get('E', 0):.6f} | "
                         f"F={pna_alphas_dict.get('F', 0):.6f} | "
+                        f"G(选用)={alpha:.6f} | "
                         f"D(TSR)={alpha_tsr:.6f}(TSR={tsr:.4f}) | "
                         f"经验={pna_alphas_dict.get('hint', 0):.6f}"
                     )
@@ -1220,45 +1221,55 @@ class PFlowPipeline:
         # 从 svd_stats 取 TSR（后续在 _get_latents 中取）
         score_D_placeholder = -1.0  # 占位，在 _get_latents 中用实际 TSR
 
-        # 方案E: 分段 temporal 修正 (v4)
-        # 基于v3实验结果: 1.0-cos 在 cos<0.5 时太温和, α直接到上限0.006
-        # 新策略: 分段压低, 让 α 更接近经验值
+        # 方案E: 分段 temporal 修正 (v5 — 调高0.20~0.50区间)
+        # 基于v4 L2-only实验: 0.20~0.50区间modifier=0.10太低(73/111严重退化)
+        # v5调整: 0.20~0.50区间从0.10提到0.20, 避免α直接掉到下限
         #   cos < 0.05 (快运动):  modifier=0.85 → α有机会到0.004~0.005
         #   cos 0.05~0.20 (慢镜头): modifier=0.25 → α≈0.001~0.002
-        #   cos 0.20~0.50 (静态):   modifier=0.10 → α≈0.0005~0.001
+        #   cos 0.20~0.50 (静态):   modifier=0.20 → α≈0.0008~0.001 (v4是0.10)
         #   cos > 0.50 (纯静态):    modifier=0.05 → α≈0.0005 (下限)
         if temporal_frame_cos < 0.05:
             temporal_modifier_E = 0.85
         elif temporal_frame_cos < 0.20:
             temporal_modifier_E = 0.25
         elif temporal_frame_cos < 0.50:
-            temporal_modifier_E = 0.10
+            temporal_modifier_E = 0.20  # v4=0.10, 73/111退化→调高
         else:
             temporal_modifier_E = 0.05
         pna_raw_E = relative_impact * temporal_modifier_E
         score_E = max(0.0, min(1.0, (pna_raw_E - pna_raw_lo * 0.5) / (pna_raw_hi - pna_raw_lo * 0.5)))
         alpha_E = pna_alpha_min + score_E * (pna_alpha_max - pna_alpha_min)
 
-        # 方案F: 分段 temporal 修正 + 更温和的边界
-        # 与方案E类似但在中间区间给稍大 modifier, 适合慢镜头但不那么极端
+        # 方案F: 分段 temporal 修正 (v5 — 调高0.15~0.60区间)
+        # 基于v4 L2-only实验: 0.15~0.60区间modifier太低
+        # v5调整: 全面上调中间区间modifier
         #   cos < 0.05 (快运动):  modifier=0.90
-        #   cos 0.05~0.15 (慢镜头偏动): modifier=0.40
-        #   cos 0.15~0.30 (慢镜头偏静): modifier=0.15
-        #   cos 0.30~0.60 (静态):       modifier=0.07
-        #   cos > 0.60 (纯静态):        modifier=0.03
+        #   cos 0.05~0.15 (慢镜头偏动): modifier=0.50 (v4=0.40)
+        #   cos 0.15~0.30 (慢镜头偏静): modifier=0.25 (v4=0.15)
+        #   cos 0.30~0.60 (静态):       modifier=0.15 (v4=0.07)
+        #   cos > 0.60 (纯静态):        modifier=0.05 (v4=0.03)
         if temporal_frame_cos < 0.05:
             temporal_modifier_F = 0.90
         elif temporal_frame_cos < 0.15:
-            temporal_modifier_F = 0.40
+            temporal_modifier_F = 0.50  # v4=0.40
         elif temporal_frame_cos < 0.30:
-            temporal_modifier_F = 0.15
+            temporal_modifier_F = 0.25  # v4=0.15
         elif temporal_frame_cos < 0.60:
-            temporal_modifier_F = 0.07
+            temporal_modifier_F = 0.15  # v4=0.07
         else:
-            temporal_modifier_F = 0.03
+            temporal_modifier_F = 0.05  # v4=0.03
         pna_raw_F = relative_impact * temporal_modifier_F
         score_F = max(0.0, min(1.0, (pna_raw_F - pna_raw_lo * 0.3) / (pna_raw_hi - pna_raw_lo * 0.3)))
         alpha_F = pna_alpha_min + score_F * (pna_alpha_max - pna_alpha_min)
+
+        # 方案G: 连续平滑修正 — 用 (1-cos)^power 替代分段, 更平滑
+        # 优势: 无边界跳变, 自动适配所有 cos 值
+        # (1-cos)^0.8: cos=0.05→0.95, cos=0.15→0.86, cos=0.30→0.74, cos=0.50→0.57, cos=0.80→0.28
+        # 相比方案E/F的分段, 在 cos=0.30 附近给更高 modifier(0.74 vs 0.20/0.15)
+        temporal_modifier_G = max(0.05, (1.0 - temporal_frame_cos) ** 0.8)
+        pna_raw_G = relative_impact * temporal_modifier_G
+        score_G = max(0.0, min(1.0, (pna_raw_G - pna_raw_lo * 0.3) / (pna_raw_hi - pna_raw_lo * 0.3)))
+        alpha_G = pna_alpha_min + score_G * (pna_alpha_max - pna_alpha_min)
 
         # ── Coupling 对比: 正向 vs 反向 ──
         # 正向: α_eff / α_ref (α大→λ大，当前实现)
@@ -1273,6 +1284,8 @@ class PFlowPipeline:
         couple_neg_E = max(0.3, min(2.0, alpha_ref / max(alpha_E, 1e-8)))
         couple_pos_F = max(0.1, min(2.0, alpha_F / alpha_ref))
         couple_neg_F = max(0.3, min(2.0, alpha_ref / max(alpha_F, 1e-8)))
+        couple_pos_G = max(0.1, min(2.0, alpha_G / alpha_ref))
+        couple_neg_G = max(0.3, min(2.0, alpha_ref / max(alpha_G, 1e-8)))
         lambda_pos_A = fi_lambda * couple_pos_A
         lambda_neg_A = fi_lambda * couple_neg_A
         lambda_pos_B = fi_lambda * couple_pos_B
@@ -1283,6 +1296,8 @@ class PFlowPipeline:
         lambda_neg_E = fi_lambda * couple_neg_E
         lambda_pos_F = fi_lambda * couple_pos_F
         lambda_neg_F = fi_lambda * couple_neg_F
+        lambda_pos_G = fi_lambda * couple_pos_G
+        lambda_neg_G = fi_lambda * couple_neg_G
 
         # ── 场景分类启发式 (基于6-18消融实验经验) ──
         # mean_cos < 0.05 → 物体运动型 (如32-动物: α≈0.004, λ≈0.05)
@@ -1336,42 +1351,49 @@ class PFlowPipeline:
             f"couple+scale={couple_pos_C:.3f} λ_eff={lambda_pos_C:.4f} | "
             f"couple-scale={couple_neg_C:.3f} λ_eff={lambda_neg_C:.4f}"
         )
-        # ── 分段区间诊断 ──
+        # ── 分段区间诊断 (v5) ──
         if temporal_frame_cos < 0.05:
             piece_label_E = 'cos<0.05→快运动(mod=0.85)'
             piece_label_F = 'cos<0.05→快运动(mod=0.90)'
         elif temporal_frame_cos < 0.15:
             piece_label_E = '0.05≤cos<0.20→慢镜头(mod=0.25)'
-            piece_label_F = '0.05≤cos<0.15→慢镜头偏动(mod=0.40)'
+            piece_label_F = '0.05≤cos<0.15→慢镜头偏动(mod=0.50)'
         elif temporal_frame_cos < 0.20:
             piece_label_E = '0.05≤cos<0.20→慢镜头(mod=0.25)'
-            piece_label_F = '0.15≤cos<0.30→慢镜头偏静(mod=0.15)'
+            piece_label_F = '0.15≤cos<0.30→慢镜头偏静(mod=0.25)'
         elif temporal_frame_cos < 0.30:
-            piece_label_E = '0.20≤cos<0.50→静态(mod=0.10)'
-            piece_label_F = '0.15≤cos<0.30→慢镜头偏静(mod=0.15)'
+            piece_label_E = '0.20≤cos<0.50→静态(mod=0.20)'
+            piece_label_F = '0.15≤cos<0.30→慢镜头偏静(mod=0.25)'
         elif temporal_frame_cos < 0.50:
-            piece_label_E = '0.20≤cos<0.50→静态(mod=0.10)'
-            piece_label_F = '0.30≤cos<0.60→静态(mod=0.07)'
+            piece_label_E = '0.20≤cos<0.50→静态(mod=0.20)'
+            piece_label_F = '0.30≤cos<0.60→静态(mod=0.15)'
         elif temporal_frame_cos < 0.60:
             piece_label_E = 'cos≥0.50→纯静态(mod=0.05)'
-            piece_label_F = '0.30≤cos<0.60→静态(mod=0.07)'
+            piece_label_F = '0.30≤cos<0.60→静态(mod=0.15)'
         else:
             piece_label_E = 'cos≥0.50→纯静态(mod=0.05)'
-            piece_label_F = 'cos≥0.60→纯静态(mod=0.03)'
+            piece_label_F = 'cos≥0.60→纯静态(mod=0.05)'
 
         logger.info(
-            f"  [PNA-E] 分段temporal修正(v4): score={score_E:.4f} → α={alpha_E:.6f} | "
+            f"  [PNA-E] 分段temporal修正(v5): score={score_E:.4f} → α={alpha_E:.6f} | "
             f"{piece_label_E} | "
             f"pna_raw_E={pna_raw_E:.6f} | "
             f"couple+scale={couple_pos_E:.3f} λ_eff={lambda_pos_E:.4f} | "
             f"couple-scale={couple_neg_E:.3f} λ_eff={lambda_neg_E:.4f}"
         )
         logger.info(
-            f"  [PNA-F] 分段temporal修正(v4): score={score_F:.4f} → α={alpha_F:.6f} | "
+            f"  [PNA-F] 分段temporal修正(v5): score={score_F:.4f} → α={alpha_F:.6f} | "
             f"{piece_label_F} | "
             f"pna_raw_F={pna_raw_F:.6f} | "
             f"couple+scale={couple_pos_F:.3f} λ_eff={lambda_pos_F:.4f} | "
             f"couple-scale={couple_neg_F:.3f} λ_eff={lambda_neg_F:.4f}"
+        )
+        logger.info(
+            f"  [PNA-G] 连续平滑修正((1-cos)^0.8): score={score_G:.4f} → α={alpha_G:.6f} | "
+            f"mod={temporal_modifier_G:.4f} | "
+            f"pna_raw_G={pna_raw_G:.6f} | "
+            f"couple+scale={couple_pos_G:.3f} λ_eff={lambda_pos_G:.4f} | "
+            f"couple-scale={couple_neg_G:.3f} λ_eff={lambda_neg_G:.4f}"
         )
         logger.info(
             f"  [PNA 经验参考] 场景建议 α≈{hint_alpha:.4f}, λ≈{hint_lambda:.4f}"
@@ -1383,6 +1405,7 @@ class PFlowPipeline:
             f"C:|{alpha_C-hint_alpha:+.4f}| "
             f"E:|{alpha_E-hint_alpha:+.4f}| "
             f"F:|{alpha_F-hint_alpha:+.4f}| "
+            f"G:|{alpha_G-hint_alpha:+.4f}| "
             f"→ 越接近0越好"
         )
         # ── 最佳方案判定 ──
@@ -1392,12 +1415,13 @@ class PFlowPipeline:
             'C': abs(alpha_C - hint_alpha),
             'E': abs(alpha_E - hint_alpha),
             'F': abs(alpha_F - hint_alpha),
+            'G': abs(alpha_G - hint_alpha),
         }
         best_scheme = min(deviations, key=deviations.get)
         logger.info(
             f"  [PNA 最佳方案] {best_scheme}(偏差最小={deviations[best_scheme]:.4f}) "
-            f"vs 选用E(偏差={deviations['E']:.4f}) "
-            f"{'✓ 一致' if best_scheme == 'E' else '✗ 不一致, 考虑切换'}"
+            f"vs 选用G(偏差={deviations['G']:.4f}) "
+            f"{'✓ 一致' if best_scheme == 'G' else '✗ 不一致, 考虑切换'}"
         )
         # ── 反向Coupling 下的 λ_eff 对比表 ──
         logger.info(
@@ -1405,20 +1429,32 @@ class PFlowPipeline:
             f"A:λ={lambda_neg_A:.4f} | "
             f"B:λ={lambda_neg_B:.4f} | "
             f"C:λ={lambda_neg_C:.4f} | "
-            f"E(选用):λ={lambda_neg_E:.4f} | "
+            f"E:λ={lambda_neg_E:.4f} | "
             f"F:λ={lambda_neg_F:.4f} | "
+            f"G(选用):λ={lambda_neg_G:.4f} | "
             f"经验:λ≈{hint_lambda:.4f}"
         )
+        # ── No-Coupling 下的 α 直接对比 (关键: 纯L2效果) ──
+        logger.info(
+            f"  [PNA 纯L2 α 对比(无Coupling)] "
+            f"A:α={alpha_A:.6f} | "
+            f"B:α={alpha_B:.6f} | "
+            f"C:α={alpha_C:.6f} | "
+            f"E:α={alpha_E:.6f} | "
+            f"F:α={alpha_F:.6f} | "
+            f"G(选用):α={alpha_G:.6f} | "
+            f"经验:α≈{hint_alpha:.6f}"
+        )
 
-        # ── 默认使用方案E (temporal_frame_cos 修正版) 作为主 score ──
-        # 原因: 方案C的pna_raw范围太窄，无法区分场景类型
-        # 方案E用temporal_frame_cos压低静态场景的α，更接近经验最佳值
+        # ── 默认使用方案G (连续平滑修正) 作为主 score ──
+        # v5切换: 方案E在0.20~0.50区间仍可能过低, 方案F的边界跳变不可控
+        # 方案G用(1-cos)^0.8连续映射, 无边界跳变, 中间区间给更高modifier
         # 同时缓存所有方案的 α 供 FI 层使用
-        pna_score = score_E
+        pna_score = score_G
 
         # 缓存多方案 α 到 cfg，供 _generate_with_fi 做诊断
         cfg._pna_alphas = {
-            'A': alpha_A, 'B': alpha_B, 'C': alpha_C, 'E': alpha_E, 'F': alpha_F,
+            'A': alpha_A, 'B': alpha_B, 'C': alpha_C, 'E': alpha_E, 'F': alpha_F, 'G': alpha_G,
             'hint': hint_alpha,
         }
         cfg._pna_raw = pna_raw
@@ -1642,15 +1678,16 @@ class PFlowPipeline:
         target_layers = meta.get("target_layers", [])
 
         # ── L2-L3 协同: 获取当前 α_eff ──
-        # 核心逻辑: SVD(L2) 和 FI(L3) 应该互补而非同向增强
-        #   - α 高 → SVD 已注入足够运动信息 → FI 应减少注入(保护外观一致性)
-        #   - α 低 → SVD 注入弱 → FI 需要正常甚至增强注入(保持时序一致性)
-        # 因此使用反向 Coupling: scale = α_ref / α_eff
+        # v5策略: 默认不开启Coupling (v4实验证明Coupling整体无效)
+        # L2(SVD)和L3(FI)独立工作, 各自适应门控
+        # Coupling仅作为诊断日志输出, 不影响实际 λ
         alpha_coupling_scale = 1.0  # 默认不缩放
+        pna_alphas = getattr(cfg, '_pna_alphas', {})
+        alpha_eff = getattr(cfg, '_current_alpha_eff', None)
+        alpha_ref = getattr(cfg, 'fi_alpha_ref', 0.004)
+
         if getattr(cfg, 'fi_alpha_coupling', False) and cfg.adaptive_alpha:
-            alpha_eff = getattr(cfg, '_current_alpha_eff', None)
             if alpha_eff is not None:
-                alpha_ref = getattr(cfg, 'fi_alpha_ref', 0.004)
                 # 反向 Coupling: α 高 → FI λ 小 (互补)
                 alpha_coupling_scale = max(0.3, min(2.0, alpha_ref / max(alpha_eff, 1e-8)))
                 # 正向 Coupling 对比 (旧逻辑): α 高 → FI λ 大
@@ -1671,7 +1708,6 @@ class PFlowPipeline:
                 )
 
                 # ── 多方案 α 对应的 Coupling 诊断 ──
-                pna_alphas = getattr(cfg, '_pna_alphas', {})
                 if pna_alphas:
                     hint_alpha = pna_alphas.get('hint', 0)
                     logger.info(
@@ -1694,45 +1730,57 @@ class PFlowPipeline:
                                 f"正向scale={pos_s:.3f} λ_eff={cfg.fi_lambda * pos_s:.4f} | "
                                 f"经验λ_eff≈{hint_lambda_neg:.4f}"
                             )
-
-        # ── L2-only 诊断（Coupling 关闭时） ──
-        if not (getattr(cfg, 'fi_alpha_coupling', False) and cfg.adaptive_alpha):
-            alpha_eff_l2 = getattr(cfg, '_current_alpha_eff', None)
-            pna_alphas_l2 = getattr(cfg, '_pna_alphas', {})
-            hint_alpha_l2 = pna_alphas_l2.get('hint', 0)
+        else:
+            # ── L2-only + 无Coupling 诊断 ──
+            hint_alpha_l2 = pna_alphas.get('hint', 0)
             temporal_cos_l2 = getattr(cfg, '_pna_temporal_frame_cos', -1)
-            if alpha_eff_l2 is not None:
+            frame_cons_l2 = getattr(cfg, '_pna_frame_consistency', -1)
+            prompt_align_l2 = getattr(cfg, '_pna_prompt_alignment', -1)
+            if alpha_eff is not None:
                 logger.info(
-                    f"  [L2-only 诊断] Coupling=OFF, FI λ固定={cfg.fi_lambda:.4f}"
+                    f"  [L2+FI 独立门控诊断] Coupling=OFF, FI λ固定={cfg.fi_lambda:.4f}"
                 )
                 logger.info(
-                    f"  [L2-only 诊断] α_eff={alpha_eff_l2:.6f}, "
+                    f"  [L2+FI 独立门控] α_eff={alpha_eff:.6f}, "
                     f"经验α≈{hint_alpha_l2:.4f}, "
-                    f"偏差={alpha_eff_l2 - hint_alpha_l2:+.4f}"
+                    f"偏差={alpha_eff - hint_alpha_l2:+.4f}"
                 )
                 if temporal_cos_l2 >= 0:
                     logger.info(
-                        f"  [L2-only 诊断] temporal_frame_cos={temporal_cos_l2:.4f}"
+                        f"  [L2+FI 独立门控] temporal_frame_cos={temporal_cos_l2:.4f}, "
+                        f"frame_consistency={frame_cons_l2:.4f}, "
+                        f"prompt_alignment={prompt_align_l2:.4f}"
                     )
                 # 输出所有方案的 α 对比
-                if pna_alphas_l2:
+                if pna_alphas:
                     logger.info(
-                        f"  [L2-only α 对比] "
-                        f"A={pna_alphas_l2.get('A', 0):.6f} | "
-                        f"B={pna_alphas_l2.get('B', 0):.6f} | "
-                        f"C={pna_alphas_l2.get('C', 0):.6f} | "
-                        f"E(选用)={alpha_eff_l2:.6f} | "
-                        f"F={pna_alphas_l2.get('F', 0):.6f} | "
+                        f"  [L2+FI α 全方案对比] "
+                        f"A={pna_alphas.get('A', 0):.6f} | "
+                        f"B={pna_alphas.get('B', 0):.6f} | "
+                        f"C={pna_alphas.get('C', 0):.6f} | "
+                        f"E={pna_alphas.get('E', 0):.6f} | "
+                        f"F={pna_alphas.get('F', 0):.6f} | "
+                        f"G(选用)={alpha_eff:.6f} | "
                         f"经验={hint_alpha_l2:.6f}"
                     )
-                    # 假设 Coupling 开启时的 λ_eff 对比（虚拟计算）
-                    alpha_ref_l2 = getattr(cfg, 'fi_alpha_ref', 0.004)
-                    couple_neg_l2 = max(0.3, min(2.0, alpha_ref_l2 / max(alpha_eff_l2, 1e-8)))
-                    logger.info(
-                        f"  [L2-only vs Coupling 对比] "
-                        f"当前: λ_eff={cfg.fi_lambda:.4f}(固定) | "
-                        f"若开启Coupling: λ_eff={cfg.fi_lambda * couple_neg_l2:.4f}(反向scale={couple_neg_l2:.3f})"
-                    )
+                # 假设 Coupling 开启时的 λ_eff 对比（虚拟计算）
+                couple_neg_l2 = max(0.3, min(2.0, alpha_ref / max(alpha_eff, 1e-8)))
+                logger.info(
+                    f"  [L2+FI vs Coupling 虚拟对比] "
+                    f"当前(无Coupling): λ_eff={cfg.fi_lambda:.4f}(固定) | "
+                    f"若开启反向Coupling: λ_eff={cfg.fi_lambda * couple_neg_l2:.4f}(scale={couple_neg_l2:.3f})"
+                )
+                # v4 L2-only 结果参考
+                temporal_cos_val = temporal_cos_l2 if temporal_cos_l2 >= 0 else 0
+                if temporal_cos_val < 0.10:
+                    l2_ref = "v4 L2-only: 32(cos=0.02) X-CLIP=0.812, 50(cos=0.08) X-CLIP=0.770"
+                elif temporal_cos_val < 0.30:
+                    l2_ref = "v4 L2-only: 80(cos=0.14) X-CLIP=0.822"
+                else:
+                    l2_ref = "v4 L2-only: 73(cos=0.32) X-CLIP=0.807, 111(cos=0.55) X-CLIP=0.814"
+                logger.info(
+                    f"  [v4 L2-only 参考值] {l2_ref}"
+                )
 
         # ── 预计算 λ 调度 (含 α 协同缩放) ──
         effective_fi_lambda = cfg.fi_lambda * alpha_coupling_scale
@@ -1845,10 +1893,10 @@ class PFlowPipeline:
                     ).item()
                     lam_eff = lam * gate
 
-                    # 每5步记录一次自适应门控统计
+                    # v5: 门控统计 (每5步输出一次, info级别)
                     if step_idx_ref[0] % 5 == 0 and layer_idx == target_layers[0]:
-                        logger.debug(
-                            f"      [FI Adaptive] step={step_idx_ref[0]}, "
+                        logger.info(
+                            f"    [FI Adaptive step={step_idx_ref[0]}] "
                             f"layer={layer_idx}, cos={cos_sim:.4f}, "
                             f"gate={gate:.4f}, λ={lam:.5f}→{lam_eff:.5f}"
                         )
@@ -1892,6 +1940,14 @@ class PFlowPipeline:
                 lam = lambda_values[step_index] * quality_scale
                 current_lambda[0] = lam
 
+                # v5: 步级详细日志 (每5步输出一次)
+                if step_index % 5 == 0 or step_index == num_steps - 1:
+                    logger.info(
+                        f"    [FI step={step_index}/{num_steps}] "
+                        f"λ_sched={lambda_values[step_index]:.5f} * qs={quality_scale:.4f} = λ_eff={lam:.5f} | "
+                        f"ref_layers={list(current_ref[0].keys()) if current_ref[0] else 'none'}"
+                    )
+
                 # 获取当前步的参考特征
                 step_features = ref_features.get(step_index, {})
                 current_ref[0] = {}
@@ -1925,6 +1981,17 @@ class PFlowPipeline:
                 # 重置注入统计
                 injection_stats_per_step[0] = {}
 
+                # v5: 注入统计日志 (每10步输出一次)
+                if step_index % 10 == 0 and step_index > 0 and fi_stats['per_step']:
+                    last_stats = fi_stats['per_step'][-1]
+                    total_norm = sum(last_stats.values()) if last_stats else 0
+                    logger.info(
+                        f"    [FI step={step_index} 累计] "
+                        f"total_norm={fi_stats['total_injection_norm']:.4f}, "
+                        f"last_step_norm={total_norm:.4f}, "
+                        f"steps_with_ref={fi_stats['steps_with_ref']}/{step_index}"
+                    )
+
                 # callback 不修改 latents
                 return callback_kwargs
 
@@ -1952,13 +2019,34 @@ class PFlowPipeline:
             for h in hooks:
                 h.remove()
 
-        # ── FI 统计总结 ──
+        # ── FI 统计总结 (v5: 更详细) ──
         logger.info("  ═══════════════════════════════════════════════")
         logger.info(f"  [FI] 生成完成总结")
         logger.info(
             f"    λ schedule: first 5={[f'{l:.4f}' for l in lambda_values[:5]]}, "
             f"last 5={[f'{l:.4f}' for l in lambda_values[-5:]]}"
         )
+        logger.info(
+            f"    Coupling: scale={alpha_coupling_scale:.4f}, "
+            f"effective_λ_max={effective_fi_lambda:.4f}"
+        )
+        logger.info(
+            f"    Quality scale: {quality_scale:.4f}"
+        )
+        logger.info(
+            f"    Steps: with_ref={fi_stats['steps_with_ref']}/{num_steps}, "
+            f"no_ref={fi_stats['steps_no_ref']}/{num_steps}"
+        )
+        logger.info(
+            f"    Total injection norm: {fi_stats['total_injection_norm']:.4f}"
+        )
+        # v5: α_eff 回顾
+        if alpha_eff is not None:
+            hint_a = pna_alphas.get('hint', 0) if pna_alphas else 0
+            logger.info(
+                f"    α_eff={alpha_eff:.6f}, 经验α≈{hint_a:.4f}, "
+                f"偏差={alpha_eff - hint_a:+.4f}"
+            )
         logger.info("  ═══════════════════════════════════════════════")
 
         # 处理输出格式
