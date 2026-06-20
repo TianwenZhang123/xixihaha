@@ -691,9 +691,8 @@ class PFlowPipeline:
                     pna_score = self._compute_pna_score(
                         eta_temporal, prompt_embeds, generator
                     )
-                    # PNA → α: 直接映射
-                    # PNA 高 (η_temporal 有利) → α 大
-                    # PNA 低 (η_temporal 无利/有害) → α 小
+                    # PNA → α: 直接映射 (现在 _compute_pna_score 内部已计算多方案)
+                    # 默认使用方案C (linear mapping)
                     pna_alpha_max = getattr(cfg, 'pna_alpha_max', 0.006)
                     pna_alpha_min = getattr(cfg, 'pna_alpha_min', 0.0005)
                     alpha = pna_alpha_min + pna_score * (pna_alpha_max - pna_alpha_min)
@@ -701,10 +700,22 @@ class PFlowPipeline:
                     # 缓存 α_eff 供 FI 协同缩放使用
                     cfg._current_alpha_eff = alpha
 
+                    # 输出 TSR-guided α 对比 (方案D)
+                    tsr_info = svd_stats.get("tsr", {}) if svd_stats else {}
+                    tsr = tsr_info.get("tsr", 0.0)
+                    alpha_tsr = pna_alpha_min + tsr * (pna_alpha_max - pna_alpha_min)
+
                     logger.info(
-                        f"  [PNA-α] PNA_score={pna_score:.4f}, "
-                        f"α_min={pna_alpha_min}, α_max={pna_alpha_max} "
-                        f"→ α_eff={alpha:.6f}"
+                        f"  [PNA-α] 选用方案C(linear): score={pna_score:.4f}, "
+                        f"α_eff={alpha:.6f}"
+                    )
+                    logger.info(
+                        f"  [PNA-α 对比] A={getattr(cfg, '_pna_alphas', {}).get('A', 0):.6f} | "
+                        f"B={getattr(cfg, '_pna_alphas', {}).get('B', 0):.6f} | "
+                        f"C(选用)={alpha:.6f} | "
+                        f"E={getattr(cfg, '_pna_alphas', {}).get('E', 0):.6f} | "
+                        f"D(TSR)={alpha_tsr:.6f}(TSR={tsr:.4f}) | "
+                        f"经验={getattr(cfg, '_pna_alphas', {}).get('hint', 0):.6f}"
                     )
                 else:
                     # fallback: 用 TSR-guided
@@ -1104,25 +1115,197 @@ class PFlowPipeline:
         else:
             cos_consistency = 0.0
 
+        # ── 指标3: 帧间差异的一致性 (temporal coherence of impact) ──
+        # 将 delta_feat 按帧拆分，计算相邻帧特征偏移方向的余弦相似度
+        # 运动型视频 → 各帧偏移方向一致 → 帧间cos高
+        # 静态/噪声型视频 → 各帧偏移方向随机 → 帧间cos低
+        frame_consistency = 0.0
+        if delta_feat.dim() == 5 and delta_feat.shape[2] >= 2:
+            # shape: [1, C, F, H, W]
+            nf = delta_feat.shape[2]
+            frame_cos_list = []
+            for f in range(nf - 1):
+                f1 = delta_feat[0, :, f, :, :].flatten()
+                f2 = delta_feat[0, :, f+1, :, :].flatten()
+                fc = torch.nn.functional.cosine_similarity(
+                    f1.unsqueeze(0), f2.unsqueeze(0)
+                ).item()
+                frame_cos_list.append(fc)
+            frame_consistency = sum(frame_cos_list) / len(frame_cos_list) if frame_cos_list else 0.0
+        elif delta_feat.dim() == 4 and delta_feat.shape[1] >= 2:
+            # shape: [C, F, H, W]
+            nf = delta_feat.shape[1]
+            frame_cos_list = []
+            for f in range(nf - 1):
+                f1 = delta_feat[:, f, :, :].flatten()
+                f2 = delta_feat[:, f+1, :, :].flatten()
+                fc = torch.nn.functional.cosine_similarity(
+                    f1.unsqueeze(0), f2.unsqueeze(0)
+                ).item()
+                frame_cos_list.append(fc)
+            frame_consistency = sum(frame_cos_list) / len(frame_cos_list) if frame_cos_list else 0.0
+
+        # ── 指标4: delta_feat 与 prompt_embeds 的方向对齐度 ──
+        # 直接测量 η_temporal 引起的特征偏移是否与文本语义方向一致
+        prompt_alignment = 0.0
+        try:
+            # prompt_embeds: [batch, seq_len, dim] 或 [batch, dim]
+            if prompt_embeds.dim() == 3:
+                prompt_dir = prompt_embeds[0].mean(dim=0)  # [dim]
+            else:
+                prompt_dir = prompt_embeds[0]  # [dim]
+            # delta_feat 太大，取 channel 平均作为方向
+            if delta_feat.dim() == 5:
+                delta_dir = delta_feat[0].mean(dim=(1, 2, 3))  # [C]
+            elif delta_feat.dim() == 4:
+                delta_dir = delta_feat.mean(dim=(1, 2, 3))  # [C]
+            else:
+                delta_dir = delta_feat.flatten()[:prompt_dir.shape[0]]
+            # 如果维度不匹配，截取/填充
+            min_dim = min(delta_dir.shape[0], prompt_dir.shape[0])
+            prompt_alignment = torch.nn.functional.cosine_similarity(
+                delta_dir[:min_dim].unsqueeze(0).float(),
+                prompt_dir[:min_dim].unsqueeze(0).float()
+            ).item()
+        except Exception:
+            pass
+
+        # ── 指标5: η_temporal 本身的帧间余弦 (即 TSR 的 mean_cos 副本) ──
+        temporal_frame_cos = 0.0
+        if eta_temporal is not None:
+            et = eta_temporal
+            if et.dim() == 5 and et.shape[2] >= 2:
+                nf = et.shape[2]
+                tc_list = []
+                for f in range(nf - 1):
+                    f1 = et[0, :, f, :, :].flatten()
+                    f2 = et[0, :, f+1, :, :].flatten()
+                    tc = torch.nn.functional.cosine_similarity(
+                        f1.unsqueeze(0), f2.unsqueeze(0)
+                    ).item()
+                    tc_list.append(tc)
+                temporal_frame_cos = sum(tc_list) / len(tc_list) if tc_list else 0.0
+
         # ── PNA score = impact × consistency ──
         # impact 高 + consistency 正 → η_temporal 有利 → PNA 高
         # impact 高 + consistency 负 → η_temporal 有害 → PNA 低
         # impact 低 → η_temporal 影响小 → PNA 中等
         pna_raw = relative_impact * (0.5 + 0.5 * cos_consistency)  # consistency 映射到 [0, 1]
 
-        # 映射到 [0, 1] — 用 sigmoid
-        # pna_raw 典型值: 0.001 ~ 0.01 (relative_impact 很小)
-        pna_score = 1.0 / (1.0 + math.exp(-500.0 * (pna_raw - 0.003)))
-        pna_score = max(0.0, min(1.0, pna_score))
+        # ── 映射策略对比：一次输出所有方案 ──
+        pna_alpha_max = getattr(cfg, 'pna_alpha_max', 0.006)
+        pna_alpha_min = getattr(cfg, 'pna_alpha_min', 0.0005)
+        alpha_ref = getattr(cfg, 'fi_alpha_ref', 0.004)
+        fi_lambda = getattr(cfg, 'fi_lambda', 0.05)
 
+        # 方案A: 旧 sigmoid (k=500, x0=0.003)
+        score_A = 1.0 / (1.0 + math.exp(-500.0 * (pna_raw - 0.003)))
+        score_A = max(0.0, min(1.0, score_A))
+        alpha_A = pna_alpha_min + score_A * (pna_alpha_max - pna_alpha_min)
+
+        # 方案B: 新 sigmoid (k=800, x0=0.008) — 中心对准典型值，陡度提升区分度
+        exp_B = max(min(-800.0 * (pna_raw - 0.008), 500.0), -500.0)
+        score_B = 1.0 / (1.0 + math.exp(exp_B))
+        score_B = max(0.0, min(1.0, score_B))
+        alpha_B = pna_alpha_min + score_B * (pna_alpha_max - pna_alpha_min)
+
+        # 方案C: linear mapping — pna_raw → [0, 1], 基于观察到的范围 [0.005, 0.01]
+        pna_raw_lo, pna_raw_hi = 0.005, 0.010
+        score_C = max(0.0, min(1.0, (pna_raw - pna_raw_lo) / (pna_raw_hi - pna_raw_lo)))
+        alpha_C = pna_alpha_min + score_C * (pna_alpha_max - pna_alpha_min)
+
+        # 方案D: TSR-only (传统 TSR-guided α, 不用 PNA)
+        # 从 svd_stats 取 TSR（后续在 _get_latents 中取）
+        score_D_placeholder = -1.0  # 占位，在 _get_latents 中用实际 TSR
+
+        # 方案E: frame_consistency 加权 — 用帧间一致性修正 pna_raw
+        # frame_consistency 高 → 运动方向跨帧一致 → 提升 pna_raw
+        # frame_consistency 低 → 帧间随机 → 压低 pna_raw
+        pna_raw_E = relative_impact * (0.5 + 0.5 * max(cos_consistency, frame_consistency))
+        score_E = max(0.0, min(1.0, (pna_raw_E - pna_raw_lo) / (pna_raw_hi - pna_raw_lo)))
+        alpha_E = pna_alpha_min + score_E * (pna_alpha_max - pna_alpha_min)
+
+        # ── Coupling 对比: 正向 vs 反向 ──
+        # 正向: α_eff / α_ref (α大→λ大，当前实现)
+        # 反向: α_ref / α_eff (α大→λ小，SVD已注入运动则FI减少)
+        couple_pos_A = max(0.1, alpha_A / alpha_ref)
+        couple_neg_A = max(0.1, alpha_ref / max(alpha_A, 1e-8))
+        couple_pos_C = max(0.1, alpha_C / alpha_ref)
+        couple_neg_C = max(0.1, alpha_ref / max(alpha_C, 1e-8))
+        lambda_pos_A = fi_lambda * couple_pos_A
+        lambda_neg_A = fi_lambda * couple_neg_A
+        lambda_pos_C = fi_lambda * couple_pos_C
+        lambda_neg_C = fi_lambda * couple_neg_C
+
+        # ── 场景分类启发式 (基于日志中的经验) ──
+        # mean_cos < 0.05 → 物体运动型 (α≈0.003~0.005, λ≈0.05)
+        # mean_cos 0.05~0.08 → 中间型 (α≈0.001~0.003, λ≈0.03~0.05)
+        # mean_cos > 0.08 → 场景/镜头型 (α≈0.0005~0.001, λ≈0.02~0.03)
+        if temporal_frame_cos < 0.05:
+            scene_hint = '物体运动型(α≈0.003~0.005,λ≈0.05)'
+            hint_alpha, hint_lambda = 0.004, 0.05
+        elif temporal_frame_cos < 0.08:
+            scene_hint = '中间型(α≈0.001~0.003,λ≈0.03~0.05)'
+            hint_alpha, hint_lambda = 0.002, 0.04
+        else:
+            scene_hint = '场景/镜头型(α≈0.0005~0.001,λ≈0.02~0.03)'
+            hint_alpha, hint_lambda = 0.0008, 0.025
+
+        # ── 全量诊断日志 ──
         logger.info(
             f"  [PNA] probe_t={t_probe:.2f}, α_test={alpha_test}, "
             f"layer={probe_layer}, "
             f"relative_impact={relative_impact:.6f}, "
             f"cos_consistency={cos_consistency:.4f}, "
-            f"pna_raw={pna_raw:.6f}, "
-            f"PNA_score={pna_score:.4f}"
+            f"pna_raw={pna_raw:.6f}"
         )
+        logger.info(
+            f"  [PNA 新指标] frame_consistency={frame_consistency:.4f}, "
+            f"prompt_alignment={prompt_alignment:.4f}, "
+            f"temporal_frame_cos={temporal_frame_cos:.4f}"
+        )
+        logger.info(
+            f"  [PNA 场景推断] mean_cos={temporal_frame_cos:.4f} → {scene_hint}"
+        )
+        logger.info(
+            f"  [PNA 映射对比] α_range=[{pna_alpha_min}, {pna_alpha_max}], α_ref={alpha_ref}, λ_max={fi_lambda}"
+        )
+        logger.info(
+            f"  [PNA-A] sigmoid(k=500,x0=0.003): score={score_A:.4f} → α={alpha_A:.6f} | "
+            f"couple+scale={couple_pos_A:.3f} λ_eff={lambda_pos_A:.4f} | "
+            f"couple-scale={couple_neg_A:.3f} λ_eff={lambda_neg_A:.4f}"
+        )
+        logger.info(
+            f"  [PNA-B] sigmoid(k=800,x0=0.008): score={score_B:.4f} → α={alpha_B:.6f} | "
+            f"couple+scale={max(0.1, alpha_B / alpha_ref):.3f} λ_eff={fi_lambda * max(0.1, alpha_B / alpha_ref):.4f} | "
+            f"couple-scale={max(0.1, alpha_ref / max(alpha_B, 1e-8)):.3f} λ_eff={fi_lambda * max(0.1, alpha_ref / max(alpha_B, 1e-8)):.4f}"
+        )
+        logger.info(
+            f"  [PNA-C] linear({pna_raw_lo}~{pna_raw_hi}):    score={score_C:.4f} → α={alpha_C:.6f} | "
+            f"couple+scale={couple_pos_C:.3f} λ_eff={lambda_pos_C:.4f} | "
+            f"couple-scale={couple_neg_C:.3f} λ_eff={lambda_neg_C:.4f}"
+        )
+        logger.info(
+            f"  [PNA-E] linear+frame_cons:      score={score_E:.4f} → α={alpha_E:.6f}"
+        )
+        logger.info(
+            f"  [PNA 经验参考] 场景建议 α≈{hint_alpha:.4f}, λ≈{hint_lambda:.4f}"
+        )
+
+        # ── 默认使用方案C (linear mapping) 作为主 score ──
+        # 原因: pna_raw 范围很窄(0.005~0.010), linear 映射区分度最高
+        # 同时缓存所有方案的 α 供 FI 层使用
+        pna_score = score_C
+
+        # 缓存多方案 α 到 cfg，供 _generate_with_fi 做诊断
+        cfg._pna_alphas = {
+            'A': alpha_A, 'B': alpha_B, 'C': alpha_C, 'E': alpha_E,
+            'hint': hint_alpha,
+        }
+        cfg._pna_raw = pna_raw
+        cfg._pna_frame_consistency = frame_consistency
+        cfg._pna_prompt_alignment = prompt_alignment
+        cfg._pna_temporal_frame_cos = temporal_frame_cos
 
         return pna_score
 
@@ -1340,17 +1523,49 @@ class PFlowPipeline:
         target_layers = meta.get("target_layers", [])
 
         # ── L2-L3 协同: 获取当前 α_eff ──
+        # 核心逻辑: SVD(L2) 和 FI(L3) 应该互补而非同向增强
+        #   - α 高 → SVD 已注入足够运动信息 → FI 应减少注入(保护外观一致性)
+        #   - α 低 → SVD 注入弱 → FI 需要正常甚至增强注入(保持时序一致性)
+        # 因此使用反向 Coupling: scale = α_ref / α_eff
         alpha_coupling_scale = 1.0  # 默认不缩放
         if getattr(cfg, 'fi_alpha_coupling', False) and cfg.adaptive_alpha:
             alpha_eff = getattr(cfg, '_current_alpha_eff', None)
             if alpha_eff is not None:
                 alpha_ref = getattr(cfg, 'fi_alpha_ref', 0.004)
-                alpha_coupling_scale = max(0.1, alpha_eff / alpha_ref)  # 下限 0.1 防止完全关闭
+                # 反向 Coupling: α 高 → FI λ 小 (互补)
+                alpha_coupling_scale = max(0.3, min(3.0, alpha_ref / max(alpha_eff, 1e-8)))
+                # 正向 Coupling 对比 (旧逻辑): α 高 → FI λ 大
+                couple_pos = max(0.1, alpha_eff / alpha_ref)
+
                 logger.info(
-                    f"  [FI-α Coupling] α_eff={alpha_eff:.6f}, α_ref={alpha_ref:.4f}, "
-                    f"scale={alpha_coupling_scale:.4f} "
+                    f"  [FI-α Coupling] α_eff={alpha_eff:.6f}, α_ref={alpha_ref:.4f}"
+                )
+                logger.info(
+                    f"  [FI-α Coupling 选用] 反向(互补): scale={alpha_coupling_scale:.4f} "
                     f"(λ_max: {cfg.fi_lambda:.4f}→{cfg.fi_lambda * alpha_coupling_scale:.4f})"
                 )
+                logger.info(
+                    f"  [FI-α Coupling 对比] 正向(同向): scale={couple_pos:.4f} "
+                    f"(λ_max: {cfg.fi_lambda:.4f}→{cfg.fi_lambda * couple_pos:.4f}) | "
+                    f"无Coupling: scale=1.0000 "
+                    f"(λ_max: {cfg.fi_lambda:.4f})"
+                )
+
+                # ── 多方案 α 对应的 Coupling 诊断 ──
+                pna_alphas = getattr(cfg, '_pna_alphas', {})
+                if pna_alphas:
+                    logger.info(
+                        f"  [FI-α 多方案 Coupling 诊断] (反向=α_ref/α, 正向=α/α_ref)"
+                    )
+                    for scheme, a_val in pna_alphas.items():
+                        if a_val > 0:
+                            neg_s = max(0.3, min(3.0, alpha_ref / a_val))
+                            pos_s = max(0.1, a_val / alpha_ref)
+                            logger.info(
+                                f"    方案{scheme}: α={a_val:.6f} → "
+                                f"反向scale={neg_s:.3f} λ_eff={cfg.fi_lambda * neg_s:.4f} | "
+                                f"正向scale={pos_s:.3f} λ_eff={cfg.fi_lambda * pos_s:.4f}"
+                            )
 
         # ── 预计算 λ 调度 (含 α 协同缩放) ──
         effective_fi_lambda = cfg.fi_lambda * alpha_coupling_scale
