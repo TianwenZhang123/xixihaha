@@ -1695,6 +1695,45 @@ class PFlowPipeline:
                                 f"经验λ_eff≈{hint_lambda_neg:.4f}"
                             )
 
+        # ── L2-only 诊断（Coupling 关闭时） ──
+        if not (getattr(cfg, 'fi_alpha_coupling', False) and cfg.adaptive_alpha):
+            alpha_eff_l2 = getattr(cfg, '_current_alpha_eff', None)
+            pna_alphas_l2 = getattr(cfg, '_pna_alphas', {})
+            hint_alpha_l2 = pna_alphas_l2.get('hint', 0)
+            temporal_cos_l2 = getattr(cfg, '_pna_temporal_frame_cos', -1)
+            if alpha_eff_l2 is not None:
+                logger.info(
+                    f"  [L2-only 诊断] Coupling=OFF, FI λ固定={cfg.fi_lambda:.4f}"
+                )
+                logger.info(
+                    f"  [L2-only 诊断] α_eff={alpha_eff_l2:.6f}, "
+                    f"经验α≈{hint_alpha_l2:.4f}, "
+                    f"偏差={alpha_eff_l2 - hint_alpha_l2:+.4f}"
+                )
+                if temporal_cos_l2 >= 0:
+                    logger.info(
+                        f"  [L2-only 诊断] temporal_frame_cos={temporal_cos_l2:.4f}"
+                    )
+                # 输出所有方案的 α 对比
+                if pna_alphas_l2:
+                    logger.info(
+                        f"  [L2-only α 对比] "
+                        f"A={pna_alphas_l2.get('A', 0):.6f} | "
+                        f"B={pna_alphas_l2.get('B', 0):.6f} | "
+                        f"C={pna_alphas_l2.get('C', 0):.6f} | "
+                        f"E(选用)={alpha_eff_l2:.6f} | "
+                        f"F={pna_alphas_l2.get('F', 0):.6f} | "
+                        f"经验={hint_alpha_l2:.6f}"
+                    )
+                    # 假设 Coupling 开启时的 λ_eff 对比（虚拟计算）
+                    alpha_ref_l2 = getattr(cfg, 'fi_alpha_ref', 0.004)
+                    couple_neg_l2 = max(0.3, min(2.0, alpha_ref_l2 / max(alpha_eff_l2, 1e-8)))
+                    logger.info(
+                        f"  [L2-only vs Coupling 对比] "
+                        f"当前: λ_eff={cfg.fi_lambda:.4f}(固定) | "
+                        f"若开启Coupling: λ_eff={cfg.fi_lambda * couple_neg_l2:.4f}(反向scale={couple_neg_l2:.3f})"
+                    )
+
         # ── 预计算 λ 调度 (含 α 协同缩放) ──
         effective_fi_lambda = cfg.fi_lambda * alpha_coupling_scale
         lambda_values = self._compute_schedule(
