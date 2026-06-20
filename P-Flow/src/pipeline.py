@@ -152,6 +152,7 @@ class PFlowConfig:
     pna_probe_step: float = 0.95       # 探测的 t 值 (接近1.0=纯噪声, 影响最大)
     pna_alpha_max: float = 0.006        # PNA 门控的 α 上限
     pna_alpha_min: float = 0.0005       # PNA 门控的 α 下限 (不允许完全为0)
+    pna_scheme: str = 'E'               # PNA 映射方案: E=分段temporal修正, G=连续平滑修正, G1=cap0.20pw1.0
 
     # ── 其他 ──
     seed: int = 42
@@ -705,8 +706,10 @@ class PFlowPipeline:
                     tsr = tsr_info.get("tsr", 0.0)
                     alpha_tsr = pna_alpha_min + tsr * (pna_alpha_max - pna_alpha_min)
 
+                    pna_scheme = getattr(cfg, 'pna_scheme', 'E').upper()
+                    scheme_desc = {'E': '分段temporal修正', 'G': '连续平滑修正', 'G1': 'G1(cap=0.20,pw=1.0)'}
                     logger.info(
-                        f"  [PNA-α] 选用方案G(连续平滑修正v5): score={pna_score:.4f}, "
+                        f"  [PNA-α] 选用方案{pna_scheme}({scheme_desc.get(pna_scheme, '?')}): score={pna_score:.4f}, "
                         f"α_eff={alpha:.6f}"
                     )
                     pna_alphas_dict = getattr(cfg, '_pna_alphas', {})
@@ -716,7 +719,8 @@ class PFlowPipeline:
                         f"C={pna_alphas_dict.get('C', 0):.6f} | "
                         f"E={pna_alphas_dict.get('E', 0):.6f} | "
                         f"F={pna_alphas_dict.get('F', 0):.6f} | "
-                        f"G(选用)={alpha:.6f} | "
+                        f"G={pna_alphas_dict.get('G', 0):.6f} | "
+                        f"{pna_scheme}(选用)={alpha:.6f} | "
                         f"D(TSR)={alpha_tsr:.6f}(TSR={tsr:.4f}) | "
                         f"经验={pna_alphas_dict.get('hint', 0):.6f}"
                     )
@@ -1441,7 +1445,7 @@ class PFlowPipeline:
         # 方案E的α也加入对比
         logger.info(
             f"  [参数扫描对比] 方案E(分段v5): α={alpha_E:.6f}(偏差={abs(alpha_E-hint_alpha):.4f}) | "
-            f"方案G(默认): α={alpha_G:.6f}(偏差={abs(alpha_G-hint_alpha):.4f}) | "
+            f"方案G(cap=0.35): α={alpha_G:.6f}(偏差={abs(alpha_G-hint_alpha):.4f}) | "
             f"扫描最佳: {best_sweep}(偏差={best_sweep_dev:.4f})"
         )
         logger.info(
@@ -1464,10 +1468,11 @@ class PFlowPipeline:
             'G': abs(alpha_G - hint_alpha),
         }
         best_scheme = min(deviations, key=deviations.get)
+        chosen_key = pna_scheme if pna_scheme in deviations else 'E'
         logger.info(
             f"  [PNA 最佳方案] {best_scheme}(偏差最小={deviations[best_scheme]:.4f}) "
-            f"vs 选用G(偏差={deviations['G']:.4f}) "
-            f"{'✓ 一致' if best_scheme == 'G' else '✗ 不一致, 考虑切换'}"
+            f"vs 选用{chosen_key}(偏差={deviations[chosen_key]:.4f}) "
+            f"{'✓ 一致' if best_scheme == chosen_key else '✗ 不一致, 考虑切换'}"
         )
         # ── 反向Coupling 下的 λ_eff 对比表 ──
         logger.info(
@@ -1477,7 +1482,7 @@ class PFlowPipeline:
             f"C:λ={lambda_neg_C:.4f} | "
             f"E:λ={lambda_neg_E:.4f} | "
             f"F:λ={lambda_neg_F:.4f} | "
-            f"G(选用):λ={lambda_neg_G:.4f} | "
+            f"G:λ={lambda_neg_G:.4f} | "
             f"经验:λ≈{hint_lambda:.4f}"
         )
         # ── No-Coupling 下的 α 直接对比 (关键: 纯L2效果) ──
@@ -1488,15 +1493,30 @@ class PFlowPipeline:
             f"C:α={alpha_C:.6f} | "
             f"E:α={alpha_E:.6f} | "
             f"F:α={alpha_F:.6f} | "
-            f"G(选用):α={alpha_G:.6f} | "
+            f"G:α={alpha_G:.6f} | "
             f"经验:α≈{hint_alpha:.6f}"
         )
 
-        # ── 默认使用方案G (连续平滑修正) 作为主 score ──
-        # v5切换: 方案E在0.20~0.50区间仍可能过低, 方案F的边界跳变不可控
-        # 方案G用(1-cos)^0.8连续映射, 无边界跳变, 中间区间给更高modifier
-        # 同时缓存所有方案的 α 供 FI 层使用
-        pna_score = score_G
+        # ── 根据 pna_scheme 选择默认方案 ──
+        # v6切换: 日志诊断表明方案E偏差最小，方案G(cap=0.35)给α过高
+        # 方案E: 分段修正，各cos区间给不同modifier，与经验值最接近
+        # 方案G: 连续修正，默认cap=0.35/pw=1.5，低cos区间α偏高
+        # 方案G1: cap=0.20/pw=1.0，参数扫描最佳
+        pna_scheme = getattr(cfg, 'pna_scheme', 'E').upper()
+        if pna_scheme == 'E':
+            pna_score = score_E
+            chosen_label = 'E(分段temporal修正)'
+        elif pna_scheme == 'G1':
+            # G1: cap=0.20, power=1.0 — 参数扫描最佳
+            mod_g1 = max(0.05, min(0.20, (1.0 - temporal_frame_cos) ** 1.0))
+            pna_raw_g1 = relative_impact * mod_g1
+            score_g1 = max(0.0, min(1.0, (pna_raw_g1 - pna_raw_lo * 0.5) / (pna_raw_hi - pna_raw_lo * 0.5)))
+            pna_score = score_g1
+            chosen_label = 'G1(cap=0.20,pw=1.0)'
+        else:  # 'G' or default
+            pna_score = score_G
+            chosen_label = 'G(连续平滑修正)'
+        logger.info(f"  [PNA-方案选择] scheme={pna_scheme}, 选用={chosen_label}, score={pna_score:.4f}")
 
         # 缓存多方案 α 到 cfg，供 _generate_with_fi 做诊断
         cfg._pna_alphas = {
@@ -1806,7 +1826,8 @@ class PFlowPipeline:
                         f"C={pna_alphas.get('C', 0):.6f} | "
                         f"E={pna_alphas.get('E', 0):.6f} | "
                         f"F={pna_alphas.get('F', 0):.6f} | "
-                        f"G(选用)={alpha_eff:.6f} | "
+                        f"G={pna_alphas.get('G', 0):.6f} | "
+                        f"选用={alpha_eff:.6f} | "
                         f"经验={hint_alpha_l2:.6f}"
                     )
                 # 假设 Coupling 开启时的 λ_eff 对比（虚拟计算）
