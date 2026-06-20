@@ -1264,11 +1264,16 @@ class PFlowPipeline:
 
         # 方案G: 连续平滑修正 — 用 (1-cos)^power 替代分段, 更平滑
         # 优势: 无边界跳变, 自动适配所有 cos 值
-        # (1-cos)^0.8: cos=0.05→0.95, cos=0.15→0.86, cos=0.30→0.74, cos=0.50→0.57, cos=0.80→0.28
-        # 相比方案E/F的分段, 在 cos=0.30 附近给更高 modifier(0.74 vs 0.20/0.15)
-        temporal_modifier_G = max(0.05, (1.0 - temporal_frame_cos) ** 0.8)
+        # v5.1修正: 加modifier上限0.5防止α饱和到上限, 用0.5归一化(与方案E一致)
+        # (1-cos)^0.8原始值: cos=0.05→0.95, cos=0.15→0.86, cos=0.30→0.74, cos=0.50→0.57, cos=0.80→0.28
+        # 加上限0.5后: cos=0.05→0.50, cos=0.15→0.50, cos=0.30→0.50, cos=0.50→0.50, cos=0.80→0.28
+        # 这太低了——73(cos=0.42)也只有0.5,和方案E差别不大
+        # 改用 (1-cos)^1.2 + 上限0.6:
+        #   cos=0.05→0.60, cos=0.15→0.60, cos=0.30→0.55, cos=0.42→0.47, cos=0.50→0.41, cos=0.80→0.19
+        # 比(1-cos)^0.8温和,但比方案E(cos=0.42时mod=0.10)高很多
+        temporal_modifier_G = max(0.05, min(0.6, (1.0 - temporal_frame_cos) ** 1.2))
         pna_raw_G = relative_impact * temporal_modifier_G
-        score_G = max(0.0, min(1.0, (pna_raw_G - pna_raw_lo * 0.3) / (pna_raw_hi - pna_raw_lo * 0.3)))
+        score_G = max(0.0, min(1.0, (pna_raw_G - pna_raw_lo * 0.5) / (pna_raw_hi - pna_raw_lo * 0.5)))
         alpha_G = pna_alpha_min + score_G * (pna_alpha_max - pna_alpha_min)
 
         # ── Coupling 对比: 正向 vs 反向 ──
@@ -1389,7 +1394,7 @@ class PFlowPipeline:
             f"couple-scale={couple_neg_F:.3f} λ_eff={lambda_neg_F:.4f}"
         )
         logger.info(
-            f"  [PNA-G] 连续平滑修正((1-cos)^0.8): score={score_G:.4f} → α={alpha_G:.6f} | "
+            f"  [PNA-G] 连续平滑修正((1-cos)^1.2, cap=0.6): score={score_G:.4f} → α={alpha_G:.6f} | "
             f"mod={temporal_modifier_G:.4f} | "
             f"pna_raw_G={pna_raw_G:.6f} | "
             f"couple+scale={couple_pos_G:.3f} λ_eff={lambda_pos_G:.4f} | "
@@ -1826,7 +1831,7 @@ class PFlowPipeline:
 
         # ── FI 统计 ──
         fi_stats = {
-            "steps_injected": 0,
+            "steps_with_ref": 0,
             "steps_no_ref": 0,
             "total_injection_norm": 0.0,
             "per_step": [],
@@ -1977,6 +1982,20 @@ class PFlowPipeline:
                         layer_idx: feat.detach()
                         for layer_idx, feat in current_ref[0].items()
                     }
+
+                # ── 更新 FI 步级统计 ──
+                if current_ref[0]:
+                    fi_stats['steps_with_ref'] += 1
+                else:
+                    fi_stats['steps_no_ref'] += 1
+
+                # 汇总本步 hook 写入的注入 norm (在重置之前)
+                if injection_stats_per_step[0]:
+                    step_total_norm = sum(injection_stats_per_step[0].values())
+                    fi_stats['total_injection_norm'] += step_total_norm
+                    fi_stats['per_step'].append(dict(injection_stats_per_step[0]))
+                else:
+                    fi_stats['per_step'].append({})
 
                 # 重置注入统计
                 injection_stats_per_step[0] = {}
