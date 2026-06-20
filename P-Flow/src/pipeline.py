@@ -1468,7 +1468,9 @@ class PFlowPipeline:
             'G': abs(alpha_G - hint_alpha),
         }
         best_scheme = min(deviations, key=deviations.get)
-        chosen_key = pna_scheme if pna_scheme in deviations else 'E'
+        _pna_scheme_early = getattr(cfg, 'pna_scheme', 'E').upper()
+        # G1在deviations中不存在，映射到G（G1是G的变体，偏差接近G1的cap=0.20版）
+        chosen_key = _pna_scheme_early if _pna_scheme_early in deviations else ('G' if _pna_scheme_early.startswith('G') else 'E')
         logger.info(
             f"  [PNA 最佳方案] {best_scheme}(偏差最小={deviations[best_scheme]:.4f}) "
             f"vs 选用{chosen_key}(偏差={deviations[chosen_key]:.4f}) "
