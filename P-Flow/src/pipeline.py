@@ -692,7 +692,7 @@ class PFlowPipeline:
                         eta_temporal, prompt_embeds, generator
                     )
                     # PNA → α: 直接映射 (现在 _compute_pna_score 内部已计算多方案)
-                    # 默认使用方案C (linear mapping)
+                    # 默认使用方案E (temporal_frame_cos 修正版)
                     pna_alpha_max = getattr(cfg, 'pna_alpha_max', 0.006)
                     pna_alpha_min = getattr(cfg, 'pna_alpha_min', 0.0005)
                     alpha = pna_alpha_min + pna_score * (pna_alpha_max - pna_alpha_min)
@@ -706,16 +706,18 @@ class PFlowPipeline:
                     alpha_tsr = pna_alpha_min + tsr * (pna_alpha_max - pna_alpha_min)
 
                     logger.info(
-                        f"  [PNA-α] 选用方案C(linear): score={pna_score:.4f}, "
+                        f"  [PNA-α] 选用方案E(temporal修正): score={pna_score:.4f}, "
                         f"α_eff={alpha:.6f}"
                     )
+                    pna_alphas_dict = getattr(cfg, '_pna_alphas', {})
                     logger.info(
-                        f"  [PNA-α 对比] A={getattr(cfg, '_pna_alphas', {}).get('A', 0):.6f} | "
-                        f"B={getattr(cfg, '_pna_alphas', {}).get('B', 0):.6f} | "
-                        f"C(选用)={alpha:.6f} | "
-                        f"E={getattr(cfg, '_pna_alphas', {}).get('E', 0):.6f} | "
+                        f"  [PNA-α 对比] A={pna_alphas_dict.get('A', 0):.6f} | "
+                        f"B={pna_alphas_dict.get('B', 0):.6f} | "
+                        f"C={pna_alphas_dict.get('C', 0):.6f} | "
+                        f"E(选用)={alpha:.6f} | "
+                        f"F={pna_alphas_dict.get('F', 0):.6f} | "
                         f"D(TSR)={alpha_tsr:.6f}(TSR={tsr:.4f}) | "
-                        f"经验={getattr(cfg, '_pna_alphas', {}).get('hint', 0):.6f}"
+                        f"经验={pna_alphas_dict.get('hint', 0):.6f}"
                     )
                 else:
                     # fallback: 用 TSR-guided
@@ -1218,12 +1220,26 @@ class PFlowPipeline:
         # 从 svd_stats 取 TSR（后续在 _get_latents 中取）
         score_D_placeholder = -1.0  # 占位，在 _get_latents 中用实际 TSR
 
-        # 方案E: frame_consistency 加权 — 用帧间一致性修正 pna_raw
-        # frame_consistency 高 → 运动方向跨帧一致 → 提升 pna_raw
-        # frame_consistency 低 → 帧间随机 → 压低 pna_raw
-        pna_raw_E = relative_impact * (0.5 + 0.5 * max(cos_consistency, frame_consistency))
-        score_E = max(0.0, min(1.0, (pna_raw_E - pna_raw_lo) / (pna_raw_hi - pna_raw_lo)))
+        # 方案E: temporal_frame_cos 修正 — 帧间一致性越高→越静态→压低α
+        # 核心洞察: η_temporal的帧间余弦高 → 视频帧间变化小(静态/慢镜头)
+        #   → SVD提取的temporal noise主要是噪声而非运动 → α应极小
+        # η_temporal的帧间余弦低 → 视频帧间变化大(快速运动)
+        #   → temporal noise包含有效运动信息 → α可以大
+        #
+        # temporal_modifier: 静态(高cos)→0.1, 运动(低cos)→0.9
+        temporal_modifier_E = max(0.1, 1.0 - temporal_frame_cos)
+        pna_raw_E = relative_impact * temporal_modifier_E
+        score_E = max(0.0, min(1.0, (pna_raw_E - pna_raw_lo * 0.5) / (pna_raw_hi - pna_raw_lo * 0.5)))
         alpha_E = pna_alpha_min + score_E * (pna_alpha_max - pna_alpha_min)
+
+        # 方案F: temporal_frame_cos 修正 + 更激进的压缩
+        # 用 sigmoid 而非 linear 做 temporal 修正，让高 cos 区域压缩更狠
+        # sigmoid(cos-0.15): cos<0.1 → ~0.5, cos=0.3 → ~0.18, cos=0.8 → ~0.001
+        temporal_sigmoid_F = 1.0 / (1.0 + math.exp(20.0 * (temporal_frame_cos - 0.15)))
+        temporal_modifier_F = max(0.05, temporal_sigmoid_F)
+        pna_raw_F = relative_impact * temporal_modifier_F
+        score_F = max(0.0, min(1.0, (pna_raw_F - pna_raw_lo * 0.3) / (pna_raw_hi - pna_raw_lo * 0.3)))
+        alpha_F = pna_alpha_min + score_F * (pna_alpha_max - pna_alpha_min)
 
         # ── Coupling 对比: 正向 vs 反向 ──
         # 正向: α_eff / α_ref (α大→λ大，当前实现)
@@ -1232,23 +1248,35 @@ class PFlowPipeline:
         couple_neg_A = max(0.1, alpha_ref / max(alpha_A, 1e-8))
         couple_pos_C = max(0.1, alpha_C / alpha_ref)
         couple_neg_C = max(0.1, alpha_ref / max(alpha_C, 1e-8))
+        couple_pos_E = max(0.1, alpha_E / alpha_ref)
+        couple_neg_E = max(0.1, alpha_ref / max(alpha_E, 1e-8))
+        couple_pos_F = max(0.1, alpha_F / alpha_ref)
+        couple_neg_F = max(0.1, alpha_ref / max(alpha_F, 1e-8))
         lambda_pos_A = fi_lambda * couple_pos_A
         lambda_neg_A = fi_lambda * couple_neg_A
         lambda_pos_C = fi_lambda * couple_pos_C
         lambda_neg_C = fi_lambda * couple_neg_C
+        lambda_pos_E = fi_lambda * couple_pos_E
+        lambda_neg_E = fi_lambda * couple_neg_E
+        lambda_pos_F = fi_lambda * couple_pos_F
+        lambda_neg_F = fi_lambda * couple_neg_F
 
-        # ── 场景分类启发式 (基于日志中的经验) ──
-        # mean_cos < 0.05 → 物体运动型 (α≈0.003~0.005, λ≈0.05)
-        # mean_cos 0.05~0.08 → 中间型 (α≈0.001~0.003, λ≈0.03~0.05)
-        # mean_cos > 0.08 → 场景/镜头型 (α≈0.0005~0.001, λ≈0.02~0.03)
+        # ── 场景分类启发式 (基于6-18消融实验经验) ──
+        # mean_cos < 0.05 → 物体运动型 (如32-动物: α≈0.004, λ≈0.05)
+        # mean_cos 0.05~0.10 → 中间型 (如50-异常: α≈0.001, λ≈0.05)
+        # mean_cos 0.10~0.20 → 慢镜头场景 (如80-蒲公英: α≈0.002, λ≈0.04)
+        # mean_cos > 0.20 → 静态/航拍场景 (如73-仓库/111-航拍: α≈0.001, λ≈0.03)
         if temporal_frame_cos < 0.05:
             scene_hint = '物体运动型(α≈0.003~0.005,λ≈0.05)'
             hint_alpha, hint_lambda = 0.004, 0.05
-        elif temporal_frame_cos < 0.08:
-            scene_hint = '中间型(α≈0.001~0.003,λ≈0.03~0.05)'
-            hint_alpha, hint_lambda = 0.002, 0.04
+        elif temporal_frame_cos < 0.10:
+            scene_hint = '中间型(α≈0.001~0.003,λ≈0.04~0.05)'
+            hint_alpha, hint_lambda = 0.002, 0.045
+        elif temporal_frame_cos < 0.20:
+            scene_hint = '慢镜头场景(α≈0.001~0.002,λ≈0.03~0.04)'
+            hint_alpha, hint_lambda = 0.0015, 0.035
         else:
-            scene_hint = '场景/镜头型(α≈0.0005~0.001,λ≈0.02~0.03)'
+            scene_hint = '静态/航拍场景(α≈0.0005~0.001,λ≈0.02~0.03)'
             hint_alpha, hint_lambda = 0.0008, 0.025
 
         # ── 全量诊断日志 ──
@@ -1286,20 +1314,39 @@ class PFlowPipeline:
             f"couple-scale={couple_neg_C:.3f} λ_eff={lambda_neg_C:.4f}"
         )
         logger.info(
-            f"  [PNA-E] linear+frame_cons:      score={score_E:.4f} → α={alpha_E:.6f}"
+            f"  [PNA-E] linear+temporal_cos修正: score={score_E:.4f} → α={alpha_E:.6f} | "
+            f"temporal_mod={temporal_modifier_E:.3f} | "
+            f"couple+scale={couple_pos_E:.3f} λ_eff={lambda_pos_E:.4f} | "
+            f"couple-scale={couple_neg_E:.3f} λ_eff={lambda_neg_E:.4f}"
+        )
+        logger.info(
+            f"  [PNA-F] linear+temporal_sigmoid修正: score={score_F:.4f} → α={alpha_F:.6f} | "
+            f"temporal_mod={temporal_modifier_F:.3f}(sigmoid_raw={temporal_sigmoid_F:.4f}) | "
+            f"couple+scale={couple_pos_F:.3f} λ_eff={lambda_pos_F:.4f} | "
+            f"couple-scale={couple_neg_F:.3f} λ_eff={lambda_neg_F:.4f}"
         )
         logger.info(
             f"  [PNA 经验参考] 场景建议 α≈{hint_alpha:.4f}, λ≈{hint_lambda:.4f}"
         )
+        logger.info(
+            f"  [PNA 方案与经验α的偏差] "
+            f"A:|{alpha_A-hint_alpha:+.4f}| "
+            f"B:|{alpha_B-hint_alpha:+.4f}| "
+            f"C:|{alpha_C-hint_alpha:+.4f}| "
+            f"E:|{alpha_E-hint_alpha:+.4f}| "
+            f"F:|{alpha_F-hint_alpha:+.4f}| "
+            f"→ 越接近0越好"
+        )
 
-        # ── 默认使用方案C (linear mapping) 作为主 score ──
-        # 原因: pna_raw 范围很窄(0.005~0.010), linear 映射区分度最高
+        # ── 默认使用方案E (temporal_frame_cos 修正版) 作为主 score ──
+        # 原因: 方案C的pna_raw范围太窄，无法区分场景类型
+        # 方案E用temporal_frame_cos压低静态场景的α，更接近经验最佳值
         # 同时缓存所有方案的 α 供 FI 层使用
-        pna_score = score_C
+        pna_score = score_E
 
         # 缓存多方案 α 到 cfg，供 _generate_with_fi 做诊断
         cfg._pna_alphas = {
-            'A': alpha_A, 'B': alpha_B, 'C': alpha_C, 'E': alpha_E,
+            'A': alpha_A, 'B': alpha_B, 'C': alpha_C, 'E': alpha_E, 'F': alpha_F,
             'hint': hint_alpha,
         }
         cfg._pna_raw = pna_raw
@@ -1554,17 +1601,26 @@ class PFlowPipeline:
                 # ── 多方案 α 对应的 Coupling 诊断 ──
                 pna_alphas = getattr(cfg, '_pna_alphas', {})
                 if pna_alphas:
+                    hint_alpha = pna_alphas.get('hint', 0)
                     logger.info(
-                        f"  [FI-α 多方案 Coupling 诊断] (反向=α_ref/α, 正向=α/α_ref)"
+                        f"  [FI-α 多方案 Coupling 诊断] (反向=α_ref/α, 正向=α/α_ref) "
+                        f"经验参考: α_hint={hint_alpha:.4f}"
                     )
                     for scheme, a_val in pna_alphas.items():
-                        if a_val > 0:
+                        if a_val > 0 and scheme != 'hint':
                             neg_s = max(0.3, min(3.0, alpha_ref / a_val))
                             pos_s = max(0.1, a_val / alpha_ref)
+                            # 经验参考 λ
+                            if hint_alpha > 0:
+                                hint_neg_s = max(0.3, min(3.0, alpha_ref / hint_alpha))
+                                hint_lambda_neg = cfg.fi_lambda * hint_neg_s
+                            else:
+                                hint_lambda_neg = -1
                             logger.info(
-                                f"    方案{scheme}: α={a_val:.6f} → "
+                                f"    方案{scheme}: α={a_val:.6f}(偏差={a_val-hint_alpha:+.4f}) → "
                                 f"反向scale={neg_s:.3f} λ_eff={cfg.fi_lambda * neg_s:.4f} | "
-                                f"正向scale={pos_s:.3f} λ_eff={cfg.fi_lambda * pos_s:.4f}"
+                                f"正向scale={pos_s:.3f} λ_eff={cfg.fi_lambda * pos_s:.4f} | "
+                                f"经验λ_eff≈{hint_lambda_neg:.4f}"
                             )
 
         # ── 预计算 λ 调度 (含 α 协同缩放) ──
