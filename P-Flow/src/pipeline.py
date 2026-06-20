@@ -1264,14 +1264,8 @@ class PFlowPipeline:
 
         # 方案G: 连续平滑修正 — 用 (1-cos)^power 替代分段, 更平滑
         # 优势: 无边界跳变, 自动适配所有 cos 值
-        # v5.1修正: 加modifier上限0.5防止α饱和到上限, 用0.5归一化(与方案E一致)
-        # (1-cos)^0.8原始值: cos=0.05→0.95, cos=0.15→0.86, cos=0.30→0.74, cos=0.50→0.57, cos=0.80→0.28
-        # 加上限0.5后: cos=0.05→0.50, cos=0.15→0.50, cos=0.30→0.50, cos=0.50→0.50, cos=0.80→0.28
-        # 这太低了——73(cos=0.42)也只有0.5,和方案E差别不大
-        # 改用 (1-cos)^1.2 + 上限0.6:
-        #   cos=0.05→0.60, cos=0.15→0.60, cos=0.30→0.55, cos=0.42→0.47, cos=0.50→0.41, cos=0.80→0.19
-        # 比(1-cos)^0.8温和,但比方案E(cos=0.42时mod=0.10)高很多
-        temporal_modifier_G = max(0.05, min(0.6, (1.0 - temporal_frame_cos) ** 1.2))
+        # v5.2: 默认cap=0.35/power=1.5
+        temporal_modifier_G = max(0.05, min(0.35, (1.0 - temporal_frame_cos) ** 1.5))
         pna_raw_G = relative_impact * temporal_modifier_G
         score_G = max(0.0, min(1.0, (pna_raw_G - pna_raw_lo * 0.5) / (pna_raw_hi - pna_raw_lo * 0.5)))
         alpha_G = pna_alpha_min + score_G * (pna_alpha_max - pna_alpha_min)
@@ -1394,7 +1388,7 @@ class PFlowPipeline:
             f"couple-scale={couple_neg_F:.3f} λ_eff={lambda_neg_F:.4f}"
         )
         logger.info(
-            f"  [PNA-G] 连续平滑修正((1-cos)^1.2, cap=0.6): score={score_G:.4f} → α={alpha_G:.6f} | "
+            f"  [PNA-G] 连续平滑修正((1-cos)^1.5, cap=0.35): score={score_G:.4f} → α={alpha_G:.6f} | "
             f"mod={temporal_modifier_G:.4f} | "
             f"pna_raw_G={pna_raw_G:.6f} | "
             f"couple+scale={couple_pos_G:.3f} λ_eff={lambda_pos_G:.4f} | "
@@ -1402,6 +1396,53 @@ class PFlowPipeline:
         )
         logger.info(
             f"  [PNA 经验参考] 场景建议 α≈{hint_alpha:.4f}, λ≈{hint_lambda:.4f}"
+        )
+        # ── 参数扫描: 一次输出多种(cap, power)组合的α值 ──
+        # 目的: 从日志直接判断最佳参数，避免反复实验
+        sweep_configs = [
+            # (cap, power, label)
+            (0.20, 1.0, 'G1:cap=0.20,pw=1.0'),
+            (0.25, 1.2, 'G2:cap=0.25,pw=1.2'),
+            (0.30, 1.3, 'G3:cap=0.30,pw=1.3'),
+            (0.35, 1.5, 'G4:cap=0.35,pw=1.5(默认)'),
+            (0.40, 1.5, 'G5:cap=0.40,pw=1.5'),
+            (0.50, 1.5, 'G6:cap=0.50,pw=1.5'),
+            (0.60, 1.2, 'G7:cap=0.60,pw=1.2(v5.1)'),
+            (0.60, 0.8, 'G8:cap=0.60,pw=0.8(v5.0)'),
+        ]
+        logger.info(
+            f"  [参数扫描] cos={temporal_frame_cos:.4f}, relative_impact={relative_impact:.6f}, "
+            f"经验α≈{hint_alpha:.4f}"
+        )
+        logger.info(
+            f"  [参数扫描表] {'方案':<28} | {'modifier':>8} | {'pna_raw':>10} | {'score':>6} | {'α':>10} | {'与经验偏差':>10}"
+        )
+        logger.info(
+            f"  [参数扫描表] {'─'*28}─┼─{'─'*8}─┼─{'─'*10}─┼─{'─'*6}─┼─{'─'*10}─┼─{'─'*10}"
+        )
+        best_sweep = None
+        best_sweep_dev = float('inf')
+        for cap, power, label in sweep_configs:
+            sw_mod = max(0.05, min(cap, (1.0 - temporal_frame_cos) ** power))
+            sw_raw = relative_impact * sw_mod
+            sw_score = max(0.0, min(1.0, (sw_raw - pna_raw_lo * 0.5) / (pna_raw_hi - pna_raw_lo * 0.5)))
+            sw_alpha = pna_alpha_min + sw_score * (pna_alpha_max - pna_alpha_min)
+            sw_dev = abs(sw_alpha - hint_alpha)
+            marker = ' ★' if sw_dev < best_sweep_dev else ''
+            if sw_dev < best_sweep_dev:
+                best_sweep_dev = sw_dev
+                best_sweep = label
+            logger.info(
+                f"  [参数扫描表] {label:<28} | {sw_mod:>8.4f} | {sw_raw:>10.6f} | {sw_score:>6.4f} | {sw_alpha:>10.6f} | {sw_alpha-hint_alpha:>+10.4f}{marker}"
+            )
+        logger.info(
+            f"  [参数扫描最佳] {best_sweep}(偏差={best_sweep_dev:.4f})"
+        )
+        # 方案E的α也加入对比
+        logger.info(
+            f"  [参数扫描对比] 方案E(分段v5): α={alpha_E:.6f}(偏差={abs(alpha_E-hint_alpha):.4f}) | "
+            f"方案G(默认): α={alpha_G:.6f}(偏差={abs(alpha_G-hint_alpha):.4f}) | "
+            f"扫描最佳: {best_sweep}(偏差={best_sweep_dev:.4f})"
         )
         logger.info(
             f"  [PNA 方案与经验α的偏差] "
