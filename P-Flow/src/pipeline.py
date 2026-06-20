@@ -706,7 +706,7 @@ class PFlowPipeline:
                     alpha_tsr = pna_alpha_min + tsr * (pna_alpha_max - pna_alpha_min)
 
                     logger.info(
-                        f"  [PNA-α] 选用方案E(temporal修正): score={pna_score:.4f}, "
+                        f"  [PNA-α] 选用方案E(分段temporal修正v4): score={pna_score:.4f}, "
                         f"α_eff={alpha:.6f}"
                     )
                     pna_alphas_dict = getattr(cfg, '_pna_alphas', {})
@@ -1220,23 +1220,42 @@ class PFlowPipeline:
         # 从 svd_stats 取 TSR（后续在 _get_latents 中取）
         score_D_placeholder = -1.0  # 占位，在 _get_latents 中用实际 TSR
 
-        # 方案E: temporal_frame_cos 修正 — 帧间一致性越高→越静态→压低α
-        # 核心洞察: η_temporal的帧间余弦高 → 视频帧间变化小(静态/慢镜头)
-        #   → SVD提取的temporal noise主要是噪声而非运动 → α应极小
-        # η_temporal的帧间余弦低 → 视频帧间变化大(快速运动)
-        #   → temporal noise包含有效运动信息 → α可以大
-        #
-        # temporal_modifier: 静态(高cos)→0.1, 运动(低cos)→0.9
-        temporal_modifier_E = max(0.1, 1.0 - temporal_frame_cos)
+        # 方案E: 分段 temporal 修正 (v4)
+        # 基于v3实验结果: 1.0-cos 在 cos<0.5 时太温和, α直接到上限0.006
+        # 新策略: 分段压低, 让 α 更接近经验值
+        #   cos < 0.05 (快运动):  modifier=0.85 → α有机会到0.004~0.005
+        #   cos 0.05~0.20 (慢镜头): modifier=0.25 → α≈0.001~0.002
+        #   cos 0.20~0.50 (静态):   modifier=0.10 → α≈0.0005~0.001
+        #   cos > 0.50 (纯静态):    modifier=0.05 → α≈0.0005 (下限)
+        if temporal_frame_cos < 0.05:
+            temporal_modifier_E = 0.85
+        elif temporal_frame_cos < 0.20:
+            temporal_modifier_E = 0.25
+        elif temporal_frame_cos < 0.50:
+            temporal_modifier_E = 0.10
+        else:
+            temporal_modifier_E = 0.05
         pna_raw_E = relative_impact * temporal_modifier_E
         score_E = max(0.0, min(1.0, (pna_raw_E - pna_raw_lo * 0.5) / (pna_raw_hi - pna_raw_lo * 0.5)))
         alpha_E = pna_alpha_min + score_E * (pna_alpha_max - pna_alpha_min)
 
-        # 方案F: temporal_frame_cos 修正 + 更激进的压缩
-        # 用 sigmoid 而非 linear 做 temporal 修正，让高 cos 区域压缩更狠
-        # sigmoid(cos-0.15): cos<0.1 → ~0.5, cos=0.3 → ~0.18, cos=0.8 → ~0.001
-        temporal_sigmoid_F = 1.0 / (1.0 + math.exp(20.0 * (temporal_frame_cos - 0.15)))
-        temporal_modifier_F = max(0.05, temporal_sigmoid_F)
+        # 方案F: 分段 temporal 修正 + 更温和的边界
+        # 与方案E类似但在中间区间给稍大 modifier, 适合慢镜头但不那么极端
+        #   cos < 0.05 (快运动):  modifier=0.90
+        #   cos 0.05~0.15 (慢镜头偏动): modifier=0.40
+        #   cos 0.15~0.30 (慢镜头偏静): modifier=0.15
+        #   cos 0.30~0.60 (静态):       modifier=0.07
+        #   cos > 0.60 (纯静态):        modifier=0.03
+        if temporal_frame_cos < 0.05:
+            temporal_modifier_F = 0.90
+        elif temporal_frame_cos < 0.15:
+            temporal_modifier_F = 0.40
+        elif temporal_frame_cos < 0.30:
+            temporal_modifier_F = 0.15
+        elif temporal_frame_cos < 0.60:
+            temporal_modifier_F = 0.07
+        else:
+            temporal_modifier_F = 0.03
         pna_raw_F = relative_impact * temporal_modifier_F
         score_F = max(0.0, min(1.0, (pna_raw_F - pna_raw_lo * 0.3) / (pna_raw_hi - pna_raw_lo * 0.3)))
         alpha_F = pna_alpha_min + score_F * (pna_alpha_max - pna_alpha_min)
@@ -1244,14 +1263,14 @@ class PFlowPipeline:
         # ── Coupling 对比: 正向 vs 反向 ──
         # 正向: α_eff / α_ref (α大→λ大，当前实现)
         # 反向: α_ref / α_eff (α大→λ小，SVD已注入运动则FI减少)
-        couple_pos_A = max(0.1, alpha_A / alpha_ref)
-        couple_neg_A = max(0.1, alpha_ref / max(alpha_A, 1e-8))
-        couple_pos_C = max(0.1, alpha_C / alpha_ref)
-        couple_neg_C = max(0.1, alpha_ref / max(alpha_C, 1e-8))
-        couple_pos_E = max(0.1, alpha_E / alpha_ref)
-        couple_neg_E = max(0.1, alpha_ref / max(alpha_E, 1e-8))
-        couple_pos_F = max(0.1, alpha_F / alpha_ref)
-        couple_neg_F = max(0.1, alpha_ref / max(alpha_F, 1e-8))
+        couple_pos_A = max(0.1, min(2.0, alpha_A / alpha_ref))
+        couple_neg_A = max(0.3, min(2.0, alpha_ref / max(alpha_A, 1e-8)))
+        couple_pos_C = max(0.1, min(2.0, alpha_C / alpha_ref))
+        couple_neg_C = max(0.3, min(2.0, alpha_ref / max(alpha_C, 1e-8)))
+        couple_pos_E = max(0.1, min(2.0, alpha_E / alpha_ref))
+        couple_neg_E = max(0.3, min(2.0, alpha_ref / max(alpha_E, 1e-8)))
+        couple_pos_F = max(0.1, min(2.0, alpha_F / alpha_ref))
+        couple_neg_F = max(0.3, min(2.0, alpha_ref / max(alpha_F, 1e-8)))
         lambda_pos_A = fi_lambda * couple_pos_A
         lambda_neg_A = fi_lambda * couple_neg_A
         lambda_pos_C = fi_lambda * couple_pos_C
@@ -1313,15 +1332,40 @@ class PFlowPipeline:
             f"couple+scale={couple_pos_C:.3f} λ_eff={lambda_pos_C:.4f} | "
             f"couple-scale={couple_neg_C:.3f} λ_eff={lambda_neg_C:.4f}"
         )
+        # ── 分段区间诊断 ──
+        if temporal_frame_cos < 0.05:
+            piece_label_E = 'cos<0.05→快运动(mod=0.85)'
+            piece_label_F = 'cos<0.05→快运动(mod=0.90)'
+        elif temporal_frame_cos < 0.15:
+            piece_label_E = '0.05≤cos<0.20→慢镜头(mod=0.25)'
+            piece_label_F = '0.05≤cos<0.15→慢镜头偏动(mod=0.40)'
+        elif temporal_frame_cos < 0.20:
+            piece_label_E = '0.05≤cos<0.20→慢镜头(mod=0.25)'
+            piece_label_F = '0.15≤cos<0.30→慢镜头偏静(mod=0.15)'
+        elif temporal_frame_cos < 0.30:
+            piece_label_E = '0.20≤cos<0.50→静态(mod=0.10)'
+            piece_label_F = '0.15≤cos<0.30→慢镜头偏静(mod=0.15)'
+        elif temporal_frame_cos < 0.50:
+            piece_label_E = '0.20≤cos<0.50→静态(mod=0.10)'
+            piece_label_F = '0.30≤cos<0.60→静态(mod=0.07)'
+        elif temporal_frame_cos < 0.60:
+            piece_label_E = 'cos≥0.50→纯静态(mod=0.05)'
+            piece_label_F = '0.30≤cos<0.60→静态(mod=0.07)'
+        else:
+            piece_label_E = 'cos≥0.50→纯静态(mod=0.05)'
+            piece_label_F = 'cos≥0.60→纯静态(mod=0.03)'
+
         logger.info(
-            f"  [PNA-E] linear+temporal_cos修正: score={score_E:.4f} → α={alpha_E:.6f} | "
-            f"temporal_mod={temporal_modifier_E:.3f} | "
+            f"  [PNA-E] 分段temporal修正(v4): score={score_E:.4f} → α={alpha_E:.6f} | "
+            f"{piece_label_E} | "
+            f"pna_raw_E={pna_raw_E:.6f} | "
             f"couple+scale={couple_pos_E:.3f} λ_eff={lambda_pos_E:.4f} | "
             f"couple-scale={couple_neg_E:.3f} λ_eff={lambda_neg_E:.4f}"
         )
         logger.info(
-            f"  [PNA-F] linear+temporal_sigmoid修正: score={score_F:.4f} → α={alpha_F:.6f} | "
-            f"temporal_mod={temporal_modifier_F:.3f}(sigmoid_raw={temporal_sigmoid_F:.4f}) | "
+            f"  [PNA-F] 分段temporal修正(v4): score={score_F:.4f} → α={alpha_F:.6f} | "
+            f"{piece_label_F} | "
+            f"pna_raw_F={pna_raw_F:.6f} | "
             f"couple+scale={couple_pos_F:.3f} λ_eff={lambda_pos_F:.4f} | "
             f"couple-scale={couple_neg_F:.3f} λ_eff={lambda_neg_F:.4f}"
         )
@@ -1336,6 +1380,30 @@ class PFlowPipeline:
             f"E:|{alpha_E-hint_alpha:+.4f}| "
             f"F:|{alpha_F-hint_alpha:+.4f}| "
             f"→ 越接近0越好"
+        )
+        # ── 最佳方案判定 ──
+        deviations = {
+            'A': abs(alpha_A - hint_alpha),
+            'B': abs(alpha_B - hint_alpha),
+            'C': abs(alpha_C - hint_alpha),
+            'E': abs(alpha_E - hint_alpha),
+            'F': abs(alpha_F - hint_alpha),
+        }
+        best_scheme = min(deviations, key=deviations.get)
+        logger.info(
+            f"  [PNA 最佳方案] {best_scheme}(偏差最小={deviations[best_scheme]:.4f}) "
+            f"vs 选用E(偏差={deviations['E']:.4f}) "
+            f"{'✓ 一致' if best_scheme == 'E' else '✗ 不一致, 考虑切换'}"
+        )
+        # ── 反向Coupling 下的 λ_eff 对比表 ──
+        logger.info(
+            f"  [PNA λ_eff 对比(反向Coupling)] "
+            f"A:λ={lambda_neg_A:.4f} | "
+            f"B:λ={lambda_neg_B:.4f} | "
+            f"C:λ={lambda_neg_C:.4f} | "
+            f"E(选用):λ={lambda_neg_E:.4f} | "
+            f"F:λ={lambda_neg_F:.4f} | "
+            f"经验:λ≈{hint_lambda:.4f}"
         )
 
         # ── 默认使用方案E (temporal_frame_cos 修正版) 作为主 score ──
@@ -1580,7 +1648,7 @@ class PFlowPipeline:
             if alpha_eff is not None:
                 alpha_ref = getattr(cfg, 'fi_alpha_ref', 0.004)
                 # 反向 Coupling: α 高 → FI λ 小 (互补)
-                alpha_coupling_scale = max(0.3, min(3.0, alpha_ref / max(alpha_eff, 1e-8)))
+                alpha_coupling_scale = max(0.3, min(2.0, alpha_ref / max(alpha_eff, 1e-8)))
                 # 正向 Coupling 对比 (旧逻辑): α 高 → FI λ 大
                 couple_pos = max(0.1, alpha_eff / alpha_ref)
 
