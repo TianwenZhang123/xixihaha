@@ -1265,6 +1265,8 @@ class PFlowPipeline:
         # 反向: α_ref / α_eff (α大→λ小，SVD已注入运动则FI减少)
         couple_pos_A = max(0.1, min(2.0, alpha_A / alpha_ref))
         couple_neg_A = max(0.3, min(2.0, alpha_ref / max(alpha_A, 1e-8)))
+        couple_pos_B = max(0.1, min(2.0, alpha_B / alpha_ref))
+        couple_neg_B = max(0.3, min(2.0, alpha_ref / max(alpha_B, 1e-8)))
         couple_pos_C = max(0.1, min(2.0, alpha_C / alpha_ref))
         couple_neg_C = max(0.3, min(2.0, alpha_ref / max(alpha_C, 1e-8)))
         couple_pos_E = max(0.1, min(2.0, alpha_E / alpha_ref))
@@ -1273,6 +1275,8 @@ class PFlowPipeline:
         couple_neg_F = max(0.3, min(2.0, alpha_ref / max(alpha_F, 1e-8)))
         lambda_pos_A = fi_lambda * couple_pos_A
         lambda_neg_A = fi_lambda * couple_neg_A
+        lambda_pos_B = fi_lambda * couple_pos_B
+        lambda_neg_B = fi_lambda * couple_neg_B
         lambda_pos_C = fi_lambda * couple_pos_C
         lambda_neg_C = fi_lambda * couple_neg_C
         lambda_pos_E = fi_lambda * couple_pos_E
