@@ -135,8 +135,14 @@ def parse_args():
                    help="PNA 门控的 α 上限 (默认 0.006)")
     p.add_argument("--pna_alpha_min", type=float, default=0.0005,
                    help="PNA 门控的 α 下限 (默认 0.0005, 不允许完全为0)")
-    p.add_argument("--pna_scheme", type=str, default='E',
-                   help="PNA 映射方案: E=分段temporal修正(默认), G=连续平滑修正(cap=0.35), G1=cap0.20pw1.0")
+    p.add_argument("--pna_gauss_center", type=float, default=0.41,
+                   help="高斯映射中心 cos 值 (默认 0.41, peak 注入位置)")
+    p.add_argument("--pna_gauss_sigma", type=float, default=0.11,
+                   help="高斯映射宽度 σ (默认 0.11)")
+    p.add_argument("--pna_gauss_peak", type=float, default=0.006,
+                   help="高斯映射峰值 α (默认 0.006, center 处的 α_eff)")
+    p.add_argument("--pna_gauss_floor", type=float, default=0.0004,
+                   help="高斯映射基底 α (默认 0.0004, cos 远离 center 时)")
 
     # ── M_d (Motion Definiteness) 融合门控 ──
     p.add_argument("--md_file", type=str, default="",
@@ -225,7 +231,10 @@ def build_config(args) -> PFlowConfig:
         pna_probe_step=args.pna_probe_step,
         pna_alpha_max=args.pna_alpha_max,
         pna_alpha_min=args.pna_alpha_min,
-        pna_scheme=args.pna_scheme,
+        pna_gauss_center=args.pna_gauss_center,
+        pna_gauss_sigma=args.pna_gauss_sigma,
+        pna_gauss_peak=args.pna_gauss_peak,
+        pna_gauss_floor=args.pna_gauss_floor,
         # M_d 融合门控
         md_file=args.md_file,
         alpha_floor=args.alpha_floor,
