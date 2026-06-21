@@ -1,0 +1,693 @@
+Case 50/111 α 扫描的日志如@SVD_FI_sweep_32_73.txt ，结合前三个case@SVD_alpha_sweep_3cases.txt 的最优注入量扫描，思考一下现在的SVD注入是否是合理的，以及如何修改
+
+
+
+root@autodl-container-a4d74c9dd1-31db82ab:~/xixihaha# #!/bin/bash
+# SVD-only α 扫描补充: Case 50, 111
+set -e
+cd /root/xixihaha/P-Flow
+
+CAPTION_DIR=/root/xixihaha/test-v200/test-v200/captions
+
+# ── Case 50 (猫坐车, cos=0.12, unusual型): α ∈ {0.001, 0.002, 0.004, 0.006, 0.008} ──
+for alpha in 0.001 0.002 0.004 0.006 0.008; do
+    alpha_str=$(printf "%.4f" $alpha | sed 's/0\.//')
+    echo "=== Case 50, α=$alpha ==="
+    python run.py \
+        --data_dir data/videos \
+        --caption_dir $CAPTION_DIR \
+        --output_dir outputs/SVD_sweep_50/alpha_${alpha_str} \
+        --sample_ids 50 \
+        --inversion --svd --blend \
+        --alpha $alpha \
+        --seed 42 --verbose
+done
+
+# ── Case 111 (航拍森林, cos=0.30, scene+cam型): α ∈ {0.0005, 0.001, 0.002, 0.004, 0.006} ──
+for alpha in 0.0005 0.001 0.002 0.004 0.006; do
+    alpha_str=$(printf "%.4f" $alpha | sed 's/0\.\([0-9]*\)/\1/')
+    echo "=== Case 111, α=$alpha ==="
+    python run.py \
+        --data_dir data/videos \
+        --caption_dir $CAPTION_DIR \
+        --output_dir outputs/SVD_sweep_111/alpha_${alpha_str} \
+        --sample_ids 111 \
+        --inversion --svd --blend \
+        --alpha $alpha \
+        --seed 42 --verbose
+done
+
+# ── 批量评测 ──
+echo "=== 评测所有扫描结果 ==="
+for case in 50 111; do
+    for alpha_dir in /root/xixihaha/P-Flow/outputs/SVD_sweep_${case}/alpha_*; do
+        if [ -d "$alpha_dir" ]; then
+            echo "--- Evaluating $alpha_dir ---"
+            OMP_NUM_THREADS=4 python evaluation/run_clip_xclip_eval.py \
+                --orig-dir data/videos \
+                --gen-dir $alpha_dir \
+                --caption-dir $CAPTION_DIR \
+echo "=== 实验1 补充扫描完成! ==="a_dir/eval_clip
+=== Case 50, α=0.001 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:22:08,976 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0010/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.001)']
+  alpha=0.001, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:22:08,992 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.001)']
+
+  [1/1] 处理 50...
+2026-06-21 10:22:08,994 [INFO]   [M_d] sample=50, M_d=1.00
+2026-06-21 10:22:08,994 [INFO] [P-Flow] sample=50, flags=['inversion', 'svd', 'blend(α=0.001)']
+2026-06-21 10:22:11,499 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:22:11,515 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:22:11,515 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  2.21it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  3.01it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.40it/s]
+2026-06-21 10:22:21,090 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:22:21,090 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:22:23,627 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:23:57,743 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=0.0078, range=[-3.703, 4.156], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-21 10:23:57,743 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:23:57,797 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-21 10:23:57,807 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:23:57,808 [INFO]   η_temporal: mean=-0.0004, std=0.3809
+2026-06-21 10:23:57,808 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:23:57,808 [INFO]   iter 1/1: The video features a white cat sitting inside the passenger ...
+2026-06-21 10:23:57,809 [INFO]   [Blend] α=0.0010 (√α=0.0316), β=0.0000 (√β=0.0000), η_temporal std=0.3809, η_mixed std=1.0000, mean=0.0000
+2026-06-21 10:23:57,809 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0128
+2026-06-21 10:23:57,809 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.012172 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 10:25:56,408 [INFO] [P-Flow] Done in 227.4s → outputs/SVD_sweep_50/alpha_0010/sample_50/50.mp4
+2026-06-21 10:25:56,408 [INFO]   [SAMPLE SUMMARY] sample_id=50
+2026-06-21 10:25:56,408 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a white cat sitting inside the passenger seat of a car with the window open. The cat is wearing a blue collar and appears to be looking out of the window, observing the surroundings. The background shows a busy urban street with people walking by, some holding umbrellas, suggesting it might be a rainy day. The setting includes buildings with storefronts and signs, adding to the city atmosphere. The cat's expression seems calm and curious as it gazes outside.
+2026-06-21 10:25:56,408 [INFO]   [SAMPLE SUMMARY] caption_length=481 chars, word_count=82
+2026-06-21 10:25:56,409 [INFO]   [SAMPLE SUMMARY] elapsed=227.4s, output=outputs/SVD_sweep_50/alpha_0010/sample_50/50.mp4
+
+批量完成! 输出: outputs/SVD_sweep_50/alpha_0010
+=== Case 50, α=0.002 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:25:59,799 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0020/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.002)']
+  alpha=0.002, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:25:59,814 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.002)']
+
+  [1/1] 处理 50...
+2026-06-21 10:25:59,816 [INFO]   [M_d] sample=50, M_d=1.00
+2026-06-21 10:25:59,816 [INFO] [P-Flow] sample=50, flags=['inversion', 'svd', 'blend(α=0.002)']
+2026-06-21 10:26:02,311 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:26:02,328 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:26:02,329 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.97it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  1.90it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.29it/s]
+2026-06-21 10:26:12,377 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:26:12,378 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:26:14,931 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:27:49,109 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=0.0078, range=[-3.703, 4.156], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-21 10:27:49,109 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:27:49,180 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-21 10:27:49,191 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:27:49,191 [INFO]   η_temporal: mean=-0.0004, std=0.3809
+2026-06-21 10:27:49,191 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:27:49,192 [INFO]   iter 1/1: The video features a white cat sitting inside the passenger ...
+2026-06-21 10:27:49,192 [INFO]   [Blend] α=0.0020 (√α=0.0447), β=0.0000 (√β=0.0000), η_temporal std=0.3809, η_mixed std=1.0000, mean=0.0000
+2026-06-21 10:27:49,193 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0177
+2026-06-21 10:27:49,193 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.017093 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 10:29:48,057 [INFO] [P-Flow] Done in 228.2s → outputs/SVD_sweep_50/alpha_0020/sample_50/50.mp4
+2026-06-21 10:29:48,058 [INFO]   [SAMPLE SUMMARY] sample_id=50
+2026-06-21 10:29:48,058 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a white cat sitting inside the passenger seat of a car with the window open. The cat is wearing a blue collar and appears to be looking out of the window, observing the surroundings. The background shows a busy urban street with people walking by, some holding umbrellas, suggesting it might be a rainy day. The setting includes buildings with storefronts and signs, adding to the city atmosphere. The cat's expression seems calm and curious as it gazes outside.
+2026-06-21 10:29:48,058 [INFO]   [SAMPLE SUMMARY] caption_length=481 chars, word_count=82
+2026-06-21 10:29:48,058 [INFO]   [SAMPLE SUMMARY] elapsed=228.2s, output=outputs/SVD_sweep_50/alpha_0020/sample_50/50.mp4
+
+批量完成! 输出: outputs/SVD_sweep_50/alpha_0020
+=== Case 50, α=0.004 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:29:51,958 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0040/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.004)']
+  alpha=0.004, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:29:51,973 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.004)']
+
+  [1/1] 处理 50...
+2026-06-21 10:29:51,975 [INFO]   [M_d] sample=50, M_d=1.00
+2026-06-21 10:29:51,975 [INFO] [P-Flow] sample=50, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-21 10:29:54,619 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:29:54,635 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:29:54,635 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  1.90it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.96it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:04<00:00,  1.24it/s]
+2026-06-21 10:30:04,489 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:30:04,489 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:30:07,029 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:31:41,205 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=0.0078, range=[-3.703, 4.156], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-21 10:31:41,205 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:31:41,276 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-21 10:31:41,286 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:31:41,286 [INFO]   η_temporal: mean=-0.0004, std=0.3809
+2026-06-21 10:31:41,286 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:31:41,286 [INFO]   iter 1/1: The video features a white cat sitting inside the passenger ...
+2026-06-21 10:31:41,287 [INFO]   [Blend] α=0.0040 (√α=0.0632), β=0.0000 (√β=0.0000), η_temporal std=0.3809, η_mixed std=0.9961, mean=0.0000
+2026-06-21 10:31:41,288 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0249
+2026-06-21 10:31:41,288 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024862 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 10:33:40,081 [INFO] [P-Flow] Done in 228.1s → outputs/SVD_sweep_50/alpha_0040/sample_50/50.mp4
+2026-06-21 10:33:40,081 [INFO]   [SAMPLE SUMMARY] sample_id=50
+2026-06-21 10:33:40,081 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a white cat sitting inside the passenger seat of a car with the window open. The cat is wearing a blue collar and appears to be looking out of the window, observing the surroundings. The background shows a busy urban street with people walking by, some holding umbrellas, suggesting it might be a rainy day. The setting includes buildings with storefronts and signs, adding to the city atmosphere. The cat's expression seems calm and curious as it gazes outside.
+2026-06-21 10:33:40,082 [INFO]   [SAMPLE SUMMARY] caption_length=481 chars, word_count=82
+2026-06-21 10:33:40,082 [INFO]   [SAMPLE SUMMARY] elapsed=228.1s, output=outputs/SVD_sweep_50/alpha_0040/sample_50/50.mp4
+
+批量完成! 输出: outputs/SVD_sweep_50/alpha_0040
+=== Case 50, α=0.006 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:33:43,489 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0060/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.006)']
+  alpha=0.006, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:33:43,504 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.006)']
+
+  [1/1] 处理 50...
+2026-06-21 10:33:43,506 [INFO]   [M_d] sample=50, M_d=1.00
+2026-06-21 10:33:43,506 [INFO] [P-Flow] sample=50, flags=['inversion', 'svd', 'blend(α=0.006)']
+2026-06-21 10:33:46,103 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:33:46,119 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:33:46,119 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  1.92it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.70it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.26it/s]
+2026-06-21 10:33:55,829 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:33:55,829 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:33:58,366 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:35:32,534 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=0.0078, range=[-3.703, 4.156], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-21 10:35:32,535 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:35:32,593 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-21 10:35:32,603 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:35:32,603 [INFO]   η_temporal: mean=-0.0004, std=0.3809
+2026-06-21 10:35:32,603 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:35:32,603 [INFO]   iter 1/1: The video features a white cat sitting inside the passenger ...
+2026-06-21 10:35:32,604 [INFO]   [Blend] α=0.0060 (√α=0.0775), β=0.0000 (√β=0.0000), η_temporal std=0.3809, η_mixed std=0.9961, mean=-0.0000
+2026-06-21 10:35:32,605 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0304
+2026-06-21 10:35:32,605 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.030041 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 10:37:31,430 [INFO] [P-Flow] Done in 227.9s → outputs/SVD_sweep_50/alpha_0060/sample_50/50.mp4
+2026-06-21 10:37:31,430 [INFO]   [SAMPLE SUMMARY] sample_id=50
+2026-06-21 10:37:31,430 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a white cat sitting inside the passenger seat of a car with the window open. The cat is wearing a blue collar and appears to be looking out of the window, observing the surroundings. The background shows a busy urban street with people walking by, some holding umbrellas, suggesting it might be a rainy day. The setting includes buildings with storefronts and signs, adding to the city atmosphere. The cat's expression seems calm and curious as it gazes outside.
+2026-06-21 10:37:31,431 [INFO]   [SAMPLE SUMMARY] caption_length=481 chars, word_count=82
+2026-06-21 10:37:31,431 [INFO]   [SAMPLE SUMMARY] elapsed=227.9s, output=outputs/SVD_sweep_50/alpha_0060/sample_50/50.mp4
+
+批量完成! 输出: outputs/SVD_sweep_50/alpha_0060
+=== Case 50, α=0.008 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:37:35,079 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0080/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.008)']
+  alpha=0.008, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:37:35,095 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.008)']
+
+  [1/1] 处理 50...
+2026-06-21 10:37:35,097 [INFO]   [M_d] sample=50, M_d=1.00
+2026-06-21 10:37:35,097 [INFO] [P-Flow] sample=50, flags=['inversion', 'svd', 'blend(α=0.008)']
+2026-06-21 10:37:37,567 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:37:37,582 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:37:37,583 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  1.87it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.89it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:04<00:00,  1.23it/s]
+2026-06-21 10:37:47,513 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:37:47,514 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:37:50,056 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:39:24,246 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=0.0078, range=[-3.703, 4.156], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-21 10:39:24,247 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:39:24,311 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-21 10:39:24,322 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:39:24,322 [INFO]   η_temporal: mean=-0.0004, std=0.3809
+2026-06-21 10:39:24,322 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:39:24,322 [INFO]   iter 1/1: The video features a white cat sitting inside the passenger ...
+2026-06-21 10:39:24,323 [INFO]   [Blend] α=0.0080 (√α=0.0894), β=0.0000 (√β=0.0000), η_temporal std=0.3809, η_mixed std=0.9961, mean=-0.0000
+2026-06-21 10:39:24,324 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0349
+2026-06-21 10:39:24,324 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.034530 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 10:41:23,199 [INFO] [P-Flow] Done in 228.1s → outputs/SVD_sweep_50/alpha_0080/sample_50/50.mp4
+2026-06-21 10:41:23,200 [INFO]   [SAMPLE SUMMARY] sample_id=50
+2026-06-21 10:41:23,200 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a white cat sitting inside the passenger seat of a car with the window open. The cat is wearing a blue collar and appears to be looking out of the window, observing the surroundings. The background shows a busy urban street with people walking by, some holding umbrellas, suggesting it might be a rainy day. The setting includes buildings with storefronts and signs, adding to the city atmosphere. The cat's expression seems calm and curious as it gazes outside.
+2026-06-21 10:41:23,200 [INFO]   [SAMPLE SUMMARY] caption_length=481 chars, word_count=82
+2026-06-21 10:41:23,200 [INFO]   [SAMPLE SUMMARY] elapsed=228.1s, output=outputs/SVD_sweep_50/alpha_0080/sample_50/50.mp4
+
+批量完成! 输出: outputs/SVD_sweep_50/alpha_0080
+=== Case 111, α=0.0005 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:41:26,973 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0005/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.0005)']
+  alpha=0.0005, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:41:26,990 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.0005)']
+
+  [1/1] 处理 111...
+2026-06-21 10:41:26,991 [INFO]   [M_d] sample=111, M_d=1.00
+2026-06-21 10:41:26,992 [INFO] [P-Flow] sample=111, flags=['inversion', 'svd', 'blend(α=0.0005)']
+2026-06-21 10:41:29,621 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:41:29,789 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:41:29,790 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  1.97it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.65it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.28it/s]
+2026-06-21 10:41:39,351 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:41:39,351 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:41:42,129 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:43:16,309 [INFO]   [Inversion Quality] η_inv: std=1.0156, mean=-0.0294, range=[-3.453, 3.547], cos_sim(η_inv, random)=-0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-21 10:43:16,309 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:43:16,379 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-21 10:43:16,390 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:43:16,390 [INFO]   η_temporal: mean=-0.0004, std=0.3398
+2026-06-21 10:43:16,390 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:43:16,390 [INFO]   iter 1/1: The video captures an aerial view of a lush, dense forest te...
+2026-06-21 10:43:16,391 [INFO]   [Blend] α=0.0005 (√α=0.0224), β=0.0000 (√β=0.0000), η_temporal std=0.3398, η_mixed std=1.0000, mean=-0.0008
+2026-06-21 10:43:16,392 [INFO]   [Blend Diag] cos(temporal, random)=-0.0006, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0070
+2026-06-21 10:43:16,392 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.007726 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 10:45:15,209 [INFO] [P-Flow] Done in 228.2s → outputs/SVD_sweep_111/alpha_0005/sample_111/111.mp4
+2026-06-21 10:45:15,209 [INFO]   [SAMPLE SUMMARY] sample_id=111
+2026-06-21 10:45:15,209 [INFO]   [SAMPLE SUMMARY] full_caption=The video captures an aerial view of a lush, dense forest teeming with greenery. The sunlight filters through the canopy, casting dappled shadows on the ground below and creating a vibrant interplay of light and dark. At the center of the frames, a drone is seen flying low over the treetops. The drone appears to be equipped with a camera or sensor, suggesting it might be used for surveillance, mapping, or capturing aerial footage. The surrounding environment is rich with various types of trees, including palm trees, indicating a tropical or subtropical setting. The overall atmosphere is serene and natural, emphasizing the beauty and complexity of the forest ecosystem.
+2026-06-21 10:45:15,209 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=109
+2026-06-21 10:45:15,209 [INFO]   [SAMPLE SUMMARY] elapsed=228.2s, output=outputs/SVD_sweep_111/alpha_0005/sample_111/111.mp4
+
+批量完成! 输出: outputs/SVD_sweep_111/alpha_0005
+=== Case 111, α=0.001 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:45:18,883 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0010/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.001)']
+  alpha=0.001, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:45:18,898 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.001)']
+
+  [1/1] 处理 111...
+2026-06-21 10:45:18,899 [INFO]   [M_d] sample=111, M_d=1.00
+2026-06-21 10:45:18,900 [INFO] [P-Flow] sample=111, flags=['inversion', 'svd', 'blend(α=0.001)']
+2026-06-21 10:45:21,490 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:45:21,505 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:45:21,506 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.74it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  2.10it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.36it/s]
+2026-06-21 10:45:30,764 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:45:30,764 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:45:33,593 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:47:07,784 [INFO]   [Inversion Quality] η_inv: std=1.0156, mean=-0.0294, range=[-3.453, 3.547], cos_sim(η_inv, random)=-0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-21 10:47:07,784 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:47:07,870 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-21 10:47:07,880 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:47:07,880 [INFO]   η_temporal: mean=-0.0004, std=0.3398
+2026-06-21 10:47:07,880 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:47:07,880 [INFO]   iter 1/1: The video captures an aerial view of a lush, dense forest te...
+2026-06-21 10:47:07,881 [INFO]   [Blend] α=0.0010 (√α=0.0316), β=0.0000 (√β=0.0000), η_temporal std=0.3398, η_mixed std=1.0000, mean=-0.0008
+2026-06-21 10:47:07,882 [INFO]   [Blend Diag] cos(temporal, random)=-0.0006, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0102
+2026-06-21 10:47:07,882 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.010877 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 10:49:06,592 [INFO] [P-Flow] Done in 227.7s → outputs/SVD_sweep_111/alpha_0010/sample_111/111.mp4
+2026-06-21 10:49:06,592 [INFO]   [SAMPLE SUMMARY] sample_id=111
+2026-06-21 10:49:06,592 [INFO]   [SAMPLE SUMMARY] full_caption=The video captures an aerial view of a lush, dense forest teeming with greenery. The sunlight filters through the canopy, casting dappled shadows on the ground below and creating a vibrant interplay of light and dark. At the center of the frames, a drone is seen flying low over the treetops. The drone appears to be equipped with a camera or sensor, suggesting it might be used for surveillance, mapping, or capturing aerial footage. The surrounding environment is rich with various types of trees, including palm trees, indicating a tropical or subtropical setting. The overall atmosphere is serene and natural, emphasizing the beauty and complexity of the forest ecosystem.
+2026-06-21 10:49:06,592 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=109
+2026-06-21 10:49:06,592 [INFO]   [SAMPLE SUMMARY] elapsed=227.7s, output=outputs/SVD_sweep_111/alpha_0010/sample_111/111.mp4
+
+批量完成! 输出: outputs/SVD_sweep_111/alpha_0010
+=== Case 111, α=0.002 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:49:09,951 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0020/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.002)']
+  alpha=0.002, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:49:09,967 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.002)']
+
+  [1/1] 处理 111...
+2026-06-21 10:49:09,968 [INFO]   [M_d] sample=111, M_d=1.00
+2026-06-21 10:49:09,968 [INFO] [P-Flow] sample=111, flags=['inversion', 'svd', 'blend(α=0.002)']
+2026-06-21 10:49:12,590 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:49:12,760 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:49:12,760 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.85it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  2.00it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.30it/s]
+2026-06-21 10:49:22,183 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:49:22,183 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:49:25,074 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:50:59,230 [INFO]   [Inversion Quality] η_inv: std=1.0156, mean=-0.0294, range=[-3.453, 3.547], cos_sim(η_inv, random)=-0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-21 10:50:59,230 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:50:59,362 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-21 10:50:59,372 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:50:59,372 [INFO]   η_temporal: mean=-0.0004, std=0.3398
+2026-06-21 10:50:59,372 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:50:59,372 [INFO]   iter 1/1: The video captures an aerial view of a lush, dense forest te...
+2026-06-21 10:50:59,373 [INFO]   [Blend] α=0.0020 (√α=0.0447), β=0.0000 (√β=0.0000), η_temporal std=0.3398, η_mixed std=1.0000, mean=-0.0008
+2026-06-21 10:50:59,374 [INFO]   [Blend Diag] cos(temporal, random)=-0.0006, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0146
+2026-06-21 10:50:59,374 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.015193 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.78s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 10:52:58,201 [INFO] [P-Flow] Done in 228.2s → outputs/SVD_sweep_111/alpha_0020/sample_111/111.mp4
+2026-06-21 10:52:58,201 [INFO]   [SAMPLE SUMMARY] sample_id=111
+2026-06-21 10:52:58,201 [INFO]   [SAMPLE SUMMARY] full_caption=The video captures an aerial view of a lush, dense forest teeming with greenery. The sunlight filters through the canopy, casting dappled shadows on the ground below and creating a vibrant interplay of light and dark. At the center of the frames, a drone is seen flying low over the treetops. The drone appears to be equipped with a camera or sensor, suggesting it might be used for surveillance, mapping, or capturing aerial footage. The surrounding environment is rich with various types of trees, including palm trees, indicating a tropical or subtropical setting. The overall atmosphere is serene and natural, emphasizing the beauty and complexity of the forest ecosystem.
+2026-06-21 10:52:58,201 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=109
+2026-06-21 10:52:58,201 [INFO]   [SAMPLE SUMMARY] elapsed=228.2s, output=outputs/SVD_sweep_111/alpha_0020/sample_111/111.mp4
+
+批量完成! 输出: outputs/SVD_sweep_111/alpha_0020
+=== Case 111, α=0.004 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:53:01,865 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0040/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.004)']
+  alpha=0.004, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:53:01,881 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.004)']
+
+  [1/1] 处理 111...
+2026-06-21 10:53:01,882 [INFO]   [M_d] sample=111, M_d=1.00
+2026-06-21 10:53:01,882 [INFO] [P-Flow] sample=111, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-21 10:53:04,512 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:53:04,527 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:53:04,528 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  3.08it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  2.03it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.32it/s]
+2026-06-21 10:53:14,405 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:53:14,405 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:53:16,945 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:54:51,127 [INFO]   [Inversion Quality] η_inv: std=1.0156, mean=-0.0294, range=[-3.453, 3.547], cos_sim(η_inv, random)=-0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-21 10:54:51,127 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:54:51,196 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-21 10:54:51,206 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:54:51,207 [INFO]   η_temporal: mean=-0.0004, std=0.3398
+2026-06-21 10:54:51,207 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:54:51,207 [INFO]   iter 1/1: The video captures an aerial view of a lush, dense forest te...
+2026-06-21 10:54:51,208 [INFO]   [Blend] α=0.0040 (√α=0.0632), β=0.0000 (√β=0.0000), η_temporal std=0.3398, η_mixed std=0.9922, mean=-0.0008
+2026-06-21 10:54:51,208 [INFO]   [Blend Diag] cos(temporal, random)=-0.0006, cos(mixed, random)=0.9961, cos(mixed, temporal)=0.0211
+2026-06-21 10:54:51,209 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022272 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 10:56:49,847 [INFO] [P-Flow] Done in 228.0s → outputs/SVD_sweep_111/alpha_0040/sample_111/111.mp4
+2026-06-21 10:56:49,848 [INFO]   [SAMPLE SUMMARY] sample_id=111
+2026-06-21 10:56:49,848 [INFO]   [SAMPLE SUMMARY] full_caption=The video captures an aerial view of a lush, dense forest teeming with greenery. The sunlight filters through the canopy, casting dappled shadows on the ground below and creating a vibrant interplay of light and dark. At the center of the frames, a drone is seen flying low over the treetops. The drone appears to be equipped with a camera or sensor, suggesting it might be used for surveillance, mapping, or capturing aerial footage. The surrounding environment is rich with various types of trees, including palm trees, indicating a tropical or subtropical setting. The overall atmosphere is serene and natural, emphasizing the beauty and complexity of the forest ecosystem.
+2026-06-21 10:56:49,848 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=109
+2026-06-21 10:56:49,848 [INFO]   [SAMPLE SUMMARY] elapsed=228.0s, output=outputs/SVD_sweep_111/alpha_0040/sample_111/111.mp4
+
+批量完成! 输出: outputs/SVD_sweep_111/alpha_0040
+=== Case 111, α=0.006 ===
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-21 10:56:53,441 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0060/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.006)']
+  alpha=0.006, rho_s=0.1, rho_m=0.9
+
+2026-06-21 10:56:53,456 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 1 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.006)']
+
+  [1/1] 处理 111...
+2026-06-21 10:56:53,458 [INFO]   [M_d] sample=111, M_d=1.00
+2026-06-21 10:56:53,458 [INFO] [P-Flow] sample=111, flags=['inversion', 'svd', 'blend(α=0.006)']
+2026-06-21 10:56:56,117 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 10:56:56,132 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 10:56:56,132 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.86it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  2.24it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:03<00:00,  1.41it/s]
+2026-06-21 10:57:05,315 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 10:57:05,315 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 10:57:08,083 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 10:58:42,255 [INFO]   [Inversion Quality] η_inv: std=1.0156, mean=-0.0294, range=[-3.453, 3.547], cos_sim(η_inv, random)=-0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-21 10:58:42,255 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 10:58:42,367 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-21 10:58:42,377 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 10:58:42,377 [INFO]   η_temporal: mean=-0.0004, std=0.3398
+2026-06-21 10:58:42,378 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 10:58:42,378 [INFO]   iter 1/1: The video captures an aerial view of a lush, dense forest te...
+2026-06-21 10:58:42,378 [INFO]   [Blend] α=0.0060 (√α=0.0775), β=0.0000 (√β=0.0000), η_temporal std=0.3398, η_mixed std=0.9922, mean=-0.0008
+2026-06-21 10:58:42,379 [INFO]   [Blend Diag] cos(temporal, random)=-0.0006, cos(mixed, random)=0.9961, cos(mixed, temporal)=0.0259
+2026-06-21 10:58:42,379 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.026934 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:52<00:00,  3.75s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 11:00:40,444 [INFO] [P-Flow] Done in 227.0s → outputs/SVD_sweep_111/alpha_0060/sample_111/111.mp4
+2026-06-21 11:00:40,444 [INFO]   [SAMPLE SUMMARY] sample_id=111
+2026-06-21 11:00:40,444 [INFO]   [SAMPLE SUMMARY] full_caption=The video captures an aerial view of a lush, dense forest teeming with greenery. The sunlight filters through the canopy, casting dappled shadows on the ground below and creating a vibrant interplay of light and dark. At the center of the frames, a drone is seen flying low over the treetops. The drone appears to be equipped with a camera or sensor, suggesting it might be used for surveillance, mapping, or capturing aerial footage. The surrounding environment is rich with various types of trees, including palm trees, indicating a tropical or subtropical setting. The overall atmosphere is serene and natural, emphasizing the beauty and complexity of the forest ecosystem.
+2026-06-21 11:00:40,444 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=109
+2026-06-21 11:00:40,444 [INFO]   [SAMPLE SUMMARY] elapsed=227.0s, output=outputs/SVD_sweep_111/alpha_0060/sample_111/111.mp4
+
+批量完成! 输出: outputs/SVD_sweep_111/alpha_0060
+=== 评测所有扫描结果 ===
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0010 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 50 CLIP(o-t=0.3724, g-t=0.3864, o-g=0.9163) XCLIP(o-t=0.3174, g-t=0.3135, o-g=0.8358)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.916296
+  orig_gen_xclip mean: 0.835757
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0010/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0010/eval_clip/eval_summary.md
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0020 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 50 CLIP(o-t=0.3724, g-t=0.3864, o-g=0.9142) XCLIP(o-t=0.3174, g-t=0.3020, o-g=0.8087)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.914245
+  orig_gen_xclip mean: 0.808662
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0020/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0020/eval_clip/eval_summary.md
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0040 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 50 CLIP(o-t=0.3724, g-t=0.3725, o-g=0.8982) XCLIP(o-t=0.3174, g-t=0.3104, o-g=0.8030)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.898167
+  orig_gen_xclip mean: 0.802996
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0040/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0040/eval_clip/eval_summary.md
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0060 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 50 CLIP(o-t=0.3724, g-t=0.3698, o-g=0.9007) XCLIP(o-t=0.3174, g-t=0.3171, o-g=0.8250)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.900664
+  orig_gen_xclip mean: 0.824993
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0060/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0060/eval_clip/eval_summary.md
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0080 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 50 CLIP(o-t=0.3724, g-t=0.3712, o-g=0.8916) XCLIP(o-t=0.3174, g-t=0.3053, o-g=0.8253)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.891566
+  orig_gen_xclip mean: 0.825305
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0080/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_50/alpha_0080/eval_clip/eval_summary.md
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0005 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 111 CLIP(o-t=0.3624, g-t=0.3785, o-g=0.9014) XCLIP(o-t=0.2802, g-t=0.3019, o-g=0.7370)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.901372
+  orig_gen_xclip mean: 0.737034
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0005/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0005/eval_clip/eval_summary.md
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0010 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 111 CLIP(o-t=0.3624, g-t=0.3840, o-g=0.9110) XCLIP(o-t=0.2802, g-t=0.3000, o-g=0.7043)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.911033
+  orig_gen_xclip mean: 0.704277
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0010/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0010/eval_clip/eval_summary.md
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0020 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 111 CLIP(o-t=0.3624, g-t=0.3770, o-g=0.9172) XCLIP(o-t=0.2802, g-t=0.3004, o-g=0.7900)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.917228
+  orig_gen_xclip mean: 0.789982
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0020/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0020/eval_clip/eval_summary.md
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0040 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 111 CLIP(o-t=0.3624, g-t=0.3791, o-g=0.9260) XCLIP(o-t=0.2802, g-t=0.3048, o-g=0.8512)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.926023
+  orig_gen_xclip mean: 0.851208
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0040/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0040/eval_clip/eval_summary.md
+--- Evaluating /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0060 ---
+Found 1 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/1] 111 CLIP(o-t=0.3624, g-t=0.3845, o-g=0.9279) XCLIP(o-t=0.2802, g-t=0.2979, o-g=0.8400)
+
+Evaluation complete!
+  Samples: 1
+  orig_gen_clip mean:  0.927881
+  orig_gen_xclip mean: 0.839984
+  CSV: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0060/eval_clip/clip_xclip_results.csv
+  Summary: /root/xixihaha/P-Flow/outputs/SVD_sweep_111/alpha_0060/eval_clip/eval_summary.md
+=== 实验1 补充扫描完成! ===
+root@autodl-container-a4d74c9dd1-31db82ab:~/xixihaha/P-Flow# 

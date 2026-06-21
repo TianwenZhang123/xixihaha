@@ -1,0 +1,473 @@
+cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/PNA_v4_piecewiseE_5samples \
+    --sample_ids 32 50 73 80 111 \
+    --inversion --svd --blend \
+    --adaptive_alpha --alpha_max 0.006 --alpha_min 0.0 \
+    --pna_probe --pna_probe_step 0.95 \
+    --pna_alpha_max 0.006 --pna_alpha_min 0.0005 \
+    --feature_inject --fi_layers mid --fi_lambda 0.05 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
+    --fi_alpha_coupling --fi_alpha_ref 0.004 \
+    --seed 42 --verbose
+
+# 2. 评测
+cd /root/xixihaha/P-Flow && OMP_NUM_THREADS=4 python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/PNA_v4_piecewiseE_5samples \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/PNA_v4_piecewiseE_5samples/eval_clip
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+2026-06-20 12:05:43,231 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/PNA_v4_piecewiseE_5samples/run_log.txt
+P-Flow | pflow_inversion_svd_blend_feature_inject
+  Flags: ['inversion', 'svd', 'blend(α=[0.0~0.006], TSR-guided)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+  alpha=[0.0~0.006], TSR-guided, rho_s=0.1, rho_m=0.9
+  [FI] λ=0.05, layers=mid, schedule=middle_peak, mode=attention, adaptive(temp=5.0)
+
+2026-06-20 12:05:43,247 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 5 个样本
+实验: pflow_inversion_svd_blend_feature_inject
+Flags: ['inversion', 'svd', 'blend(α=[0.0~0.006], TSR-guided)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+
+  [1/5] 处理 32...
+2026-06-20 12:05:43,249 [INFO]   [M_d] sample=32, M_d=1.00
+2026-06-20 12:05:43,249 [INFO] [P-Flow] sample=32, flags=['inversion', 'svd', 'blend(α=[0.0~0.006], TSR-guided)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-20 12:05:45,854 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-20 12:05:45,854 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+
+libgomp: Invalid value for environment variable OMP_NUM_THREADS
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  2.51it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  1.89it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:04<00:00,  1.23it/s]
+2026-06-20 12:05:55,893 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-20 12:05:55,894 [INFO]   GPU 0: 13.8GB allocated, 14.1GB reserved
+2026-06-20 12:05:55,894 [INFO]   [Inversion] encoding reference → latent...
+2026-06-20 12:05:58,426 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-20 12:05:58,426 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-20 12:05:58,426 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|████████████▌                                                         | 9/50 [00:19<01:29,  2.17s/it]2026-06-20 12:06:20,389 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0728, std=0.4707, cached=11 points
+Inversion + Trajectory:  38%|██████████████████████████▏                                          | 19/50 [00:42<01:09,  2.25s/it]2026-06-20 12:06:43,103 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0889, std=0.5820, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████                             | 29/50 [01:05<00:48,  2.30s/it]2026-06-20 12:07:05,938 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.1074, std=0.7188, cached=31 points
+Inversion + Trajectory:  78%|█████████████████████████████████████████████████████▊               | 39/50 [01:28<00:25,  2.29s/it]2026-06-20 12:07:28,791 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.1289, std=0.8867, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████▌ | 49/50 [01:51<00:02,  2.33s/it]2026-06-20 12:07:52,147 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.1543, std=1.0938, cached=51 points
+2026-06-20 12:07:52,147 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.1543, std=1.0938                
+2026-06-20 12:07:52,148 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-20 12:07:52,169 [INFO]   [Inversion Quality] η_inv: std=1.0938, mean=0.1543, range=[-3.562, 3.547], cos_sim(η_inv, random)=-0.0007, cos_sim(η_inv, z0)=0.9805
+2026-06-20 12:07:52,169 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-20 12:07:52,236 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-20 12:07:52,246 [DEBUG]   [Stage2] Temporal: kept top-7/21 components
+2026-06-20 12:07:52,251 [INFO]   [TSR] TCR=0.3458, TAC=0.1641, TSR=0.1512
+2026-06-20 12:07:52,252 [INFO]   η_temporal: mean=0.0002, std=0.3633
+2026-06-20 12:07:52,252 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-20 12:07:52,252 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-20 12:07:52,252 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-20 12:07:52,252 [INFO]   iter 1/1: The video features two adorable golden retriever puppies pla...
+2026-06-20 12:07:56,026 [INFO]   [PNA] probe_t=0.95, α_test=0.004, layer=15, relative_impact=0.014898, cos_consistency=0.0014, pna_raw=0.007460
+2026-06-20 12:07:56,026 [INFO]   [PNA 新指标] frame_consistency=0.0000, prompt_alignment=0.0005, temporal_frame_cos=0.1643
+2026-06-20 12:07:56,027 [INFO]   [PNA 场景推断] mean_cos=0.1643 → 慢镜头场景(α≈0.001~0.002,λ≈0.03~0.04)
+2026-06-20 12:07:56,027 [INFO]   [PNA 映射对比] α_range=[0.0005, 0.006], α_ref=0.004, λ_max=0.05
+2026-06-20 12:07:56,027 [INFO]   [PNA-A] sigmoid(k=500,x0=0.003): score=0.9029 → α=0.005466 | couple+scale=1.366 λ_eff=0.0683 | couple-scale=0.732 λ_eff=0.0366
+2026-06-20 12:07:56,027 [INFO]   [PNA-B] sigmoid(k=800,x0=0.008): score=0.3936 → α=0.002665 | couple+scale=0.666 λ_eff=0.0333 | couple-scale=1.501 λ_eff=0.0750
+2026-06-20 12:07:56,027 [INFO]   [PNA-C] linear(0.005~0.01):    score=0.4920 → α=0.003206 | couple+scale=0.801 λ_eff=0.0401 | couple-scale=1.248 λ_eff=0.0624
+2026-06-20 12:07:56,027 [INFO]   [PNA-E] 分段temporal修正(v4): score=0.1633 → α=0.001398 | 0.05≤cos<0.20→慢镜头(mod=0.25) | pna_raw_E=0.003725 | couple+scale=0.350 λ_eff=0.0175 | couple-scale=2.000 λ_eff=0.1000
+2026-06-20 12:07:56,027 [INFO]   [PNA-F] 分段temporal修正(v4): score=0.0864 → α=0.000975 | 0.15≤cos<0.30→慢镜头偏静(mod=0.15) | pna_raw_F=0.002235 | couple+scale=0.244 λ_eff=0.0122 | couple-scale=2.000 λ_eff=0.1000
+2026-06-20 12:07:56,027 [INFO]   [PNA 经验参考] 场景建议 α≈0.0015, λ≈0.0350
+2026-06-20 12:07:56,027 [INFO]   [PNA 方案与经验α的偏差] A:|+0.0040| B:|+0.0012| C:|+0.0017| E:|-0.0001| F:|-0.0005| → 越接近0越好
+2026-06-20 12:07:56,027 [INFO]   [PNA 最佳方案] E(偏差最小=0.0001) vs 选用E(偏差=0.0001) ✓ 一致
+2026-06-20 12:07:56,027 [INFO]   [PNA λ_eff 对比(反向Coupling)] A:λ=0.0366 | B:λ=0.0750 | C:λ=0.0624 | E(选用):λ=0.1000 | F:λ=0.1000 | 经验:λ≈0.0350
+2026-06-20 12:07:56,027 [INFO]   [PNA-α] 选用方案E(分段temporal修正v4): score=0.1633, α_eff=0.001398
+2026-06-20 12:07:56,027 [INFO]   [PNA-α 对比] A=0.005466 | B=0.002665 | C=0.003206 | E(选用)=0.001398 | F=0.000975 | D(TSR)=0.001332(TSR=0.1512) | 经验=0.001500
+2026-06-20 12:07:56,028 [INFO]   [Blend] α=0.0014 (√α=0.0374), β=0.0000 (√β=0.0000), η_temporal std=0.3633, η_mixed std=1.0000, mean=-0.0014
+2026-06-20 12:07:56,028 [INFO]   [Blend Diag] cos(temporal, random)=-0.0015, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0121
+2026-06-20 12:07:56,028 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.013640 (越大越说明 temporal 有影响)
+2026-06-20 12:07:56,028 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:07:56,028 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-20 12:07:56,028 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:07:56,028 [INFO]   [FI-α Coupling] α_eff=0.001398, α_ref=0.0040
+2026-06-20 12:07:56,028 [INFO]   [FI-α Coupling 选用] 反向(互补): scale=2.0000 (λ_max: 0.0500→0.1000)
+2026-06-20 12:07:56,028 [INFO]   [FI-α Coupling 对比] 正向(同向): scale=0.3495 (λ_max: 0.0500→0.0175) | 无Coupling: scale=1.0000 (λ_max: 0.0500)
+2026-06-20 12:07:56,029 [INFO]   [FI-α 多方案 Coupling 诊断] (反向=α_ref/α, 正向=α/α_ref) 经验参考: α_hint=0.0015
+2026-06-20 12:07:56,029 [INFO]     方案A: α=0.005466(偏差=+0.0040) → 反向scale=0.732 λ_eff=0.0366 | 正向scale=1.366 λ_eff=0.0683 | 经验λ_eff≈0.1333
+2026-06-20 12:07:56,029 [INFO]     方案B: α=0.002665(偏差=+0.0012) → 反向scale=1.501 λ_eff=0.0750 | 正向scale=0.666 λ_eff=0.0333 | 经验λ_eff≈0.1333
+2026-06-20 12:07:56,029 [INFO]     方案C: α=0.003206(偏差=+0.0017) → 反向scale=1.248 λ_eff=0.0624 | 正向scale=0.801 λ_eff=0.0401 | 经验λ_eff≈0.1333
+2026-06-20 12:07:56,029 [INFO]     方案E: α=0.001398(偏差=-0.0001) → 反向scale=2.861 λ_eff=0.1431 | 正向scale=0.350 λ_eff=0.0175 | 经验λ_eff≈0.1333
+2026-06-20 12:07:56,029 [INFO]     方案F: α=0.000975(偏差=-0.0005) → 反向scale=3.000 λ_eff=0.1500 | 正向scale=0.244 λ_eff=0.0122 | 经验λ_eff≈0.1333
+2026-06-20 12:07:56,029 [INFO]   [Schedule] type=middle_peak, max=0.1, steps=30, first 5: ['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5: ['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:07:56,031 [INFO]   [Quality Scale] mean_cos=-0.0564, threshold=0.05, scale=0.1957 (minimal)
+2026-06-20 12:07:56,031 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.1957, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-20 12:07:56,031 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|██████████████████▊                                                                           | 6/30 [00:23<01:34,  3.94s/it]2026-06-20 12:08:20,430 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6250, gate=0.3486, λ=0.01009→0.00352
+2026-06-20 12:08:22,343 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6094, gate=0.3666, λ=0.01009→0.00370
+ 37%|██████████████████████████████████                                                           | 11/30 [00:44<01:18,  4.12s/it]2026-06-20 12:08:41,159 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6484, gate=0.3225, λ=0.01729→0.00558
+2026-06-20 12:08:43,073 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6367, gate=0.3355, λ=0.01729→0.00580
+ 53%|█████████████████████████████████████████████████▌                                           | 16/30 [01:05<00:57,  4.13s/it]2026-06-20 12:09:01,864 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6758, gate=0.2934, λ=0.01954→0.00573
+2026-06-20 12:09:03,779 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6641, gate=0.3057, λ=0.01954→0.00597
+ 70%|█████████████████████████████████████████████████████████████████                            | 21/30 [01:25<00:37,  4.15s/it]2026-06-20 12:09:22,511 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6992, gate=0.2697, λ=0.01620→0.00437
+2026-06-20 12:09:24,426 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6914, gate=0.2775, λ=0.01620→0.00449
+ 87%|████████████████████████████████████████████████████████████████████████████████▌            | 26/30 [01:46<00:16,  4.13s/it]2026-06-20 12:09:43,130 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7344, gate=0.2365, λ=0.00822→0.00194
+2026-06-20 12:09:45,045 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7305, gate=0.2401, λ=0.00822→0.00197
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:02<00:00,  4.09s/it]
+2026-06-20 12:10:02,497 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:10:02,497 [INFO]   [FI] 生成完成总结
+2026-06-20 12:10:02,497 [INFO]     λ schedule: first 5=['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5=['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:10:02,497 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-20 12:10:04,929 [INFO] [P-Flow] Done in 261.7s → outputs/PNA_v4_piecewiseE_5samples/sample_32/32.mp4
+2026-06-20 12:10:04,929 [INFO]   [SAMPLE SUMMARY] sample_id=32
+2026-06-20 12:10:04,929 [INFO]   [SAMPLE SUMMARY] full_caption=The video features two adorable golden retriever puppies playing joyfully in a snowy landscape. The scene is set during what appears to be late afternoon, as indicated by the warm, soft light casting long shadows on the snow. The puppies are covered in fluffy, golden fur and are energetically moving through the snow, their paws kicking up small clouds of snow as they play. Their tails are wagging, and their expressions convey a sense of excitement and happiness. The background shows a serene winter setting with snow-covered ground and bare trees, adding to the picturesque and cozy atmosphere of the video.
+2026-06-20 12:10:04,929 [INFO]   [SAMPLE SUMMARY] caption_length=612 chars, word_count=101
+2026-06-20 12:10:04,929 [INFO]   [SAMPLE SUMMARY] elapsed=261.7s, output=outputs/PNA_v4_piecewiseE_5samples/sample_32/32.mp4
+  [2/5] 处理 50...
+2026-06-20 12:10:06,510 [INFO]   [M_d] sample=50, M_d=1.00
+2026-06-20 12:10:06,510 [INFO] [P-Flow] sample=50, flags=['inversion', 'svd', 'blend(α=[0.0~0.006], TSR-guided)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-20 12:10:08,757 [INFO]   [Inversion] encoding reference → latent...
+2026-06-20 12:10:11,079 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-20 12:10:11,079 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-20 12:10:11,079 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|████████████▌                                                         | 9/50 [00:20<01:34,  2.31s/it]2026-06-20 12:10:33,973 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0096, std=0.4766, cached=11 points
+Inversion + Trajectory:  38%|██████████████████████████▏                                          | 19/50 [00:44<01:12,  2.35s/it]2026-06-20 12:10:57,386 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0095, std=0.5898, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████                             | 29/50 [01:07<00:48,  2.33s/it]2026-06-20 12:11:20,701 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0089, std=0.7266, cached=31 points
+Inversion + Trajectory:  78%|█████████████████████████████████████████████████████▊               | 39/50 [01:31<00:26,  2.40s/it]2026-06-20 12:11:44,725 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0080, std=0.8906, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████▌ | 49/50 [01:55<00:02,  2.37s/it]2026-06-20 12:12:08,439 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0078, std=1.0781, cached=51 points
+2026-06-20 12:12:08,439 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0078, std=1.0781                
+2026-06-20 12:12:08,440 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-20 12:12:08,445 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=0.0078, range=[-3.703, 4.156], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-20 12:12:08,445 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-20 12:12:08,457 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-20 12:12:08,462 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-20 12:12:08,466 [INFO]   [TSR] TCR=0.1953, TAC=0.1159, TSR=0.0837
+2026-06-20 12:12:08,467 [INFO]   η_temporal: mean=-0.0004, std=0.3809
+2026-06-20 12:12:08,469 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-20 12:12:08,470 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-20 12:12:08,470 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-20 12:12:08,470 [INFO]   iter 1/1: The video features a white cat sitting inside the passenger ...
+2026-06-20 12:12:12,249 [INFO]   [PNA] probe_t=0.95, α_test=0.004, layer=15, relative_impact=0.016231, cos_consistency=0.0022, pna_raw=0.008134
+2026-06-20 12:12:12,249 [INFO]   [PNA 新指标] frame_consistency=0.0000, prompt_alignment=-0.0105, temporal_frame_cos=0.1161
+2026-06-20 12:12:12,249 [INFO]   [PNA 场景推断] mean_cos=0.1161 → 慢镜头场景(α≈0.001~0.002,λ≈0.03~0.04)
+2026-06-20 12:12:12,249 [INFO]   [PNA 映射对比] α_range=[0.0005, 0.006], α_ref=0.004, λ_max=0.05
+2026-06-20 12:12:12,250 [INFO]   [PNA-A] sigmoid(k=500,x0=0.003): score=0.9287 → α=0.005608 | couple+scale=1.402 λ_eff=0.0701 | couple-scale=0.713 λ_eff=0.0357
+2026-06-20 12:12:12,250 [INFO]   [PNA-B] sigmoid(k=800,x0=0.008): score=0.5267 → α=0.003397 | couple+scale=0.849 λ_eff=0.0425 | couple-scale=1.178 λ_eff=0.0589
+2026-06-20 12:12:12,250 [INFO]   [PNA-C] linear(0.005~0.01):    score=0.6267 → α=0.003947 | couple+scale=0.987 λ_eff=0.0493 | couple-scale=1.013 λ_eff=0.0507
+2026-06-20 12:12:12,250 [INFO]   [PNA-E] 分段temporal修正(v4): score=0.2077 → α=0.001642 | 0.05≤cos<0.20→慢镜头(mod=0.25) | pna_raw_E=0.004058 | couple+scale=0.411 λ_eff=0.0205 | couple-scale=2.000 λ_eff=0.1000
+2026-06-20 12:12:12,250 [INFO]   [PNA-F] 分段temporal修正(v4): score=0.5873 → α=0.003730 | 0.05≤cos<0.15→慢镜头偏动(mod=0.40) | pna_raw_F=0.006492 | couple+scale=0.933 λ_eff=0.0466 | couple-scale=1.072 λ_eff=0.0536
+2026-06-20 12:12:12,250 [INFO]   [PNA 经验参考] 场景建议 α≈0.0015, λ≈0.0350
+2026-06-20 12:12:12,250 [INFO]   [PNA 方案与经验α的偏差] A:|+0.0041| B:|+0.0019| C:|+0.0024| E:|+0.0001| F:|+0.0022| → 越接近0越好
+2026-06-20 12:12:12,250 [INFO]   [PNA 最佳方案] E(偏差最小=0.0001) vs 选用E(偏差=0.0001) ✓ 一致
+2026-06-20 12:12:12,250 [INFO]   [PNA λ_eff 对比(反向Coupling)] A:λ=0.0357 | B:λ=0.0589 | C:λ=0.0507 | E(选用):λ=0.1000 | F:λ=0.0536 | 经验:λ≈0.0350
+2026-06-20 12:12:12,250 [INFO]   [PNA-α] 选用方案E(分段temporal修正v4): score=0.2077, α_eff=0.001642
+2026-06-20 12:12:12,250 [INFO]   [PNA-α 对比] A=0.005608 | B=0.003397 | C=0.003947 | E(选用)=0.001642 | F=0.003730 | D(TSR)=0.000960(TSR=0.0837) | 经验=0.001500
+2026-06-20 12:12:12,250 [INFO]   [Blend] α=0.0016 (√α=0.0405), β=0.0000 (√β=0.0000), η_temporal std=0.3809, η_mixed std=1.0000, mean=0.0000
+2026-06-20 12:12:12,251 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0161
+2026-06-20 12:12:12,251 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.015539 (越大越说明 temporal 有影响)
+2026-06-20 12:12:12,251 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:12:12,251 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-20 12:12:12,251 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:12:12,251 [INFO]   [FI-α Coupling] α_eff=0.001642, α_ref=0.0040
+2026-06-20 12:12:12,251 [INFO]   [FI-α Coupling 选用] 反向(互补): scale=2.0000 (λ_max: 0.0500→0.1000)
+2026-06-20 12:12:12,251 [INFO]   [FI-α Coupling 对比] 正向(同向): scale=0.4106 (λ_max: 0.0500→0.0205) | 无Coupling: scale=1.0000 (λ_max: 0.0500)
+2026-06-20 12:12:12,251 [INFO]   [FI-α 多方案 Coupling 诊断] (反向=α_ref/α, 正向=α/α_ref) 经验参考: α_hint=0.0015
+2026-06-20 12:12:12,251 [INFO]     方案A: α=0.005608(偏差=+0.0041) → 反向scale=0.713 λ_eff=0.0357 | 正向scale=1.402 λ_eff=0.0701 | 经验λ_eff≈0.1333
+2026-06-20 12:12:12,252 [INFO]     方案B: α=0.003397(偏差=+0.0019) → 反向scale=1.178 λ_eff=0.0589 | 正向scale=0.849 λ_eff=0.0425 | 经验λ_eff≈0.1333
+2026-06-20 12:12:12,252 [INFO]     方案C: α=0.003947(偏差=+0.0024) → 反向scale=1.013 λ_eff=0.0507 | 正向scale=0.987 λ_eff=0.0493 | 经验λ_eff≈0.1333
+2026-06-20 12:12:12,252 [INFO]     方案E: α=0.001642(偏差=+0.0001) → 反向scale=2.436 λ_eff=0.1218 | 正向scale=0.411 λ_eff=0.0205 | 经验λ_eff≈0.1333
+2026-06-20 12:12:12,252 [INFO]     方案F: α=0.003730(偏差=+0.0022) → 反向scale=1.072 λ_eff=0.0536 | 正向scale=0.933 λ_eff=0.0466 | 经验λ_eff≈0.1333
+2026-06-20 12:12:12,252 [INFO]   [Schedule] type=middle_peak, max=0.1, steps=30, first 5: ['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5: ['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:12:12,254 [INFO]   [Quality Scale] mean_cos=0.0466, threshold=0.05, scale=0.5348 (weak)
+2026-06-20 12:12:12,254 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.5348, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-20 12:12:12,254 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|██████████████████▊                                                                           | 6/30 [00:24<01:39,  4.13s/it]2026-06-20 12:12:37,765 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5742, gate=0.4083, λ=0.02757→0.01126
+2026-06-20 12:12:39,683 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5586, gate=0.4273, λ=0.02757→0.01178
+ 37%|██████████████████████████████████                                                           | 11/30 [00:45<01:18,  4.14s/it]2026-06-20 12:12:58,478 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6094, gate=0.3666, λ=0.04725→0.01732
+2026-06-20 12:13:00,396 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.5977, gate=0.3803, λ=0.04725→0.01797
+ 53%|█████████████████████████████████████████████████▌                                           | 16/30 [01:06<00:59,  4.28s/it]2026-06-20 12:13:19,654 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6445, gate=0.3268, λ=0.05340→0.01745
+2026-06-20 12:13:21,572 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6406, gate=0.3311, λ=0.05340→0.01768
+ 70%|█████████████████████████████████████████████████████████████████                            | 21/30 [01:29<00:40,  4.53s/it]2026-06-20 12:13:42,552 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6758, gate=0.2934, λ=0.04427→0.01299
+2026-06-20 12:13:44,468 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6719, gate=0.2975, λ=0.04427→0.01317
+ 87%|████████████████████████████████████████████████████████████████████████████████▌            | 26/30 [01:50<00:17,  4.29s/it]2026-06-20 12:14:03,876 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7109, gate=0.2583, λ=0.02246→0.00580
+2026-06-20 12:14:05,791 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7070, gate=0.2621, λ=0.02246→0.00589
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:07<00:00,  4.24s/it]
+2026-06-20 12:14:23,208 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:14:23,208 [INFO]   [FI] 生成完成总结
+2026-06-20 12:14:23,208 [INFO]     λ schedule: first 5=['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5=['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:14:23,208 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-20 12:14:25,594 [INFO] [P-Flow] Done in 259.1s → outputs/PNA_v4_piecewiseE_5samples/sample_50/50.mp4
+2026-06-20 12:14:25,594 [INFO]   [SAMPLE SUMMARY] sample_id=50
+2026-06-20 12:14:25,594 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a white cat sitting inside the passenger seat of a car with the window open. The cat is wearing a blue collar and appears to be looking out of the window, observing the surroundings. The background shows a busy urban street with people walking by, some holding umbrellas, suggesting it might be a rainy day. The setting includes buildings with storefronts and signs, adding to the city atmosphere. The cat's expression seems calm and curious as it gazes outside.
+2026-06-20 12:14:25,594 [INFO]   [SAMPLE SUMMARY] caption_length=481 chars, word_count=82
+2026-06-20 12:14:25,594 [INFO]   [SAMPLE SUMMARY] elapsed=259.1s, output=outputs/PNA_v4_piecewiseE_5samples/sample_50/50.mp4
+  [3/5] 处理 73...
+2026-06-20 12:14:27,020 [INFO]   [M_d] sample=73, M_d=1.00
+2026-06-20 12:14:27,020 [INFO] [P-Flow] sample=73, flags=['inversion', 'svd', 'blend(α=[0.0~0.006], TSR-guided)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-20 12:14:29,466 [INFO]   [Inversion] encoding reference → latent...
+2026-06-20 12:14:31,790 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-20 12:14:31,791 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-20 12:14:31,791 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|████████████▌                                                         | 9/50 [00:20<01:33,  2.29s/it]2026-06-20 12:14:54,838 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0281, std=0.3984, cached=11 points
+Inversion + Trajectory:  38%|██████████████████████████▏                                          | 19/50 [00:43<01:11,  2.29s/it]2026-06-20 12:15:17,642 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0317, std=0.4883, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████                             | 29/50 [01:07<00:49,  2.38s/it]2026-06-20 12:15:41,252 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0356, std=0.5977, cached=31 points
+Inversion + Trajectory:  78%|█████████████████████████████████████████████████████▊               | 39/50 [01:30<00:25,  2.32s/it]2026-06-20 12:16:04,375 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0400, std=0.7344, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████▌ | 49/50 [01:53<00:02,  2.33s/it]2026-06-20 12:16:27,593 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0447, std=0.8984, cached=51 points
+2026-06-20 12:16:27,593 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0447, std=0.8984                
+2026-06-20 12:16:27,593 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-20 12:16:27,598 [INFO]   [Inversion Quality] η_inv: std=0.8984, mean=0.0447, range=[-3.766, 3.281], cos_sim(η_inv, random)=-0.0003, cos_sim(η_inv, z0)=0.9727
+2026-06-20 12:16:27,598 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-20 12:16:27,611 [DEBUG]   [Stage1] Spatial: removed top-15 components
+2026-06-20 12:16:27,615 [DEBUG]   [Stage2] Temporal: kept top-16/21 components
+2026-06-20 12:16:27,620 [INFO]   [TSR] TCR=0.2283, TAC=0.4213, TSR=0.3299
+2026-06-20 12:16:27,620 [INFO]   η_temporal: mean=0.0006, std=0.3105
+2026-06-20 12:16:27,623 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-20 12:16:27,623 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-20 12:16:27,623 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-20 12:16:27,623 [INFO]   iter 1/1: The video depicts an expansive, empty warehouse with high ce...
+2026-06-20 12:16:31,401 [INFO]   [PNA] probe_t=0.95, α_test=0.004, layer=15, relative_impact=0.014535, cos_consistency=0.0035, pna_raw=0.007293
+2026-06-20 12:16:31,401 [INFO]   [PNA 新指标] frame_consistency=0.0000, prompt_alignment=0.0054, temporal_frame_cos=0.4214
+2026-06-20 12:16:31,401 [INFO]   [PNA 场景推断] mean_cos=0.4214 → 静态/航拍场景(α≈0.0005~0.001,λ≈0.02~0.03)
+2026-06-20 12:16:31,401 [INFO]   [PNA 映射对比] α_range=[0.0005, 0.006], α_ref=0.004, λ_max=0.05
+2026-06-20 12:16:31,401 [INFO]   [PNA-A] sigmoid(k=500,x0=0.003): score=0.8953 → α=0.005424 | couple+scale=1.356 λ_eff=0.0678 | couple-scale=0.737 λ_eff=0.0369
+2026-06-20 12:16:31,401 [INFO]   [PNA-B] sigmoid(k=800,x0=0.008): score=0.3622 → α=0.002492 | couple+scale=0.623 λ_eff=0.0312 | couple-scale=1.605 λ_eff=0.0802
+2026-06-20 12:16:31,401 [INFO]   [PNA-C] linear(0.005~0.01):    score=0.4586 → α=0.003022 | couple+scale=0.756 λ_eff=0.0378 | couple-scale=1.324 λ_eff=0.0662
+2026-06-20 12:16:31,401 [INFO]   [PNA-E] 分段temporal修正(v4): score=0.0000 → α=0.000500 | 0.20≤cos<0.50→静态(mod=0.10) | pna_raw_E=0.001453 | couple+scale=0.125 λ_eff=0.0063 | couple-scale=2.000 λ_eff=0.1000
+2026-06-20 12:16:31,401 [INFO]   [PNA-F] 分段temporal修正(v4): score=0.0000 → α=0.000500 | 0.30≤cos<0.60→静态(mod=0.07) | pna_raw_F=0.001017 | couple+scale=0.125 λ_eff=0.0063 | couple-scale=2.000 λ_eff=0.1000
+2026-06-20 12:16:31,401 [INFO]   [PNA 经验参考] 场景建议 α≈0.0008, λ≈0.0250
+2026-06-20 12:16:31,401 [INFO]   [PNA 方案与经验α的偏差] A:|+0.0046| B:|+0.0017| C:|+0.0022| E:|-0.0003| F:|-0.0003| → 越接近0越好
+2026-06-20 12:16:31,401 [INFO]   [PNA 最佳方案] E(偏差最小=0.0003) vs 选用E(偏差=0.0003) ✓ 一致
+2026-06-20 12:16:31,401 [INFO]   [PNA λ_eff 对比(反向Coupling)] A:λ=0.0369 | B:λ=0.0802 | C:λ=0.0662 | E(选用):λ=0.1000 | F:λ=0.1000 | 经验:λ≈0.0250
+2026-06-20 12:16:31,401 [INFO]   [PNA-α] 选用方案E(分段temporal修正v4): score=0.0000, α_eff=0.000500
+2026-06-20 12:16:31,401 [INFO]   [PNA-α 对比] A=0.005424 | B=0.002492 | C=0.003022 | E(选用)=0.000500 | F=0.000500 | D(TSR)=0.002314(TSR=0.3299) | 经验=0.000800
+2026-06-20 12:16:31,402 [INFO]   [Blend] α=0.0005 (√α=0.0224), β=0.0000 (√β=0.0000), η_temporal std=0.3105, η_mixed std=1.0000, mean=0.0005
+2026-06-20 12:16:31,402 [INFO]   [Blend Diag] cos(temporal, random)=0.0008, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0077
+2026-06-20 12:16:31,402 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.007122 (越大越说明 temporal 有影响)
+2026-06-20 12:16:31,403 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:16:31,403 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-20 12:16:31,403 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:16:31,403 [INFO]   [FI-α Coupling] α_eff=0.000500, α_ref=0.0040
+2026-06-20 12:16:31,403 [INFO]   [FI-α Coupling 选用] 反向(互补): scale=2.0000 (λ_max: 0.0500→0.1000)
+2026-06-20 12:16:31,403 [INFO]   [FI-α Coupling 对比] 正向(同向): scale=0.1250 (λ_max: 0.0500→0.0063) | 无Coupling: scale=1.0000 (λ_max: 0.0500)
+2026-06-20 12:16:31,403 [INFO]   [FI-α 多方案 Coupling 诊断] (反向=α_ref/α, 正向=α/α_ref) 经验参考: α_hint=0.0008
+2026-06-20 12:16:31,403 [INFO]     方案A: α=0.005424(偏差=+0.0046) → 反向scale=0.737 λ_eff=0.0369 | 正向scale=1.356 λ_eff=0.0678 | 经验λ_eff≈0.1500
+2026-06-20 12:16:31,403 [INFO]     方案B: α=0.002492(偏差=+0.0017) → 反向scale=1.605 λ_eff=0.0802 | 正向scale=0.623 λ_eff=0.0312 | 经验λ_eff≈0.1500
+2026-06-20 12:16:31,403 [INFO]     方案C: α=0.003022(偏差=+0.0022) → 反向scale=1.324 λ_eff=0.0662 | 正向scale=0.756 λ_eff=0.0378 | 经验λ_eff≈0.1500
+2026-06-20 12:16:31,403 [INFO]     方案E: α=0.000500(偏差=-0.0003) → 反向scale=3.000 λ_eff=0.1500 | 正向scale=0.125 λ_eff=0.0063 | 经验λ_eff≈0.1500
+2026-06-20 12:16:31,403 [INFO]     方案F: α=0.000500(偏差=-0.0003) → 反向scale=3.000 λ_eff=0.1500 | 正向scale=0.125 λ_eff=0.0063 | 经验λ_eff≈0.1500
+2026-06-20 12:16:31,403 [INFO]   [Schedule] type=middle_peak, max=0.1, steps=30, first 5: ['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5: ['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:16:31,405 [INFO]   [Quality Scale] mean_cos=0.0785, threshold=0.05, scale=0.6748 (weak)
+2026-06-20 12:16:31,405 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.6748, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-20 12:16:31,405 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|██████████████████▊                                                                           | 6/30 [00:23<01:34,  3.95s/it]2026-06-20 12:16:55,817 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6055, gate=0.3711, λ=0.03479→0.01291
+2026-06-20 12:16:57,733 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5977, gate=0.3803, λ=0.03479→0.01323
+ 37%|██████████████████████████████████                                                           | 11/30 [00:43<01:17,  4.09s/it]2026-06-20 12:17:16,190 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6250, gate=0.3486, λ=0.05962→0.02079
+2026-06-20 12:17:18,105 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6211, gate=0.3531, λ=0.05962→0.02105
+ 53%|█████████████████████████████████████████████████▌                                           | 16/30 [01:04<00:58,  4.15s/it]2026-06-20 12:17:36,998 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6523, gate=0.3183, λ=0.06738→0.02144
+2026-06-20 12:17:38,914 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6523, gate=0.3183, λ=0.06738→0.02144
+ 70%|█████████████████████████████████████████████████████████████████                            | 21/30 [01:25<00:37,  4.12s/it]2026-06-20 12:17:57,623 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6797, gate=0.2894, λ=0.05585→0.01616
+2026-06-20 12:17:59,541 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6758, gate=0.2934, λ=0.05585→0.01639
+ 87%|████████████████████████████████████████████████████████████████████████████████▌            | 26/30 [01:45<00:16,  4.10s/it]2026-06-20 12:18:18,114 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7227, gate=0.2473, λ=0.02833→0.00701
+2026-06-20 12:18:20,031 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7266, gate=0.2436, λ=0.02833→0.00690
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:02<00:00,  4.08s/it]
+2026-06-20 12:18:37,339 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:18:37,339 [INFO]   [FI] 生成完成总结
+2026-06-20 12:18:37,339 [INFO]     λ schedule: first 5=['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5=['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:18:37,339 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-20 12:18:39,928 [INFO] [P-Flow] Done in 252.9s → outputs/PNA_v4_piecewiseE_5samples/sample_73/73.mp4
+2026-06-20 12:18:39,928 [INFO]   [SAMPLE SUMMARY] sample_id=73
+2026-06-20 12:18:39,928 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts an expansive, empty warehouse with high ceilings and large windows allowing natural light to flood in. The floor is clean and marked with yellow lines, suggesting it might be used for storage or industrial purposes. As the camera moves forward, the focus shifts from the empty space to a vibrant, lush garden that gradually fills the center of the frame. The garden is teeming with a variety of green plants, flowers, and foliage, creating a stark contrast against the industrial backdrop. The plants appear healthy and well-maintained, adding a touch of nature and tranquility to the otherwise stark environment. The transition from the barren warehouse to the thriving garden symbolizes growth, transformation, or the potential for nature to reclaim even the most urban spaces.
+2026-06-20 12:18:39,929 [INFO]   [SAMPLE SUMMARY] caption_length=797 chars, word_count=127
+2026-06-20 12:18:39,929 [INFO]   [SAMPLE SUMMARY] elapsed=252.9s, output=outputs/PNA_v4_piecewiseE_5samples/sample_73/73.mp4
+  [4/5] 处理 80...
+2026-06-20 12:18:41,448 [INFO]   [M_d] sample=80, M_d=1.00
+2026-06-20 12:18:41,449 [INFO] [P-Flow] sample=80, flags=['inversion', 'svd', 'blend(α=[0.0~0.006], TSR-guided)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-20 12:18:43,752 [INFO]   [Inversion] encoding reference → latent...
+2026-06-20 12:18:46,077 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-20 12:18:46,077 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-20 12:18:46,077 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|████████████▌                                                         | 9/50 [00:20<01:34,  2.30s/it]2026-06-20 12:19:08,883 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=0.0200, std=0.5156, cached=11 points
+Inversion + Trajectory:  38%|██████████████████████████▏                                          | 19/50 [00:43<01:12,  2.33s/it]2026-06-20 12:19:32,103 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=0.0229, std=0.6328, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████                             | 29/50 [01:06<00:48,  2.29s/it]2026-06-20 12:19:54,913 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=0.0264, std=0.7773, cached=31 points
+Inversion + Trajectory:  78%|█████████████████████████████████████████████████████▊               | 39/50 [01:29<00:25,  2.35s/it]2026-06-20 12:20:18,203 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=0.0312, std=0.9453, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████▌ | 49/50 [01:52<00:02,  2.27s/it]2026-06-20 12:20:40,941 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=0.0386, std=1.1250, cached=51 points
+2026-06-20 12:20:40,942 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=0.0386, std=1.1250                
+2026-06-20 12:20:40,942 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-20 12:20:40,947 [INFO]   [Inversion Quality] η_inv: std=1.1250, mean=0.0386, range=[-4.656, 4.156], cos_sim(η_inv, random)=0.0013, cos_sim(η_inv, z0)=0.9805
+2026-06-20 12:20:40,947 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-20 12:20:40,959 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-20 12:20:40,963 [DEBUG]   [Stage2] Temporal: kept top-17/21 components
+2026-06-20 12:20:40,968 [INFO]   [TSR] TCR=0.1930, TAC=0.7949, TSR=0.5700
+2026-06-20 12:20:40,968 [INFO]   η_temporal: mean=-0.0004, std=0.3691
+2026-06-20 12:20:40,971 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-20 12:20:40,972 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-20 12:20:40,972 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-20 12:20:40,972 [INFO]   iter 1/1: The video features a close-up view of a dandelion seed head,...
+2026-06-20 12:20:44,754 [INFO]   [PNA] probe_t=0.95, α_test=0.004, layer=15, relative_impact=0.015988, cos_consistency=-0.0061, pna_raw=0.007945
+2026-06-20 12:20:44,754 [INFO]   [PNA 新指标] frame_consistency=0.0000, prompt_alignment=0.0206, temporal_frame_cos=0.7951
+2026-06-20 12:20:44,754 [INFO]   [PNA 场景推断] mean_cos=0.7951 → 静态/航拍场景(α≈0.0005~0.001,λ≈0.02~0.03)
+2026-06-20 12:20:44,754 [INFO]   [PNA 映射对比] α_range=[0.0005, 0.006], α_ref=0.004, λ_max=0.05
+2026-06-20 12:20:44,754 [INFO]   [PNA-A] sigmoid(k=500,x0=0.003): score=0.9222 → α=0.005572 | couple+scale=1.393 λ_eff=0.0697 | couple-scale=0.718 λ_eff=0.0359
+2026-06-20 12:20:44,754 [INFO]   [PNA-B] sigmoid(k=800,x0=0.008): score=0.4890 → α=0.003190 | couple+scale=0.797 λ_eff=0.0399 | couple-scale=1.254 λ_eff=0.0627
+2026-06-20 12:20:44,754 [INFO]   [PNA-C] linear(0.005~0.01):    score=0.5890 → α=0.003740 | couple+scale=0.935 λ_eff=0.0467 | couple-scale=1.070 λ_eff=0.0535
+2026-06-20 12:20:44,754 [INFO]   [PNA-E] 分段temporal修正(v4): score=0.0000 → α=0.000500 | cos≥0.50→纯静态(mod=0.05) | pna_raw_E=0.000799 | couple+scale=0.125 λ_eff=0.0063 | couple-scale=2.000 λ_eff=0.1000
+2026-06-20 12:20:44,754 [INFO]   [PNA-F] 分段temporal修正(v4): score=0.0000 → α=0.000500 | cos≥0.60→纯静态(mod=0.03) | pna_raw_F=0.000480 | couple+scale=0.125 λ_eff=0.0063 | couple-scale=2.000 λ_eff=0.1000
+2026-06-20 12:20:44,754 [INFO]   [PNA 经验参考] 场景建议 α≈0.0008, λ≈0.0250
+2026-06-20 12:20:44,754 [INFO]   [PNA 方案与经验α的偏差] A:|+0.0048| B:|+0.0024| C:|+0.0029| E:|-0.0003| F:|-0.0003| → 越接近0越好
+2026-06-20 12:20:44,754 [INFO]   [PNA 最佳方案] E(偏差最小=0.0003) vs 选用E(偏差=0.0003) ✓ 一致
+2026-06-20 12:20:44,754 [INFO]   [PNA λ_eff 对比(反向Coupling)] A:λ=0.0359 | B:λ=0.0627 | C:λ=0.0535 | E(选用):λ=0.1000 | F:λ=0.1000 | 经验:λ≈0.0250
+2026-06-20 12:20:44,754 [INFO]   [PNA-α] 选用方案E(分段temporal修正v4): score=0.0000, α_eff=0.000500
+2026-06-20 12:20:44,754 [INFO]   [PNA-α 对比] A=0.005572 | B=0.003190 | C=0.003740 | E(选用)=0.000500 | F=0.000500 | D(TSR)=0.003635(TSR=0.5700) | 经验=0.000800
+2026-06-20 12:20:44,755 [INFO]   [Blend] α=0.0005 (√α=0.0224), β=0.0000 (√β=0.0000), η_temporal std=0.3691, η_mixed std=1.0000, mean=-0.0003
+2026-06-20 12:20:44,755 [INFO]   [Blend Diag] cos(temporal, random)=-0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0077
+2026-06-20 12:20:44,756 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.008374 (越大越说明 temporal 有影响)
+2026-06-20 12:20:44,756 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:20:44,756 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-20 12:20:44,756 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:20:44,756 [INFO]   [FI-α Coupling] α_eff=0.000500, α_ref=0.0040
+2026-06-20 12:20:44,756 [INFO]   [FI-α Coupling 选用] 反向(互补): scale=2.0000 (λ_max: 0.0500→0.1000)
+2026-06-20 12:20:44,756 [INFO]   [FI-α Coupling 对比] 正向(同向): scale=0.1250 (λ_max: 0.0500→0.0063) | 无Coupling: scale=1.0000 (λ_max: 0.0500)
+2026-06-20 12:20:44,756 [INFO]   [FI-α 多方案 Coupling 诊断] (反向=α_ref/α, 正向=α/α_ref) 经验参考: α_hint=0.0008
+2026-06-20 12:20:44,756 [INFO]     方案A: α=0.005572(偏差=+0.0048) → 反向scale=0.718 λ_eff=0.0359 | 正向scale=1.393 λ_eff=0.0697 | 经验λ_eff≈0.1500
+2026-06-20 12:20:44,756 [INFO]     方案B: α=0.003190(偏差=+0.0024) → 反向scale=1.254 λ_eff=0.0627 | 正向scale=0.797 λ_eff=0.0399 | 经验λ_eff≈0.1500
+2026-06-20 12:20:44,756 [INFO]     方案C: α=0.003740(偏差=+0.0029) → 反向scale=1.070 λ_eff=0.0535 | 正向scale=0.935 λ_eff=0.0467 | 经验λ_eff≈0.1500
+2026-06-20 12:20:44,756 [INFO]     方案E: α=0.000500(偏差=-0.0003) → 反向scale=3.000 λ_eff=0.1500 | 正向scale=0.125 λ_eff=0.0063 | 经验λ_eff≈0.1500
+2026-06-20 12:20:44,756 [INFO]     方案F: α=0.000500(偏差=-0.0003) → 反向scale=3.000 λ_eff=0.1500 | 正向scale=0.125 λ_eff=0.0063 | 经验λ_eff≈0.1500
+2026-06-20 12:20:44,756 [INFO]   [Schedule] type=middle_peak, max=0.1, steps=30, first 5: ['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5: ['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:20:44,758 [INFO]   [Quality Scale] mean_cos=0.0952, threshold=0.05, scale=0.7407 (strong)
+2026-06-20 12:20:44,758 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.7407, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-20 12:20:44,758 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|██████████████████▊                                                                           | 6/30 [00:23<01:34,  3.95s/it]2026-06-20 12:21:09,182 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5664, gate=0.4177, λ=0.03819→0.01595
+2026-06-20 12:21:11,100 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.5586, gate=0.4273, λ=0.03819→0.01632
+ 37%|██████████████████████████████████                                                           | 11/30 [00:44<01:18,  4.13s/it]2026-06-20 12:21:30,012 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6172, gate=0.3576, λ=0.06544→0.02340
+2026-06-20 12:21:31,929 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6094, gate=0.3666, λ=0.06544→0.02399
+ 53%|█████████████████████████████████████████████████▌                                           | 16/30 [01:05<00:58,  4.16s/it]2026-06-20 12:21:50,808 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6641, gate=0.3057, λ=0.07396→0.02261
+2026-06-20 12:21:52,726 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6562, gate=0.3141, λ=0.07396→0.02323
+ 70%|█████████████████████████████████████████████████████████████████                            | 21/30 [01:25<00:37,  4.13s/it]2026-06-20 12:22:11,509 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.7031, gate=0.2659, λ=0.06130→0.01630
+2026-06-20 12:22:13,426 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6953, gate=0.2736, λ=0.06130→0.01677
+ 87%|████████████████████████████████████████████████████████████████████████████████▌            | 26/30 [01:46<00:16,  4.11s/it]2026-06-20 12:22:32,052 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7539, gate=0.2193, λ=0.03110→0.00682
+2026-06-20 12:22:33,970 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7539, gate=0.2193, λ=0.03110→0.00682
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:02<00:00,  4.10s/it]
+2026-06-20 12:22:51,300 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:22:51,301 [INFO]   [FI] 生成完成总结
+2026-06-20 12:22:51,301 [INFO]     λ schedule: first 5=['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5=['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:22:51,301 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-20 12:22:53,792 [INFO] [P-Flow] Done in 252.3s → outputs/PNA_v4_piecewiseE_5samples/sample_80/80.mp4
+2026-06-20 12:22:53,793 [INFO]   [SAMPLE SUMMARY] sample_id=80
+2026-06-20 12:22:53,793 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a close-up view of a dandelion seed head, showcasing its intricate structure and delicate white seeds. The camera remains stationary throughout the sequence, focusing on the central part of the seed head where the seeds are attached to thin, feathery stems. The background is a dark green, which contrasts sharply with the light color of the seeds, making them stand out prominently. The lighting highlights the texture and fine details of the seeds, giving a sense of depth and dimension to the image. There is no movement or action other than the subtle changes in focus that slightly alter the clarity and sharpness of the seeds as the camera adjusts its focus.
+2026-06-20 12:22:53,793 [INFO]   [SAMPLE SUMMARY] caption_length=683 chars, word_count=115
+2026-06-20 12:22:53,793 [INFO]   [SAMPLE SUMMARY] elapsed=252.3s, output=outputs/PNA_v4_piecewiseE_5samples/sample_80/80.mp4
+  [5/5] 处理 111...
+2026-06-20 12:22:55,358 [INFO]   [M_d] sample=111, M_d=1.00
+2026-06-20 12:22:55,358 [INFO] [P-Flow] sample=111, flags=['inversion', 'svd', 'blend(α=[0.0~0.006], TSR-guided)', 'feature_inject(λ=0.05, layers=mid, sched=middle_peak, mode=attention, adaptive(temp=5.0))']
+2026-06-20 12:22:57,672 [INFO]   [Inversion] encoding reference → latent...
+2026-06-20 12:22:59,998 [INFO]   [Inversion] euler (1st-order) + trajectory caching...
+2026-06-20 12:22:59,999 [INFO]   [FI Inline] 反演时同时缓存 FI 特征: 10 layers, gen_steps=30
+2026-06-20 12:22:59,999 [INFO]   [Inversion+Trajectory] Starting: steps=50, cache_every_n=1, latent_shape=[1, 16, 21, 60, 104], estimated_cache_size=51 points
+Inversion + Trajectory:  18%|████████████▌                                                         | 9/50 [00:21<01:39,  2.43s/it]2026-06-20 12:23:23,511 [INFO]     [Inversion+Traj step 10/50] t=0.800, x_t: mean=-0.0070, std=0.4355, cached=11 points
+Inversion + Trajectory:  38%|██████████████████████████▏                                          | 19/50 [00:44<01:11,  2.32s/it]2026-06-20 12:23:46,807 [INFO]     [Inversion+Traj step 20/50] t=0.600, x_t: mean=-0.0103, std=0.5391, cached=21 points
+Inversion + Trajectory:  58%|████████████████████████████████████████                             | 29/50 [01:07<00:48,  2.30s/it]2026-06-20 12:24:09,754 [INFO]     [Inversion+Traj step 30/50] t=0.400, x_t: mean=-0.0150, std=0.6680, cached=31 points
+Inversion + Trajectory:  78%|█████████████████████████████████████████████████████▊               | 39/50 [01:30<00:24,  2.27s/it]2026-06-20 12:24:32,693 [INFO]     [Inversion+Traj step 40/50] t=0.200, x_t: mean=-0.0214, std=0.8242, cached=41 points
+Inversion + Trajectory:  98%|███████████████████████████████████████████████████████████████████▌ | 49/50 [01:53<00:02,  2.31s/it]2026-06-20 12:24:55,713 [INFO]     [Inversion+Traj step 50/50] t=0.000, x_t: mean=-0.0294, std=1.0156, cached=51 points
+2026-06-20 12:24:55,714 [INFO]   [Inversion+Trajectory] Done: 51 points cached, final x_0: mean=-0.0294, std=1.0156               
+2026-06-20 12:24:55,714 [INFO]   [FI Inline] 特征缓存完成: 30 steps × 10 layers = 300 tensors
+2026-06-20 12:24:55,720 [INFO]   [Inversion Quality] η_inv: std=1.0156, mean=-0.0294, range=[-3.453, 3.547], cos_sim(η_inv, random)=-0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-20 12:24:55,721 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-20 12:24:55,733 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-20 12:24:55,737 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-20 12:24:55,742 [INFO]   [TSR] TCR=0.2506, TAC=0.3042, TSR=0.2490
+2026-06-20 12:24:55,742 [INFO]   η_temporal: mean=-0.0004, std=0.3398
+2026-06-20 12:24:55,748 [INFO]   [FI] ✅ 复用反演缓存的轨迹 (51 points), 无需二次反演
+2026-06-20 12:24:55,748 [INFO]   [FI] ✅ 复用反演时 inline 缓存的特征 (30 steps)
+2026-06-20 12:24:55,748 [INFO]   [Noise Decision Summary] feature_inject=ACTIVE, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-20 12:24:55,748 [INFO]   iter 1/1: The video captures an aerial view of a lush, dense forest te...
+2026-06-20 12:24:59,529 [INFO]   [PNA] probe_t=0.95, α_test=0.004, layer=15, relative_impact=0.014717, cos_consistency=-0.0015, pna_raw=0.007347
+2026-06-20 12:24:59,530 [INFO]   [PNA 新指标] frame_consistency=0.0000, prompt_alignment=-0.0159, temporal_frame_cos=0.3041
+2026-06-20 12:24:59,530 [INFO]   [PNA 场景推断] mean_cos=0.3041 → 静态/航拍场景(α≈0.0005~0.001,λ≈0.02~0.03)
+2026-06-20 12:24:59,530 [INFO]   [PNA 映射对比] α_range=[0.0005, 0.006], α_ref=0.004, λ_max=0.05
+2026-06-20 12:24:59,530 [INFO]   [PNA-A] sigmoid(k=500,x0=0.003): score=0.8978 → α=0.005438 | couple+scale=1.360 λ_eff=0.0680 | couple-scale=0.736 λ_eff=0.0368
+2026-06-20 12:24:59,530 [INFO]   [PNA-B] sigmoid(k=800,x0=0.008): score=0.3723 → α=0.002548 | couple+scale=0.637 λ_eff=0.0318 | couple-scale=1.570 λ_eff=0.0785
+2026-06-20 12:24:59,530 [INFO]   [PNA-C] linear(0.005~0.01):    score=0.4694 → α=0.003082 | couple+scale=0.770 λ_eff=0.0385 | couple-scale=1.298 λ_eff=0.0649
+2026-06-20 12:24:59,530 [INFO]   [PNA-E] 分段temporal修正(v4): score=0.0000 → α=0.000500 | 0.20≤cos<0.50→静态(mod=0.10) | pna_raw_E=0.001472 | couple+scale=0.125 λ_eff=0.0063 | couple-scale=2.000 λ_eff=0.1000
+2026-06-20 12:24:59,530 [INFO]   [PNA-F] 分段temporal修正(v4): score=0.0000 → α=0.000500 | 0.30≤cos<0.60→静态(mod=0.07) | pna_raw_F=0.001030 | couple+scale=0.125 λ_eff=0.0063 | couple-scale=2.000 λ_eff=0.1000
+2026-06-20 12:24:59,530 [INFO]   [PNA 经验参考] 场景建议 α≈0.0008, λ≈0.0250
+2026-06-20 12:24:59,530 [INFO]   [PNA 方案与经验α的偏差] A:|+0.0046| B:|+0.0017| C:|+0.0023| E:|-0.0003| F:|-0.0003| → 越接近0越好
+2026-06-20 12:24:59,530 [INFO]   [PNA 最佳方案] E(偏差最小=0.0003) vs 选用E(偏差=0.0003) ✓ 一致
+2026-06-20 12:24:59,530 [INFO]   [PNA λ_eff 对比(反向Coupling)] A:λ=0.0368 | B:λ=0.0785 | C:λ=0.0649 | E(选用):λ=0.1000 | F:λ=0.1000 | 经验:λ≈0.0250
+2026-06-20 12:24:59,530 [INFO]   [PNA-α] 选用方案E(分段temporal修正v4): score=0.0000, α_eff=0.000500
+2026-06-20 12:24:59,530 [INFO]   [PNA-α 对比] A=0.005438 | B=0.002548 | C=0.003082 | E(选用)=0.000500 | F=0.000500 | D(TSR)=0.001869(TSR=0.2490) | 经验=0.000800
+2026-06-20 12:24:59,531 [INFO]   [Blend] α=0.0005 (√α=0.0224), β=0.0000 (√β=0.0000), η_temporal std=0.3398, η_mixed std=1.0000, mean=-0.0008
+2026-06-20 12:24:59,531 [INFO]   [Blend Diag] cos(temporal, random)=-0.0006, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0070
+2026-06-20 12:24:59,531 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.007726 (越大越说明 temporal 有影响)
+2026-06-20 12:24:59,531 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:24:59,531 [INFO]   [FI] 开始 Feature Injection 生成
+2026-06-20 12:24:59,531 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:24:59,531 [INFO]   [FI-α Coupling] α_eff=0.000500, α_ref=0.0040
+2026-06-20 12:24:59,532 [INFO]   [FI-α Coupling 选用] 反向(互补): scale=2.0000 (λ_max: 0.0500→0.1000)
+2026-06-20 12:24:59,532 [INFO]   [FI-α Coupling 对比] 正向(同向): scale=0.1250 (λ_max: 0.0500→0.0063) | 无Coupling: scale=1.0000 (λ_max: 0.0500)
+2026-06-20 12:24:59,532 [INFO]   [FI-α 多方案 Coupling 诊断] (反向=α_ref/α, 正向=α/α_ref) 经验参考: α_hint=0.0008
+2026-06-20 12:24:59,532 [INFO]     方案A: α=0.005438(偏差=+0.0046) → 反向scale=0.736 λ_eff=0.0368 | 正向scale=1.360 λ_eff=0.0680 | 经验λ_eff≈0.1500
+2026-06-20 12:24:59,532 [INFO]     方案B: α=0.002548(偏差=+0.0017) → 反向scale=1.570 λ_eff=0.0785 | 正向scale=0.637 λ_eff=0.0318 | 经验λ_eff≈0.1500
+2026-06-20 12:24:59,532 [INFO]     方案C: α=0.003082(偏差=+0.0023) → 反向scale=1.298 λ_eff=0.0649 | 正向scale=0.770 λ_eff=0.0385 | 经验λ_eff≈0.1500
+2026-06-20 12:24:59,532 [INFO]     方案E: α=0.000500(偏差=-0.0003) → 反向scale=3.000 λ_eff=0.1500 | 正向scale=0.125 λ_eff=0.0063 | 经验λ_eff≈0.1500
+2026-06-20 12:24:59,532 [INFO]     方案F: α=0.000500(偏差=-0.0003) → 反向scale=3.000 λ_eff=0.1500 | 正向scale=0.125 λ_eff=0.0063 | 经验λ_eff≈0.1500
+2026-06-20 12:24:59,532 [INFO]   [Schedule] type=middle_peak, max=0.1, steps=30, first 5: ['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5: ['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:24:59,534 [INFO]   [Quality Scale] mean_cos=0.0670, threshold=0.05, scale=0.6260 (weak)
+2026-06-20 12:24:59,534 [INFO]   [FI] λ_max=0.05, schedule=middle_peak, quality_scale=0.6260, layers=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19], cache_mode=attention
+2026-06-20 12:24:59,534 [INFO]   [FI] 自适应门控: ON, temp=5.0 (特征越接近参考→注入越少)
+ 20%|██████████████████▊                                                                           | 6/30 [00:25<01:40,  4.17s/it]2026-06-20 12:25:25,386 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6211, gate=0.3531, λ=0.03227→0.01139
+2026-06-20 12:25:27,302 [DEBUG]       [FI Adaptive] step=5, layer=10, cos=0.6094, gate=0.3666, λ=0.03227→0.01183
+ 37%|██████████████████████████████████                                                           | 11/30 [00:46<01:21,  4.29s/it]2026-06-20 12:25:46,676 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6445, gate=0.3268, λ=0.05530→0.01807
+2026-06-20 12:25:48,592 [DEBUG]       [FI Adaptive] step=10, layer=10, cos=0.6406, gate=0.3311, λ=0.05530→0.01831
+ 53%|█████████████████████████████████████████████████▌                                           | 16/30 [01:07<00:58,  4.17s/it]2026-06-20 12:26:07,396 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6680, gate=0.3016, λ=0.06250→0.01885
+2026-06-20 12:26:09,313 [DEBUG]       [FI Adaptive] step=15, layer=10, cos=0.6602, gate=0.3099, λ=0.06250→0.01937
+ 70%|█████████████████████████████████████████████████████████████████                            | 21/30 [01:27<00:37,  4.16s/it]2026-06-20 12:26:28,174 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6875, gate=0.2814, λ=0.05181→0.01458
+2026-06-20 12:26:30,090 [DEBUG]       [FI Adaptive] step=20, layer=10, cos=0.6836, gate=0.2854, λ=0.05181→0.01478
+ 87%|████████████████████████████████████████████████████████████████████████████████▌            | 26/30 [01:48<00:16,  4.16s/it]2026-06-20 12:26:48,955 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7266, gate=0.2436, λ=0.02628→0.00640
+2026-06-20 12:26:50,871 [DEBUG]       [FI Adaptive] step=25, layer=10, cos=0.7227, gate=0.2473, λ=0.02628→0.00650
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [02:05<00:00,  4.20s/it]
+2026-06-20 12:27:09,012 [INFO]   ═══════════════════════════════════════════════
+2026-06-20 12:27:09,012 [INFO]   [FI] 生成完成总结
+2026-06-20 12:27:09,012 [INFO]     λ schedule: first 5=['0.0000', '0.0108', '0.0215', '0.0319', '0.0420'], last 5=['0.0420', '0.0319', '0.0215', '0.0108', '0.0000']
+2026-06-20 12:27:09,013 [INFO]   ═══════════════════════════════════════════════
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-20 12:27:11,463 [INFO] [P-Flow] Done in 256.1s → outputs/PNA_v4_piecewiseE_5samples/sample_111/111.mp4
+2026-06-20 12:27:11,464 [INFO]   [SAMPLE SUMMARY] sample_id=111
+2026-06-20 12:27:11,464 [INFO]   [SAMPLE SUMMARY] full_caption=The video captures an aerial view of a lush, dense forest teeming with greenery. The sunlight filters through the canopy, casting dappled shadows on the ground below and creating a vibrant interplay of light and dark. At the center of the frames, a drone is seen flying low over the treetops. The drone appears to be equipped with a camera or sensor, suggesting it might be used for surveillance, mapping, or capturing aerial footage. The surrounding environment is rich with various types of trees, including palm trees, indicating a tropical or subtropical setting. The overall atmosphere is serene and natural, emphasizing the beauty and complexity of the forest ecosystem.
+2026-06-20 12:27:11,464 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=109
+2026-06-20 12:27:11,464 [INFO]   [SAMPLE SUMMARY] elapsed=256.1s, output=outputs/PNA_v4_piecewiseE_5samples/sample_111/111.mp4
+
+批量完成! 输出: outputs/PNA_v4_piecewiseE_5samples
+Found 5 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/5] 32 CLIP(o-t=0.3908, g-t=0.4113, o-g=0.9242) XCLIP(o-t=0.2908, g-t=0.3149, o-g=0.8358)
+[2/5] 50 CLIP(o-t=0.3724, g-t=0.3883, o-g=0.9202) XCLIP(o-t=0.3174, g-t=0.3038, o-g=0.8211)
+[3/5] 73 CLIP(o-t=0.3428, g-t=0.3877, o-g=0.8883) XCLIP(o-t=0.1975, g-t=0.2059, o-g=0.5968)
+[4/5] 80 CLIP(o-t=0.3603, g-t=0.3416, o-g=0.9004) XCLIP(o-t=0.2262, g-t=0.1318, o-g=0.7163)
+[5/5] 111 CLIP(o-t=0.3624, g-t=0.3670, o-g=0.9080) XCLIP(o-t=0.2802, g-t=0.2993, o-g=0.7779)
+
+Evaluation complete!
+  Samples: 5
+  orig_gen_clip mean:  0.908220
+  orig_gen_xclip mean: 0.749583
+  CSV: outputs/PNA_v4_piecewiseE_5samples/eval_clip/clip_xclip_results.csv
+  Summary: outputs/PNA_v4_piecewiseE_5samples/eval_clip/eval_summary.md
+root@autodl-container-a4d74c9dd1-31db82ab:~/xixihaha/P-Flow# 

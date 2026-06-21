@@ -1,0 +1,175 @@
+root@autodl-container-a4d74c9dd1-31db82ab:~/xixihaha/P-Flow# cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/SVD_only_default_5samples \
+    --sample_ids 32 50 73 80 111 \
+    --inversion --svd --blend \
+    --alpha 0.004 \
+    --seed 42 --verbose
+
+cd /root/xixihaha/P-Flow && OMP_NUM_THREADS=4 python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/SVD_only_default_5samples \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/SVD_only_default_5samples/eval_clip
+2026-06-21 01:32:54,667 [INFO] 日志将保存到: /root/xixihaha/P-Flow/outputs/SVD_only_default_5samples/run_log.txt
+P-Flow | pflow_inversion_svd_blend
+  Flags: ['inversion', 'svd', 'blend(α=0.004)']
+  alpha=0.004, rho_s=0.1, rho_m=0.9
+
+2026-06-21 01:32:54,684 [INFO] GPU: NVIDIA A800 80GB PCIe (79.3 GB)
+找到 5 个样本
+实验: pflow_inversion_svd_blend
+Flags: ['inversion', 'svd', 'blend(α=0.004)']
+
+  [1/5] 处理 32...
+2026-06-21 01:32:54,685 [INFO]   [M_d] sample=32, M_d=1.00
+2026-06-21 01:32:54,685 [INFO] [P-Flow] sample=32, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-21 01:32:56,697 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 01:32:56,907 [INFO] Loading Wan 2.1-1.3B (t2v) from: models/Wan2.1-T2V-1.3B-Diffusers
+2026-06-21 01:32:56,907 [INFO]   Mode: single GPU (full model on VRAM), dtype=torch.bfloat16
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  8.12it/s]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:01<00:00,  3.52it/s]
+Loading pipeline components...: 100%|███████████████████████████████████████████████████████████████| 5/5 [00:02<00:00,  2.04it/s]
+2026-06-21 01:33:05,033 [INFO]   Model loaded to GPU (no CPU offload needed for 1.3B)
+2026-06-21 01:33:05,033 [INFO]   GPU 0: 14.2GB allocated, 14.5GB reserved
+2026-06-21 01:33:07,556 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 01:34:40,995 [INFO]   [Inversion Quality] η_inv: std=1.0938, mean=0.1543, range=[-3.562, 3.547], cos_sim(η_inv, random)=-0.0007, cos_sim(η_inv, z0)=0.9805
+2026-06-21 01:34:40,995 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 01:34:41,080 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-21 01:34:41,090 [DEBUG]   [Stage2] Temporal: kept top-7/21 components
+2026-06-21 01:34:41,091 [INFO]   η_temporal: mean=0.0002, std=0.3633
+2026-06-21 01:34:41,091 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 01:34:41,091 [INFO]   iter 1/1: The video features two adorable golden retriever puppies pla...
+2026-06-21 01:34:41,092 [INFO]   [Blend] α=0.0040 (√α=0.0632), β=0.0000 (√β=0.0000), η_temporal std=0.3633, η_mixed std=0.9961, mean=-0.0014
+2026-06-21 01:34:41,092 [INFO]   [Blend Diag] cos(temporal, random)=-0.0015, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0217
+2026-06-21 01:34:41,092 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.023826 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.78s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 01:36:39,762 [INFO] [P-Flow] Done in 225.1s → outputs/SVD_only_default_5samples/sample_32/32.mp4
+2026-06-21 01:36:39,762 [INFO]   [SAMPLE SUMMARY] sample_id=32
+2026-06-21 01:36:39,762 [INFO]   [SAMPLE SUMMARY] full_caption=The video features two adorable golden retriever puppies playing joyfully in a snowy landscape. The scene is set during what appears to be late afternoon, as indicated by the warm, soft light casting long shadows on the snow. The puppies are covered in fluffy, golden fur and are energetically moving through the snow, their paws kicking up small clouds of snow as they play. Their tails are wagging, and their expressions convey a sense of excitement and happiness. The background shows a serene winter setting with snow-covered ground and bare trees, adding to the picturesque and cozy atmosphere of the video.
+2026-06-21 01:36:39,762 [INFO]   [SAMPLE SUMMARY] caption_length=612 chars, word_count=101
+2026-06-21 01:36:39,762 [INFO]   [SAMPLE SUMMARY] elapsed=225.1s, output=outputs/SVD_only_default_5samples/sample_32/32.mp4
+  [2/5] 处理 50...
+2026-06-21 01:36:39,764 [INFO]   [M_d] sample=50, M_d=1.00
+2026-06-21 01:36:39,764 [INFO] [P-Flow] sample=50, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-21 01:36:41,738 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 01:36:44,072 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 01:38:18,470 [INFO]   [Inversion Quality] η_inv: std=1.0781, mean=0.0078, range=[-3.703, 4.156], cos_sim(η_inv, random)=0.0003, cos_sim(η_inv, z0)=0.9805
+2026-06-21 01:38:18,470 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 01:38:18,484 [DEBUG]   [Stage1] Spatial: removed top-25 components
+2026-06-21 01:38:18,489 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 01:38:18,489 [INFO]   η_temporal: mean=-0.0004, std=0.3809
+2026-06-21 01:38:18,492 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 01:38:18,493 [INFO]   iter 1/1: The video features a white cat sitting inside the passenger ...
+2026-06-21 01:38:18,493 [INFO]   [Blend] α=0.0040 (√α=0.0632), β=0.0000 (√β=0.0000), η_temporal std=0.3809, η_mixed std=0.9961, mean=0.0000
+2026-06-21 01:38:18,494 [INFO]   [Blend Diag] cos(temporal, random)=0.0007, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0249
+2026-06-21 01:38:18,494 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024862 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 01:40:17,422 [INFO] [P-Flow] Done in 217.7s → outputs/SVD_only_default_5samples/sample_50/50.mp4
+2026-06-21 01:40:17,422 [INFO]   [SAMPLE SUMMARY] sample_id=50
+2026-06-21 01:40:17,422 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a white cat sitting inside the passenger seat of a car with the window open. The cat is wearing a blue collar and appears to be looking out of the window, observing the surroundings. The background shows a busy urban street with people walking by, some holding umbrellas, suggesting it might be a rainy day. The setting includes buildings with storefronts and signs, adding to the city atmosphere. The cat's expression seems calm and curious as it gazes outside.
+2026-06-21 01:40:17,422 [INFO]   [SAMPLE SUMMARY] caption_length=481 chars, word_count=82
+2026-06-21 01:40:17,422 [INFO]   [SAMPLE SUMMARY] elapsed=217.7s, output=outputs/SVD_only_default_5samples/sample_50/50.mp4
+  [3/5] 处理 73...
+2026-06-21 01:40:17,424 [INFO]   [M_d] sample=73, M_d=1.00
+2026-06-21 01:40:17,424 [INFO] [P-Flow] sample=73, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-21 01:40:19,449 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 01:40:21,786 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 01:41:56,227 [INFO]   [Inversion Quality] η_inv: std=0.8984, mean=0.0447, range=[-3.766, 3.281], cos_sim(η_inv, random)=-0.0003, cos_sim(η_inv, z0)=0.9727
+2026-06-21 01:41:56,227 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 01:41:56,240 [DEBUG]   [Stage1] Spatial: removed top-15 components
+2026-06-21 01:41:56,245 [DEBUG]   [Stage2] Temporal: kept top-16/21 components
+2026-06-21 01:41:56,245 [INFO]   η_temporal: mean=0.0006, std=0.3105
+2026-06-21 01:41:56,249 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 01:41:56,249 [INFO]   iter 1/1: The video depicts an expansive, empty warehouse with high ce...
+2026-06-21 01:41:56,249 [INFO]   [Blend] α=0.0040 (√α=0.0632), β=0.0000 (√β=0.0000), η_temporal std=0.3105, η_mixed std=0.9961, mean=0.0005
+2026-06-21 01:41:56,250 [INFO]   [Blend Diag] cos(temporal, random)=0.0008, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0206
+2026-06-21 01:41:56,250 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.020632 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.78s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 01:43:55,144 [INFO] [P-Flow] Done in 217.7s → outputs/SVD_only_default_5samples/sample_73/73.mp4
+2026-06-21 01:43:55,144 [INFO]   [SAMPLE SUMMARY] sample_id=73
+2026-06-21 01:43:55,144 [INFO]   [SAMPLE SUMMARY] full_caption=The video depicts an expansive, empty warehouse with high ceilings and large windows allowing natural light to flood in. The floor is clean and marked with yellow lines, suggesting it might be used for storage or industrial purposes. As the camera moves forward, the focus shifts from the empty space to a vibrant, lush garden that gradually fills the center of the frame. The garden is teeming with a variety of green plants, flowers, and foliage, creating a stark contrast against the industrial backdrop. The plants appear healthy and well-maintained, adding a touch of nature and tranquility to the otherwise stark environment. The transition from the barren warehouse to the thriving garden symbolizes growth, transformation, or the potential for nature to reclaim even the most urban spaces.
+2026-06-21 01:43:55,144 [INFO]   [SAMPLE SUMMARY] caption_length=797 chars, word_count=127
+2026-06-21 01:43:55,145 [INFO]   [SAMPLE SUMMARY] elapsed=217.7s, output=outputs/SVD_only_default_5samples/sample_73/73.mp4
+  [4/5] 处理 80...
+2026-06-21 01:43:55,146 [INFO]   [M_d] sample=80, M_d=1.00
+2026-06-21 01:43:55,146 [INFO] [P-Flow] sample=80, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-21 01:43:57,152 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 01:43:59,482 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 01:45:33,886 [INFO]   [Inversion Quality] η_inv: std=1.1250, mean=0.0386, range=[-4.656, 4.156], cos_sim(η_inv, random)=0.0013, cos_sim(η_inv, z0)=0.9805
+2026-06-21 01:45:33,887 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 01:45:33,900 [DEBUG]   [Stage1] Spatial: removed top-6 components
+2026-06-21 01:45:33,905 [DEBUG]   [Stage2] Temporal: kept top-17/21 components
+2026-06-21 01:45:33,905 [INFO]   η_temporal: mean=-0.0004, std=0.3691
+2026-06-21 01:45:33,908 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 01:45:33,908 [INFO]   iter 1/1: The video features a close-up view of a dandelion seed head,...
+2026-06-21 01:45:33,909 [INFO]   [Blend] α=0.0040 (√α=0.0632), β=0.0000 (√β=0.0000), η_temporal std=0.3691, η_mixed std=0.9961, mean=-0.0003
+2026-06-21 01:45:33,909 [INFO]   [Blend Diag] cos(temporal, random)=-0.0005, cos(mixed, random)=1.0000, cos(mixed, temporal)=0.0231
+2026-06-21 01:45:33,910 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.024171 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 01:47:32,888 [INFO] [P-Flow] Done in 217.7s → outputs/SVD_only_default_5samples/sample_80/80.mp4
+2026-06-21 01:47:32,888 [INFO]   [SAMPLE SUMMARY] sample_id=80
+2026-06-21 01:47:32,888 [INFO]   [SAMPLE SUMMARY] full_caption=The video features a close-up view of a dandelion seed head, showcasing its intricate structure and delicate white seeds. The camera remains stationary throughout the sequence, focusing on the central part of the seed head where the seeds are attached to thin, feathery stems. The background is a dark green, which contrasts sharply with the light color of the seeds, making them stand out prominently. The lighting highlights the texture and fine details of the seeds, giving a sense of depth and dimension to the image. There is no movement or action other than the subtle changes in focus that slightly alter the clarity and sharpness of the seeds as the camera adjusts its focus.
+2026-06-21 01:47:32,888 [INFO]   [SAMPLE SUMMARY] caption_length=683 chars, word_count=115
+2026-06-21 01:47:32,889 [INFO]   [SAMPLE SUMMARY] elapsed=217.7s, output=outputs/SVD_only_default_5samples/sample_80/80.mp4
+  [5/5] 处理 111...
+2026-06-21 01:47:32,889 [INFO]   [M_d] sample=111, M_d=1.00
+2026-06-21 01:47:32,890 [INFO] [P-Flow] sample=111, flags=['inversion', 'svd', 'blend(α=0.004)']
+2026-06-21 01:47:34,906 [INFO]   [Inversion] encoding reference → latent...
+2026-06-21 01:47:37,237 [INFO]   [Inversion] euler (1st-order)...
+2026-06-21 01:49:11,598 [INFO]   [Inversion Quality] η_inv: std=1.0156, mean=-0.0294, range=[-3.453, 3.547], cos_sim(η_inv, random)=-0.0001, cos_sim(η_inv, z0)=0.9766
+2026-06-21 01:49:11,598 [INFO]   [SVD] ρ_s=0.1, ρ_m=0.9
+2026-06-21 01:49:11,611 [DEBUG]   [Stage1] Spatial: removed top-8 components
+2026-06-21 01:49:11,615 [DEBUG]   [Stage2] Temporal: kept top-12/21 components
+2026-06-21 01:49:11,616 [INFO]   η_temporal: mean=-0.0004, std=0.3398
+2026-06-21 01:49:11,619 [INFO]   [Noise Decision Summary] feature_inject=OFF, svd_blend=ENABLED, eta_temporal=AVAILABLE, use_blend=True
+2026-06-21 01:49:11,619 [INFO]   iter 1/1: The video captures an aerial view of a lush, dense forest te...
+2026-06-21 01:49:11,619 [INFO]   [Blend] α=0.0040 (√α=0.0632), β=0.0000 (√β=0.0000), η_temporal std=0.3398, η_mixed std=0.9922, mean=-0.0008
+2026-06-21 01:49:11,620 [INFO]   [Blend Diag] cos(temporal, random)=-0.0006, cos(mixed, random)=0.9961, cos(mixed, temporal)=0.0211
+2026-06-21 01:49:11,620 [INFO]   [Blend Diag] direction_shift=‖η-η_rand‖/‖η_rand‖=0.022272 (越大越说明 temporal 有影响)
+100%|█████████████████████████████████████████████████████████████████████████████████████████████| 30/30 [01:53<00:00,  3.79s/it]
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+        - Avoid using `tokenizers` before the fork if possible
+        - Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+2026-06-21 01:51:10,490 [INFO] [P-Flow] Done in 217.6s → outputs/SVD_only_default_5samples/sample_111/111.mp4
+2026-06-21 01:51:10,490 [INFO]   [SAMPLE SUMMARY] sample_id=111
+2026-06-21 01:51:10,490 [INFO]   [SAMPLE SUMMARY] full_caption=The video captures an aerial view of a lush, dense forest teeming with greenery. The sunlight filters through the canopy, casting dappled shadows on the ground below and creating a vibrant interplay of light and dark. At the center of the frames, a drone is seen flying low over the treetops. The drone appears to be equipped with a camera or sensor, suggesting it might be used for surveillance, mapping, or capturing aerial footage. The surrounding environment is rich with various types of trees, including palm trees, indicating a tropical or subtropical setting. The overall atmosphere is serene and natural, emphasizing the beauty and complexity of the forest ecosystem.
+2026-06-21 01:51:10,490 [INFO]   [SAMPLE SUMMARY] caption_length=676 chars, word_count=109
+2026-06-21 01:51:10,490 [INFO]   [SAMPLE SUMMARY] elapsed=217.6s, output=outputs/SVD_only_default_5samples/sample_111/111.mp4
+
+批量完成! 输出: outputs/SVD_only_default_5samples
+Found 5 aligned samples for evaluation
+Loading CLIP model from: models/clip-vit-base-patch32
+Using a slow image processor as `use_fast` is unset and a slow processor was saved with this model. `use_fast=True` will be the default behavior in v4.52, even if the model was saved with a slow processor. This will result in minor differences in outputs. You'll still be able to use a slow processor with `use_fast=False`.
+Loading X-CLIP model from: models/xclip-base-patch32
+[1/5] 32 CLIP(o-t=0.3908, g-t=0.4057, o-g=0.9167) XCLIP(o-t=0.2908, g-t=0.3197, o-g=0.8221)
+[2/5] 50 CLIP(o-t=0.3724, g-t=0.3725, o-g=0.8982) XCLIP(o-t=0.3174, g-t=0.3104, o-g=0.8030)
+[3/5] 73 CLIP(o-t=0.3428, g-t=0.3896, o-g=0.8883) XCLIP(o-t=0.1975, g-t=0.1548, o-g=0.6245)
+[4/5] 80 CLIP(o-t=0.3603, g-t=0.3452, o-g=0.9250) XCLIP(o-t=0.2262, g-t=0.1289, o-g=0.6235)
+[5/5] 111 CLIP(o-t=0.3624, g-t=0.3791, o-g=0.9260) XCLIP(o-t=0.2802, g-t=0.3048, o-g=0.8512)
+
+Evaluation complete!
+  Samples: 5
+  orig_gen_clip mean:  0.910837
+  orig_gen_xclip mean: 0.744854
+  CSV: outputs/SVD_only_default_5samples/eval_clip/clip_xclip_results.csv
+  Summary: outputs/SVD_only_default_5samples/eval_clip/eval_summary.md
+root@autodl-container-a4d74c9dd1-31db82ab:~/xixihaha/P-Flow# 

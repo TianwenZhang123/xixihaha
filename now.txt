@@ -1,0 +1,184 @@
+对，需要验证。高斯映射是在5个 case 上拟合的，过拟合风险很大——5个点拟合4个参数（peak, center, sigma, floor），几乎必然过拟合。所以验证是必须的。
+
+让我先看看现有的 case 库，选一些有代表性的验证 case。
+
+现在让我看看现有的200个视频样本的元数据，了解有哪些 case 可以选来做验证。
+
+让我看看之前 v5.2 扫描中其他 case 的 temporal_frame_cos，以及看看有没有更多 PNA 探测过的样本。
+
+之前的实验都只有5个 case（32, 50, 73, 80, 111），没有其他样本的 mean_cos 数据。现在让我看看当前 pipeline 代码中的高斯映射相关的结构，为更新做准备。
+
+好的，我现在完全理解了代码结构。让我先实现高斯映射，然后讨论验证实验的设计。
+
+现在让我看看 CLI 参数解析的位置：
+
+我看到 `run.py` 里用的是 `--pna_scheme` 来选择方案。现在让我看看 run.py 是怎么把参数传到 `PFlowConfig` 的：
+
+好的，现在让我看看 `PFlowConfig` 中 `pna_scheme` 的使用方式：
+
+`pna_scheme` 在 `run.py` 里传入了但没有在 `pipeline.py` 中使用。让我看看完整的 `PFlowConfig` 有没有 `pna_scheme` 字段：
+
+好的，现在我清楚代码结构了。让我开始修改。核心改动：
+
+1. 将 `pna_cap` 和 `pna_power` 替换为高斯映射参数
+2. 修改 `_compute_pna_score` 中的映射逻辑
+3. 更新 `run.py` CLI
+
+现在修改 `_compute_pna_score` 中的核心映射逻辑：
+
+现在我要替换方案 G 的映射逻辑为高斯映射：
+
+现在更新 `run.py` 的 CLI 参数：
+
+现在更新 `run.py` 中传参到 `PFlowConfig` 的部分：
+
+现在让我检查一下还有没有引用旧的 `pna_cap` 或 `pna_power` 的地方：
+
+好的，旧参数已完全清理。现在让我检查一下 `_compute_pna_score` 的函数签名注释也需要更新：
+
+现在让我检查一下有没有其他地方引用了 `pna_scheme`：
+
+好的，让我也检查一下 `reproduce.sh` 脚本：
+
+好的，没有其他脚本需要更新。让我检查一下 linter：
+
+好的，代码改动已完成。现在来讨论验证实验的设计。
+
+---
+
+## 代码改动总结
+
+已将方案 G 的单调映射 `(1-cos)^power × cap` 替换为**高斯映射**：
+
+$$\alpha_{eff} = \alpha_{floor} + \alpha_{peak} \cdot \exp\left(-\frac{(cos - cos_{center})^2}{2\sigma^2}\right) \times impact\_scale$$
+
+**默认参数**：`center=0.41, σ=0.11, peak=0.006, floor=0.0004`
+
+**新增 CLI 参数**：`--pna_gauss_center`, `--pna_gauss_sigma`, `--pna_gauss_peak`, `--pna_gauss_floor`
+
+**保留的 PNA 探测机制**：relative_impact 仍用于可靠性缩放（0.5×~1.0×），裁剪到 `[alpha_min, alpha_max]`。
+
+---
+
+## 验证实验设计
+
+你说得对，5个点拟合4个参数，过拟合风险很高。验证实验需要解决两个问题：
+
+### 1. 选哪些验证 case？
+
+关键是要覆盖高斯映射的**不同区域**：
+
+| cos 区域 | 高斯映射预测 | 需要验证的 | 候选 case |
+|----------|------------|-----------|----------|
+| cos ≈ 0.1~0.2 (左尾) | α 极低 (≈0.0005) | 真的不需要注入吗？ | 需要找 cos≈0.1 的 case |
+| cos ≈ 0.3 (左坡) | α 中等 (≈0.004) | 和111一致？ | 需要找 cos≈0.3 的 case |
+| cos ≈ 0.4 (峰值) | α 最高 (≈0.006) | 真的需要高注入吗？ | 需要找 cos≈0.35~0.45 的 case |
+| cos ≈ 0.6 (右坡) | α 低 (≈0.001) | 中间过渡区 | 需要找 cos≈0.5~0.6 的 case |
+| cos ≈ 0.8+ (右尾) | α 极低 (≈0.0005) | 和80一致？ | 需要找 cos≈0.8 的 case |
+
+但问题是：**目前只有5个 case 的 mean_cos 数据**。新 case 需要先跑 PNA 探测才能知道 cos 值。
+
+### 2. 建议的实验流程
+
+**实验 A：先批量探测 cos 值**
+- 从200个视频中选10~15个新 case（不同类型：动物、场景、人物动作等）
+- 跑一遍 PNA 探测，得到每个 case 的 `temporal_frame_cos` 和 `relative_impact`
+- 从中挑出 cos 在 0.1, 0.3, 0.4, 0.6, 0.8 附近的有代表性的 case
+
+**实验 B：验证 case 的 α 扫描**
+- 对选出的验证 case，跑 SVD-only α 扫描（5个 α 值）
+- 比较扫描得到的最优 α 与高斯映射预测的 α 是否一致
+
+**实验 C：高斯映射 end-to-end**
+- 用高斯映射参数跑 SVD-only 5个验证 case
+- 对比固定 α=0.004 和高斯映射的 clip/xclip
+
+时间估算：
+- 实验 A：10~15 case × 1次生成 ≈ 40~60 min
+- 实验 B：5验证 case × 5 α ≈ 100 min
+- 实验 C：5 case × 1次 ≈ 20 min
+- **总计约 3 小时**
+
+你想怎么选 case？是先跑批量探测看 cos 分布再挑，还是你已经有特定的 case 想验证？
+
+从 `tag_classification_results.csv` 中找表现不好的 case——即 SVD+FI 相比 baseline 的 `delta_xclip` 为负的 case。
+
+从 CSV 数据直接读出：
+
+| Case | Tag | delta_xclip | delta_clip | 说明 |
+|------|-----|-------------|------------|------|
+| **47** | animal | **-0.032** | -0.012 | 动物，两项均变差 |
+| **76** | scene/cam | **-0.028** | -0.028 | 静态场景+镜头 |
+| **80** | scene/cam | **-0.101** | -0.018 | 蒲公英(已知问题case) |
+| **78** | scene | **-0.055** | -0.013 | 静态场景 |
+| **106** | scene | **-0.089** | -0.019 | 场景，XCLIP掉很多 |
+| **74** | unusual subject | **-0.018** | -0.021 | 两项均变差 |
+| **31** | unusual activity | **-0.053** | -0.060 | 两项均变差最大 |
+| **105** | scene/cam | **-0.071** | +0.019 | XCLIP掉很多 |
+
+选出这8个（排除 80 因为已经是训练 case），共7个新的表现差的 case：**47, 76, 78, 106, 74, 31, 105**。
+
+---
+
+**实验1：高斯映射 SVD+FI (PNA-Gauss) — 对表现差的case**
+
+```bash
+cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/Gauss_badcases \
+    --sample_ids 47 76 78 106 74 31 105 \
+    --inversion --svd --blend \
+    --adaptive_alpha --alpha_max 0.008 --alpha_min 0.0 \
+    --pna_probe --pna_probe_step 0.95 \
+    --pna_alpha_max 0.008 --pna_alpha_min 0.0005 \
+    --pna_gauss_center 0.41 --pna_gauss_sigma 0.11 \
+    --pna_gauss_peak 0.006 --pna_gauss_floor 0.0004 \
+    --feature_inject --fi_layers mid --fi_lambda 0.05 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
+    --seed 42 --verbose
+```
+
+```bash
+cd /root/xixihaha/P-Flow && OMP_NUM_THREADS=4 python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/Gauss_badcases \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/Gauss_badcases/eval_clip
+```
+
+---
+
+**实验2：Baseline SVD+FI 固定α=0.004 — 同样的case**
+
+```bash
+cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/Baseline_badcases \
+    --sample_ids 47 76 78 106 74 31 105 \
+    --inversion --svd --blend \
+    --alpha 0.004 \
+    --feature_inject --fi_layers mid --fi_lambda 0.05 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
+    --seed 42 --verbose
+```
+
+```bash
+cd /root/xixihaha/P-Flow && OMP_NUM_THREADS=4 python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/Baseline_badcases \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/Baseline_badcases/eval_clip
+```
+
+---
+
+**重点关注**：
+
+- **Case 76, 78, 106**：静态 scene 类，cos 预计 >0.6，高斯映射应当自动给极低 α（≈0.0004~0.001），理论上能修复 delta_xclip 为负的问题
+- **Case 31**：unusual activity，两项均为全样本最大跌幅（delta_clip=-0.06），看高斯映射能否回正
+- **Case 47**：动物但 SVD+FI 变差，cos 预计偏低（小动作或特殊场景），看高斯映射的左尾保护是否有效
+- **Case 105**：XCLIP 下跌 -0.071，cos 预计偏高，是高斯映射右坡的关键验证
+
+时间估算：**7 case × 2组 × ~4 min ≈ 56 min**，加评测约 1 小时。
