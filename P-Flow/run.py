@@ -70,10 +70,6 @@ def parse_args():
                    help="自适应 α 上限 (TSR=1 且 M_d=1 时 α_fusion 可达此值)")
     p.add_argument("--alpha_min", type=float, default=0.0,
                    help="自适应 α 下限 (TSR=0 时取此值, 0=完全关闭 SVD blend)")
-    p.add_argument("--tsr_tcr_center", type=float, default=0.1,
-                   help="TCR sigmoid 中心 (TCR < center → 低可靠性, 默认 0.1)")
-    p.add_argument("--tsr_tcr_slope", type=float, default=10.0,
-                   help="TCR sigmoid 斜率 (越大越陡峭, 默认 10.0)")
     p.add_argument("--beta", type=float, default=0.0,
                    help="外观分量混合权重 β (推荐 0.0~0.005, 需 α+β<1.0). "
                         "启用后将 SVD Stage 1 分离的外观/内容分量也注入混合噪声, "
@@ -202,8 +198,6 @@ def build_config(args) -> PFlowConfig:
         adaptive_alpha=args.adaptive_alpha,
         alpha_max=args.alpha_max,
         alpha_min=args.alpha_min,
-        tsr_tcr_center=args.tsr_tcr_center,
-        tsr_tcr_slope=args.tsr_tcr_slope,
         beta=args.beta,
         rho_s=args.rho_s,
         rho_m=args.rho_m,
