@@ -417,7 +417,11 @@ class PFlowPipeline:
             logger.info(f"  iter {i}/{num_iters}: {current_prompt[:60]}...")
 
             # 获取噪声
-            latents = self._get_latents(eta_temporal, generator, svd_stats=svd_stats)
+            latents = self._get_latents(
+                eta_temporal, generator,
+                svd_stats=svd_stats,
+                fi_ref_features=fi_ref_features,
+            )
 
             # 生成视频（FI / 标准）
             if cfg.feature_inject and fi_ref_features is not None:
@@ -600,6 +604,7 @@ class PFlowPipeline:
         eta_temporal: Optional[torch.Tensor],
         generator: torch.Generator,
         svd_stats: Optional[Dict[str, Any]] = None,
+        fi_ref_features: Optional[Dict[str, Any]] = None,
     ) -> Optional[torch.Tensor]:
         """
         L2: Noise Prior Blending
@@ -644,7 +649,8 @@ class PFlowPipeline:
                 prompt_embeds = getattr(cfg, '_current_prompt_embeds', None)
                 if prompt_embeds is not None:
                     alpha_eff = self._compute_pna_score(
-                        eta_temporal, prompt_embeds, generator
+                        eta_temporal, prompt_embeds, generator,
+                        fi_ref_features=fi_ref_features,
                     )
                     # _compute_pna_score 已计算 α_eff 并缓存到 cfg._current_alpha_eff
                     alpha = getattr(cfg, '_current_alpha_eff', cfg.alpha)
@@ -905,16 +911,19 @@ class PFlowPipeline:
         eta_temporal: torch.Tensor,
         prompt_embeds: torch.Tensor,
         generator: torch.Generator,
+        fi_ref_features: Optional[Dict[str, Any]] = None,
     ) -> float:
         """
         PNA (Prompt-Noise Alignment): 在线测量 η_temporal 方向对模型是否有利。
 
-        流程:
-            1. 混合噪声 vs 纯随机噪声 → 一步模型前向 → mid层特征差异
-            2. relative_impact = ‖delta_feat‖ / ‖feat_random‖
-            3. temporal_frame_cos = η_temporal 帧间余弦
-            4. 高斯映射: α = floor + peak * exp(-((cos-center)²/(2σ²)))
-            5. impact_scale 缩放: impact 越大 temporal 方向越可靠
+        诊断模式 (fi_ref_features 可用时):
+            1. 多个 α_test 试探注入, 算 delta_inject = feat_mixed - feat_random
+            2. 取参考特征 feat_ref (对应 t_probe 的 step_index)
+            3. align = cos(delta_inject, delta_ref), delta_ref = feat_ref - feat_random
+            4. align > 0 → 注入方向朝参考 → 有利; align < 0 → 远离参考 → 有害
+            5. 同时输出旧的 relative_impact / temporal_frame_cos 供对比
+
+        映射: 高斯映射 (保留兼容), 后续根据 align 设计新映射
         """
         cfg = self.config
         transformer = self.pipe.transformer
@@ -1013,6 +1022,125 @@ class PFlowPipeline:
                     ).item()
                     tc_list.append(tc)
                 temporal_frame_cos = sum(tc_list) / len(tc_list) if tc_list else 0.0
+
+        # ════════════════════════════════════════════════════════════════════
+        # 诊断模式: 多α试探 + align 指标 (需要 fi_ref_features)
+        # 目的: 获知 align = cos(delta_inject, delta_ref) 与最优注入量的关系
+        # ════════════════════════════════════════════════════════════════════
+        diag_align_info = {}
+        if fi_ref_features is not None and len(fi_ref_features) > 1:
+            # 找到 t_probe 对应的 step_index
+            # 生成: step_index 完成后 t = 1 - (step_index+1)/N
+            # t_probe=0.95 → step_index ≈ round((1-0.95)*N - 1) ≈ 0
+            num_steps_gen = fi_ref_features.get("_meta", {}).get("num_steps", 30)
+            probe_step_idx = max(0, min(num_steps_gen - 1,
+                                        int(round((1.0 - t_probe) * num_steps_gen - 1))))
+            step_features = fi_ref_features.get(probe_step_idx, {})
+            feat_ref = step_features.get(probe_layer, None)
+
+            if feat_ref is not None:
+                # feat_ref 在 CPU, 移到正确设备
+                feat_ref = feat_ref.to(device=feat_random.device, dtype=feat_random.dtype)
+                # 展平用于 cos 计算
+                fr_flat = feat_random.flatten()
+                fm_flat = feat_mixed.flatten()
+                fref_flat = feat_ref.flatten()
+
+                # delta_ref = feat_ref - feat_random (朝参考靠拢的方向)
+                delta_ref = fref_flat - fr_flat
+                # delta_inject (α_test=0.004) = feat_mixed - feat_random
+                delta_inject_004 = fm_flat - fr_flat
+
+                # align: 注入方向与"朝参考方向"的对齐度
+                align_004 = torch.nn.functional.cosine_similarity(
+                    delta_inject_004.unsqueeze(0), delta_ref.unsqueeze(0)
+                ).item()
+
+                # cos(feat_mixed, feat_ref) vs cos(feat_random, feat_ref)
+                # align_diff > 0 → 注入后更接近参考 → 有利
+                cos_mixed_ref = torch.nn.functional.cosine_similarity(
+                    fm_flat.unsqueeze(0), fref_flat.unsqueeze(0)
+                ).item()
+                cos_random_ref = torch.nn.functional.cosine_similarity(
+                    fr_flat.unsqueeze(0), fref_flat.unsqueeze(0)
+                ).item()
+                align_diff = cos_mixed_ref - cos_random_ref
+
+                # ── 多 α_test 试探: 验证 align 对不同α是否稳定 ──
+                # 对小α, delta_inject ≈ √α · J · η_temporal, 方向应几乎不变
+                # 注意: 此时 hook 已 remove, 需要重新注册
+                multi_alpha_results = []
+                handle2 = transformer.blocks[probe_layer].register_forward_hook(probe_hook)
+                try:
+                    for alpha_t in [0.001, 0.002, 0.004, 0.006, 0.008]:
+                        sa = math.sqrt(alpha_t)
+                        s1ma = math.sqrt(1.0 - alpha_t)
+                        eta_mixed_t = sa * eta_temporal + s1ma * eta_random
+                        captured.clear()
+                        _ = transformer(
+                            hidden_states=eta_mixed_t, timestep=t_tensor,
+                            encoder_hidden_states=prompt_embeds, return_dict=False,
+                        )
+                        feat_t = captured.get('feat')
+                        if feat_t is not None:
+                            ft_flat = feat_t.flatten()
+                            di = ft_flat - fr_flat
+                            a_t = torch.nn.functional.cosine_similarity(
+                                di.unsqueeze(0), delta_ref.unsqueeze(0)
+                            ).item()
+                            ri_t = di.norm().item() / max(feat_random.norm().item(), 1e-8)
+                            cos_t_ref = torch.nn.functional.cosine_similarity(
+                                ft_flat.unsqueeze(0), fref_flat.unsqueeze(0)
+                            ).item()
+                            multi_alpha_results.append({
+                                'alpha': alpha_t, 'align': a_t,
+                                'relative_impact': ri_t,
+                                'cos_with_ref': cos_t_ref,
+                                'align_diff': cos_t_ref - cos_random_ref,
+                            })
+                finally:
+                    handle2.remove()
+
+                # 多层 align: 看不同层的 align 是否一致
+                multi_layer_align = {}
+                for l in list(step_features.keys())[:5]:  # 前5个缓存层
+                    fr_l = step_features[l].to(device=feat_random.device, dtype=feat_random.dtype).flatten()
+                    # 需要重新hook该层 — 但为节省时间, 用已有的 feat_mixed/feat_random 的近似
+                    # (probe_layer 的结果代表性强, 多层仅作参考)
+                    multi_layer_align[l] = None  # 占位, 实际需要额外forward
+
+                diag_align_info = {
+                    'probe_step': probe_step_idx,
+                    'align_004': align_004,
+                    'align_diff_004': align_diff,
+                    'cos_mixed_ref': cos_mixed_ref,
+                    'cos_random_ref': cos_random_ref,
+                    'multi_alpha': multi_alpha_results,
+                }
+
+                logger.info(
+                    f"  [PNA-Diag] probe_step={probe_step_idx}, layer={probe_layer}"
+                )
+                logger.info(
+                    f"  [PNA-Diag] align(cos(delta_inject, delta_ref))={align_004:.6f}, "
+                    f"align_diff(cos_mixed_ref - cos_random_ref)={align_diff:.6f}"
+                )
+                logger.info(
+                    f"  [PNA-Diag] cos_mixed_ref={cos_mixed_ref:.6f}, "
+                    f"cos_random_ref={cos_random_ref:.6f}"
+                )
+                for r in multi_alpha_results:
+                    logger.info(
+                        f"  [PNA-Diag] α_test={r['alpha']:.4f}: "
+                        f"align={r['align']:.6f}, "
+                        f"impact={r['relative_impact']:.6f}, "
+                        f"cos_with_ref={r['cos_with_ref']:.6f}, "
+                        f"align_diff={r['align_diff']:.6f}"
+                    )
+            else:
+                logger.info(f"  [PNA-Diag] feat_ref 不可用 (step={probe_step_idx}, layer={probe_layer}), 跳过 align 诊断")
+        else:
+            logger.info(f"  [PNA-Diag] fi_ref_features 不可用, 跳过 align 诊断")
 
         # ── 高斯映射: α = floor + peak * exp(-((cos-center)²/(2σ²))) ──
         # 直觉: cos≈center 时 temporal 信号与噪声方向适度相关, 注入最有价值
