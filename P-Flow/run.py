@@ -137,8 +137,11 @@ def parse_args():
                    help="高斯映射宽度 σ (默认 0.11)")
     p.add_argument("--pna_gauss_peak", type=float, default=0.006,
                    help="高斯映射峰值 α (默认 0.006, center 处的 α_eff)")
-    p.add_argument("--pna_gauss_floor", type=float, default=0.0004,
-                   help="高斯映射基底 α (默认 0.0004, cos 远离 center 时)")
+    p.add_argument("--pna_gauss_floor", type=float, default=0.0005,
+                   help="高斯映射基底 α (默认 0.0005, cos 远离 center 时); 应 ≥ --pna_alpha_min")
+    p.add_argument("--pna_impact_ref", type=float, default=0.015,
+                   help="impact 归一化参考值 (默认 0.015). 若日志显示 impact 普遍偏低, "
+                        "调小此值避免 α 被系统性砍半")
 
     # ── M_d (Motion Definiteness) 融合门控 ──
     p.add_argument("--md_file", type=str, default="",
@@ -229,6 +232,7 @@ def build_config(args) -> PFlowConfig:
         pna_gauss_sigma=args.pna_gauss_sigma,
         pna_gauss_peak=args.pna_gauss_peak,
         pna_gauss_floor=args.pna_gauss_floor,
+        pna_impact_ref=args.pna_impact_ref,
         # M_d 融合门控
         md_file=args.md_file,
         alpha_floor=args.alpha_floor,

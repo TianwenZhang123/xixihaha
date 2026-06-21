@@ -129,10 +129,13 @@ class PFlowConfig:
     pna_probe_step: float = 0.95       # 探测的 t 值 (接近1.0=纯噪声, 影响最大)
     pna_alpha_max: float = 0.008        # PNA 门控的 α 上限
     pna_alpha_min: float = 0.0005       # PNA 门控的 α 下限 (不允许完全为0)
+                                        # NOTE: 需与 pna_gauss_floor 一致, 否则 floor 被 max() 裁剪覆盖
     pna_gauss_center: float = 0.41     # 高斯映射中心 cos 值 (peak 注入位置)
     pna_gauss_sigma: float = 0.11      # 高斯映射宽度 σ
     pna_gauss_peak: float = 0.006      # 高斯映射峰值 α (center 处的 α_eff)
-    pna_gauss_floor: float = 0.0004    # 高斯映射基底 α (cos 远离 center 时)
+    pna_gauss_floor: float = 0.0005    # 高斯映射基底 α (cos 远离 center 时); 应 ≥ pna_alpha_min
+    pna_impact_ref: float = 0.015      # impact 归一化参考值 (relative_impact / ref → [0.5,1.0])
+                                        # 若日志显示 impact 普遍 < ref/2, 应调小此值; 否则 α 会被系统性砍半
 
     # ── 其他 ──
     seed: int = 42
@@ -651,10 +654,10 @@ class PFlowPipeline:
                 # 用模型一步前向测量 η_temporal 的方向是否有利
                 prompt_embeds = getattr(cfg, '_current_prompt_embeds', None)
                 if prompt_embeds is not None:
-                    pna_score = self._compute_pna_score(
+                    alpha_eff = self._compute_pna_score(
                         eta_temporal, prompt_embeds, generator
                     )
-                    # PNA → α: _compute_pna_score 已计算 α_eff 并缓存到 cfg
+                    # _compute_pna_score 已计算 α_eff 并缓存到 cfg._current_alpha_eff
                     alpha = getattr(cfg, '_current_alpha_eff', cfg.alpha)
                 else:
                     # fallback: prompt_embeds 不可用, 使用固定 α
@@ -928,12 +931,15 @@ class PFlowPipeline:
         transformer = self.pipe.transformer
 
         # ── 构造两种噪声 ──
+        # 用独立 generator 避免消耗主采样 RNG 状态, 保证 PNA 与基线可严格对比
         alpha_test = 0.004
+        probe_seed = getattr(cfg, 'seed', 42) + 1
+        probe_generator = torch.Generator(device=eta_temporal.device).manual_seed(probe_seed)
         eta_random = torch.randn(
             eta_temporal.shape,
             dtype=eta_temporal.dtype,
             device=eta_temporal.device,
-            generator=generator,
+            generator=probe_generator,
         )
         sqrt_a = math.sqrt(alpha_test)
         sqrt_1ma = math.sqrt(1.0 - alpha_test)
@@ -1032,8 +1038,9 @@ class PFlowPipeline:
         alpha_eff = gauss_floor + gauss_peak * gauss_exp
 
         # 用 relative_impact 做可靠性缩放: impact 越大, temporal 方向越可靠
-        # impact 范围约 0.01~0.02, 归一化到 [0.5, 1.0] 避免极端压制
-        impact_scale = max(0.5, min(1.0, relative_impact / 0.015))
+        # 归一化到 [0.5, 1.0] 避免极端压制
+        impact_ref = cfg.pna_impact_ref
+        impact_scale = max(0.5, min(1.0, relative_impact / impact_ref))
         alpha_eff = alpha_eff * impact_scale
 
         # 裁剪到合法范围
