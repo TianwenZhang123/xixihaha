@@ -140,17 +140,6 @@ class PFlowConfig:
     # ── 其他 ──
     seed: int = 42
 
-    # ── 运行时缓存 (非 CLI 参数) ──
-    _md_lookup: Dict[int, float] = field(default_factory=dict, repr=False)
-
-    def load_md_scores(self):
-        """从 CSV 加载 M_d 查表 (保留兼容接口, 当前未使用)。"""
-        pass
-
-    def get_md(self, sample_id: int) -> float:
-        """获取指定样本的 M_d 值 (保留兼容接口, 始终返回1.0)。"""
-        return 1.0
-
     def active_flags(self) -> List[str]:
         """返回当前启用的改动点列表。"""
         flags = []

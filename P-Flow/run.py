@@ -107,19 +107,6 @@ def parse_args():
                    help="禁用 FI 自适应门控 (默认开启: 特征越接近参考→注入越少)")
     p.add_argument("--fi_adaptive_temp", type=float, default=5.0,
                    help="FI 自适应门控温度 (越大越敏感, 推荐 3~10; 默认 5.0)")
-    p.add_argument("--fi_qs_md_floor", type=float, default=0.5,
-                   help="FI Quality Scale 中 M_d 的下限 (默认 0.5). "
-                        "M_d=0 时 QS 不会低于 QS * fi_qs_md_floor, 防止 FI 被完全关闭")
-    p.add_argument("--fi_md_gate", action="store_true", default=False,
-                   help="启用 M_d 对 FI QS 的修正 (默认关闭, 消融用). "
-                        "关闭时 L3 FI 不受 M_d 影响, 只测 L2 SVD 门控效果")
-    p.add_argument("--fi_alpha_coupling", action="store_true", default=False,
-                   help="启用 FI λ 与 L2 α 协同缩放 (默认关闭). "
-                        "α_eff/α_ref 比例缩放 FI λ_max, α 低时 FI 注入同步降低")
-    p.add_argument("--no_fi_alpha_coupling", action="store_true", default=False,
-                   help="显式关闭 FI-α 协同 (当默认开启时使用)")
-    p.add_argument("--fi_alpha_ref", type=float, default=0.004,
-                   help="FI-α 协同的 α 参考值 (默认 0.004, 即 SVD+FI 基线固定 α)")
 
     # ── PNA (Prompt-Noise Alignment) 在线门控 ──
     p.add_argument("--pna_probe", action="store_true", default=False,
@@ -142,17 +129,6 @@ def parse_args():
     p.add_argument("--pna_impact_ref", type=float, default=0.015,
                    help="impact 归一化参考值 (默认 0.015). 若日志显示 impact 普遍偏低, "
                         "调小此值避免 α 被系统性砍半")
-
-    # ── M_d (Motion Definiteness) 融合门控 ──
-    p.add_argument("--md_file", type=str, default="",
-                   help="M_d 查表 CSV 路径 (由 scripts/compute_md.py 生成). "
-                        "启用后自适应 α 将使用 M_d × TSR 融合门控")
-    p.add_argument("--alpha_floor", type=float, default=0.004,
-                   help="M_d 确认物体运动时的保底 α (默认 0.004=旧版固定值). "
-                        "α_eff = max(α_floor * max(M_d, alpha_md_floor), α_min + f(M_d,TSR) * (α_max - α_min))")
-    p.add_argument("--alpha_md_floor", type=float, default=0.3,
-                   help="α 保底中 M_d 的下限 (默认 0.3). 防止 M_d=0 时 α 完全归零, "
-                        "确保场景类样本仍保留微量注入. md_for_alpha = max(M_d, alpha_md_floor)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
@@ -219,10 +195,6 @@ def build_config(args) -> PFlowConfig:
         fi_cache_mode=args.fi_cache_mode,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
-        fi_qs_md_floor=args.fi_qs_md_floor,
-        fi_md_gate=args.fi_md_gate,
-        fi_alpha_coupling=args.fi_alpha_coupling and not args.no_fi_alpha_coupling,
-        fi_alpha_ref=args.fi_alpha_ref,
         # PNA 在线门控
         pna_probe=args.pna_probe,
         pna_probe_step=args.pna_probe_step,
@@ -233,10 +205,6 @@ def build_config(args) -> PFlowConfig:
         pna_gauss_peak=args.pna_gauss_peak,
         pna_gauss_floor=args.pna_gauss_floor,
         pna_impact_ref=args.pna_impact_ref,
-        # M_d 融合门控
-        md_file=args.md_file,
-        alpha_floor=args.alpha_floor,
-        alpha_md_floor=args.alpha_md_floor,
     )
 
 
@@ -351,8 +319,6 @@ def main():
         print(f"  [FI] λ={config.fi_lambda}, layers={config.fi_layers}, schedule={config.fi_schedule}, mode={config.fi_cache_mode}{fi_adapt_str}")
     if config.use_iter:
         print(f"  iterations={config.i_max}")
-    if config.md_file:
-        print(f"  [M_d] md_file={config.md_file}, alpha_floor={config.alpha_floor}, alpha_md_floor={config.alpha_md_floor}")
     print()
 
     pipeline = PFlowPipeline(config)
