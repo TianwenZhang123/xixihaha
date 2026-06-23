@@ -476,21 +476,20 @@ class PFlowPipeline:
         logger.info(f"  [SAMPLE SUMMARY] caption_length={len(caption)} chars, word_count={len(caption.split())}")
         logger.info(f"  [SAMPLE SUMMARY] elapsed={elapsed:.1f}s, output={final_path}")
 
-        # ── PNA 诊断快照 (30-case 实验专用) ──
+        # ── PNA v4 诊断快照 (固定α策略) ──
         pna_diag = getattr(cfg, '_pna_diag', None)
         if pna_diag is not None:
             logger.info(
-                f"  [SAMPLE-PNA] ★★★ PNA DIAGNOSTIC FOR sample_{sample_id} ★★★"
+                f"  [SAMPLE-PNA-v4] ★★★ PNA-v4 DIAGNOSTIC FOR sample_{sample_id} ★★★"
             )
             logger.info(
-                f"  [SAMPLE-PNA] category={pna_diag['pna_category']}, "
+                f"  [SAMPLE-PNA-v4] category={pna_diag['pna_category']}, "
                 f"α_final={pna_diag['alpha_eff']:.6f}, "
-                f"std_gate={'CAPPED' if pna_diag['std_gate_active'] else 'off'}"
+                f"std_gate={'FLOOR' if pna_diag['std_gate_active'] else 'off'}"
             )
             logger.info(
-                f"  [SAMPLE-PNA] η_std={pna_diag.get('eta_std', 0):.4f}, "
-                f"frame_cos={pna_diag.get('temporal_frame_cos', 0):.4f}, "
-                f"impact={pna_diag.get('relative_impact', 0):.6f}"
+                f"  [SAMPLE-PNA-v4] η_std={pna_diag.get('eta_std', 0):.4f}, "
+                f"frame_cos={pna_diag.get('temporal_frame_cos', 0):.4f}"
             )
             # 预测: α vs fixed=0.004 的关系 → 后续对比XC验证
             alpha_diff = pna_diag['alpha_eff'] - 0.004
@@ -1169,88 +1168,69 @@ class PFlowPipeline:
         else:
             logger.info(f"  [PNA-Diag] fi_ref_features 不可用, 跳过 align 诊断")
 
-        # ── 高斯映射: α = floor + peak * exp(-((cos-center)²/(2σ²))) ──
-        # 直觉: cos≈center 时 temporal 信号与噪声方向适度相关, 注入最有价值
-        #        cos 极低: temporal 信号不可靠, 注入有害 → 低 α
-        #        cos 极高: 静态场景, 注入破坏结构 → 低 α
-        gauss_center = cfg.pna_gauss_center
-        gauss_sigma = cfg.pna_gauss_sigma
-        gauss_peak = cfg.pna_gauss_peak
-        gauss_floor = cfg.pna_gauss_floor
-
-        gauss_exp = math.exp(-((temporal_frame_cos - gauss_center) ** 2) / (2 * gauss_sigma ** 2))
-        alpha_eff = gauss_floor + gauss_peak * gauss_exp
-
-        # 用 relative_impact 做可靠性缩放: impact 越大, temporal 方向越可靠
-        # 归一化到 [0.5, 1.0] 避免极端压制
-        impact_ref = cfg.pna_impact_ref
-        impact_scale = max(0.5, min(1.0, relative_impact / impact_ref))
-        alpha_eff = alpha_eff * impact_scale
-
-        # 裁剪到合法范围
-        alpha_eff = max(cfg.pna_alpha_min, min(cfg.pna_alpha_max, alpha_eff))
-
-        # # ── 方案G (已弃用, 保留备用): modifier = min(cap, (1-cos)^power) ──
-        # # 单调递减映射: cos低→大α, cos高→小α
-        # # 问题: 无法处理cos低但注入有害的情况 (如Case 32/50)
-        # cap = 0.60
-        # power = 2.0
-        # temporal_modifier = max(0.05, min(cap, (1.0 - temporal_frame_cos) ** power))
-        # pna_raw_g = relative_impact * temporal_modifier
-        # pna_raw_lo, pna_raw_hi = 0.005, 0.010
-        # pna_score = max(0.0, min(1.0, (pna_raw_g - pna_raw_lo * 0.5) / (pna_raw_hi - pna_raw_lo * 0.5)))
-        # alpha_eff = cfg.pna_alpha_min + pna_score * (cfg.pna_alpha_max - cfg.pna_alpha_min)
-
         # ════════════════════════════════════════════════════════════════════
-        # PNA v2: η_temporal std 门控 (Phase A 修复)
-        # 问题: temporal_frame_cos 只衡量帧间连贯性, 不衡量信号强度
-        #       Sample 73: std=0.3105(最低) 但 cos=0.42(适中) → 误判为高α
-        # 方案: std < 阈值时, 强制封顶 α, 防止弱信号过注入
+        # ★★★ PNA v4: 固定 α + StdGate floor 保护 ★★★
+        #
+        # [废弃] 高斯映射 (frame_cos → α):
+        #   经 30-case 实验验证, frame_cos 与 XC 收益几乎零相关 (r=0.05)
+        #   原因: frame_cos 衡量的是参考视频帧间连贯性(内容特性),
+        #         不代表 SVD 先验的质量或适用度
+        #   下方保留原代码注释供参考.
+        #
+        # [当前策略] 固定 α = alpha_test (默认0.0004),
+        #   仅当 η_std < 阈值时做 floor 保护(防止极端弱信号过注入).
+        #   这是最简单稳健的方案: 不试图预测最优α, 只做底线防护.
         # ════════════════════════════════════════════════════════════════════
+
+        # ── [已废弃] 高斯映射原始代码 (保留注释) ──
+        # gauss_center = cfg.pna_gauss_center
+        # gauss_sigma = cfg.pna_gauss_sigma
+        # gauss_peak = cfg.pna_gauss_peak
+        # gauss_floor = cfg.pna_gauss_floor
+        # gauss_exp = math.exp(-((temporal_frame_cos - gauss_center) ** 2) / (2 * gauss_sigma ** 2))
+        # alpha_eff = gauss_floor + gauss_peak * gauss_exp
+        # impact_ref = cfg.pna_impact_ref
+        # impact_scale = max(0.5, min(1.0, relative_impact / impact_ref))
+        # alpha_eff = alpha_eff * impact_scale
+        # alpha_eff = max(cfg.pna_alpha_min, min(cfg.pna_alpha_max, alpha_eff))
+
+        # ★ v4 策略: 固定 α
+        alpha_eff = alpha_test  # 固定为探测用的 α (默认 0.0004)
+
+        # StdGate floor 保护 (仅设下限, 不封顶)
         eta_std = 0.0
         std_gate_active = False
-        alpha_before_std_gate = alpha_eff
-        std_gate_threshold = 0.33   # 历史数据: std<0.33 的样本对α极度敏感
-        std_gate_cap_factor = 2.0    # 封顶到 pna_alpha_min * factor (≈0.001)
+        std_gate_threshold = 0.33
 
         if eta_temporal is not None:
             eta_std = eta_temporal.std().item()
             if eta_std < std_gate_threshold:
-                alpha_cap = cfg.pna_alpha_min * std_gate_cap_factor
-                if alpha_eff > alpha_cap:
-                    alpha_eff = alpha_cap
+                # 弱信号样本: 设一个安全的 floor, 但不关闭 SVD
+                safe_floor = 0.001  # 比默认值小但非零
+                if alpha_eff > safe_floor:
+                    alpha_eff = safe_floor
                     std_gate_active = True
 
-        # ── 日志 ──
+        # ── 日志 (v4 简化版) ──
         logger.info(
-            f"  [PNA] probe_t={t_probe:.2f}, layer={probe_layer}, "
+            f"  [PNA-v4] strategy=fixed_α+StdGate_floor, "
+            f"α_fixed={alpha_test:.6f}, "
             f"relative_impact={relative_impact:.6f}, "
-            f"cos_consistency={cos_consistency:.4f}, "
-            f"pna_raw={pna_raw:.6f}"
+            f"cos_consistency={cos_consistency:.4f}"
         )
         logger.info(
-            f"  [PNA 新指标] temporal_frame_cos={temporal_frame_cos:.4f}, "
-            f"eta_temporal_std={eta_std:.4f}"
+            f"  [PNA-v4] temporal_frame_cos={temporal_frame_cos:.4f} (NOT used for α), "
+            f"eta_std={eta_std:.4f}"
         )
         logger.info(
-            f"  [PNA-Gauss] cos={temporal_frame_cos:.4f}, "
-            f"exp={gauss_exp:.4f}, "
-            f"α_base={gauss_floor + gauss_peak * gauss_exp:.6f}, "
-            f"impact_scale={impact_scale:.4f}, "
-            f"α_pre_stdgate={alpha_before_std_gate:.6f}"
-        )
-        logger.info(
-            f"  [PNA-StdGate] η_std={eta_std:.4f}, threshold={std_gate_threshold:.2f}, "
-            f"active={'✅ YES' if std_gate_active else 'no'}, "
-            f"cap={cfg.pna_alpha_min * std_gate_cap_factor:.6f}, "
-            f"α_after_stdgate={alpha_eff:.6f}"
+            f"  [PNA-v4-StdGate] η_std={eta_std:.4f}, threshold={std_gate_threshold:.2f}, "
+            f"active={'✅ FLOOR' if std_gate_active else 'no'}, "
+            f"α_final={alpha_eff:.6f}"
         )
 
         # ════════════════════════════════════════════════════════════════════
-        # PNA 诊断汇总 (30-case 实验专用, 便于批量分析)
-        # 输出一行关键指标 + 样本分类标签
+        # PNA v4 诊断汇总 (固定α策略)
         # ════════════════════════════════════════════════════════════════════
-        # ── 样本分类 ──
         if eta_std > 0:
             if eta_std < 0.33:
                 std_tag = "WEAK_SIGNAL"
@@ -1273,32 +1253,23 @@ class PFlowPipeline:
 
         pna_category = f"{std_tag}|{cos_tag}"
 
-        # ── 与固定α对比 ──
-        fixed_alpha_default = 0.004  # 表格中 svd_fi 使用的默认α
+        fixed_alpha_default = alpha_test
         alpha_vs_fixed = alpha_eff - fixed_alpha_default
 
         logger.info(
-            f"  [PNA-SUMMARY] ═════════════════════════════════════════════"
+            f"  [PNA-v4-SUMMARY] ═════════════════════════════════════════"
         )
         logger.info(
-            f"  [PNA-SUMMARY] category={pna_category}"
+            f"  [PNA-v4-SUMMARY] category={pna_category}"
         )
         logger.info(
-            f"  [PNA-SUMMARY] η_std={eta_std:.4f} ({std_tag}), "
+            f"  [PNA-v4-SUMMARY] η_std={eta_std:.4f} ({std_tag}), "
             f"frame_cos={temporal_frame_cos:.4f} ({cos_tag})"
         )
         logger.info(
-            f"  [PNA-SUMMARY] impact={relative_impact:.6f}, "
-            f"cos_consistency={cos_consistency:.4f}"
-        )
-        logger.info(
-            f"  [PNA-SUMMARY] α_gauss_raw={gauss_floor + gauss_peak * gauss_exp:.6f}, "
-            f"α_impact_scaled={alpha_before_std_gate:.6f}"
-        )
-        logger.info(
-            f"  [PNA-SUMMARY] α_final={alpha_eff:.6f} "
-            f"(vs fixed={fixed_alpha_default}, delta={alpha_vs_fixed:+.6f}), "
-            f"std_gate={'ON→CAPPED' if std_gate_active else 'off'}"
+            f"  [PNA-v4-SUMMARY] α_fixed={fixed_alpha_default:.6f}, "
+            f"α_final={alpha_eff:.6f}, delta={alpha_vs_fixed:+.6f}, "
+            f"std_gate={'FLOOR' if std_gate_active else 'off'}"
         )
         align_val = diag_align_info.get('align_004', None)
         logger.info(
