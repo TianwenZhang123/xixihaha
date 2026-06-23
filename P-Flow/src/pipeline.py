@@ -475,6 +475,32 @@ class PFlowPipeline:
         logger.info(f"  [SAMPLE SUMMARY] full_caption={caption}")
         logger.info(f"  [SAMPLE SUMMARY] caption_length={len(caption)} chars, word_count={len(caption.split())}")
         logger.info(f"  [SAMPLE SUMMARY] elapsed={elapsed:.1f}s, output={final_path}")
+
+        # ── PNA 诊断快照 (30-case 实验专用) ──
+        pna_diag = getattr(cfg, '_pna_diag', None)
+        if pna_diag is not None:
+            logger.info(
+                f"  [SAMPLE-PNA] ★★★ PNA DIAGNOSTIC FOR sample_{sample_id} ★★★"
+            )
+            logger.info(
+                f"  [SAMPLE-PNA] category={pna_diag['pna_category']}, "
+                f"α_final={pna_diag['alpha_eff']:.6f}, "
+                f"std_gate={'CAPPED' if pna_diag['std_gate_active'] else 'off'}"
+            )
+            logger.info(
+                f"  [SAMPLE-PNA] η_std={pna_diag.get('eta_std', 0):.4f}, "
+                f"frame_cos={pna_diag.get('temporal_frame_cos', 0):.4f}, "
+                f"impact={pna_diag.get('relative_impact', 0):.6f}"
+            )
+            # 预测: α vs fixed=0.004 的关系 → 后续对比XC验证
+            alpha_diff = pna_diag['alpha_eff'] - 0.004
+            if alpha_diff > 0.001:
+                pred_tag = "α_UP→expect_WORSE(over-inject)"
+            elif alpha_diff < -0.001:
+                pred_tag = "α_DOWN→expect_BETTER(less-inject)"
+            else:
+                pred_tag = "α≈fixed→expect_SIMILAR"
+            logger.info(f"  [SAMPLE-PNA] prediction: {pred_tag} (vs fixed_α=0.004)")
         return metadata
 
     # ─────────────────────────────────────────────────────────────
@@ -1221,68 +1247,75 @@ class PFlowPipeline:
         )
 
         # ════════════════════════════════════════════════════════════════════
-        # PNA v3: SVD Bypass Gate (完全绕过 SVD)
-        # 问题: StdGate 只能压 α 到 0.001, 但对 73号这类样本,
-        #       SVD 本身就有害 (无论 α 大小), 唯一正确做法是 α=0
-        # 方案: 二维条件 (η_std + temporal_frame_cos) 精准识别危险样本 → α=0
+        # PNA 诊断汇总 (30-case 实验专用, 便于批量分析)
+        # 输出一行关键指标 + 样本分类标签
         # ════════════════════════════════════════════════════════════════════
-        bypass_active = False
-        bypass_reason = ""
-        alpha_before_bypass = alpha_eff
+        # ── 样本分类 ──
+        if eta_std > 0:
+            if eta_std < 0.33:
+                std_tag = "WEAK_SIGNAL"
+            elif eta_std < 0.40:
+                std_tag = "MODERATE"
+            else:
+                std_tag = "STRONG"
+        else:
+            std_tag = "N/A"
 
-        if eta_temporal is not None:
-            # ── Level 1: Hard Bypass (硬绕过) ──
-            # 条件: 弱信号(低std) + 中等连贯性(中cos) = 场景变换/内容突变型视频
-            # 这类视频中 SVD 提取的是无意义噪声, 注入必有害
-            l1_std_threshold = 0.32          # η_std 上限 (73号=0.3105)
-            l1_cos_low = 0.35               # cos 区间下限
-            l1_cos_high = 0.50              # cos 区间上限 (73号=0.4214)
+        if temporal_frame_cos > 0:
+            if temporal_frame_cos < 0.30:
+                cos_tag = "LOW_COS(incoherent)"
+            elif temporal_frame_cos < 0.50:
+                cos_tag = "MID_COS(transitional)"
+            else:
+                cos_tag = "HIGH_COS(coherent)"
+        else:
+            cos_tag = "N/A"
 
-            l1_hit_std = eta_std < l1_std_threshold
-            l1_hit_cos = l1_cos_low <= temporal_frame_cos <= l1_cos_high
+        pna_category = f"{std_tag}|{cos_tag}"
 
-            logger.info(
-                f"  [PNA-Bypass-L1] check: "
-                f"std={eta_std:.4f}<{l1_std_threshold}? {'✅' if l1_hit_std else '❌'}, "
-                f"cos={temporal_frame_cos:.4f}∈[{l1_cos_low},{l1_cos_high}]? {'✅' if l1_hit_cos else '❌'}"
-            )
+        # ── 与固定α对比 ──
+        fixed_alpha_default = 0.004  # 表格中 svd_fi 使用的默认α
+        alpha_vs_fixed = alpha_eff - fixed_alpha_default
 
-            if l1_hit_std and l1_hit_cos:
-                alpha_eff = 0.0
-                bypass_active = True
-                bypass_reason = "L1_weak_signal_mid_coherence"
-                logger.info(
-                    f"  [PNA-Bypass] ★ HARD BYPASS TRIGGERED! reason={bypass_reason}"
-                )
-                # ★ 关键修复: 同时抑制 FI
-                # 对73号这类样本, SVD和FI都有害(反演特征本身混乱)
-                # 需要让系统尽可能退回到 baseline (纯随机生成)
-                cfg._pna_bypass_fi_suppress = True
-                logger.info(
-                    f"  [PNA-Bypass] ★ FI SUPPRESSION ACTIVATED! "
-                    f"FI λ will be scaled down to near-zero"
-                )
-
-            # ── Level 2: Soft Warning (软警告, 仅日志) ──
-            # 条件: 反演信号整体偏弱 (辅助诊断, 不阻止)
-            # 注意: eta_inv_std 需要外部传入, 当前用 eta_std 近似判断
-            if eta_std < 0.33 and not bypass_active:
-                logger.warning(
-                    f"  [PNA-Bypass-L2] ⚠️ η_std={eta_std:.4f}<0.33, "
-                    f"SVD信号偏弱, 效果可能不佳 (但不阻止注入)"
-                )
-
-        # ── Bypass 最终日志 ──
         logger.info(
-            f"  [PNA-Bypass] "
-            f"α_before_bypass={alpha_before_bypass:.6f} → "
-            f"α_final={alpha_eff:.6f}"
-            f"{' ★ SVD DISABLED!' if bypass_active else ''}"
-            f" | reason={bypass_reason if bypass_active else 'none'}"
+            f"  [PNA-SUMMARY] ═════════════════════════════════════════════"
+        )
+        logger.info(
+            f"  [PNA-SUMMARY] category={pna_category}"
+        )
+        logger.info(
+            f"  [PNA-SUMMARY] η_std={eta_std:.4f} ({std_tag}), "
+            f"frame_cos={temporal_frame_cos:.4f} ({cos_tag})"
+        )
+        logger.info(
+            f"  [PNA-SUMMARY] impact={relative_impact:.6f}, "
+            f"cos_consistency={cos_consistency:.4f}"
+        )
+        logger.info(
+            f"  [PNA-SUMMARY] α_gauss_raw={gauss_floor + gauss_peak * gauss_exp:.6f}, "
+            f"α_impact_scaled={alpha_before_std_gate:.6f}"
+        )
+        logger.info(
+            f"  [PNA-SUMMARY] α_final={alpha_eff:.6f} "
+            f"(vs fixed={fixed_alpha_default}, delta={alpha_vs_fixed:+.6f}), "
+            f"std_gate={'ON→CAPPED' if std_gate_active else 'off'}"
+        )
+        align_val = diag_align_info.get('align_004', None)
+        logger.info(
+            f"  [PNA-SUMMARY] align_004={align_val:.6f}" if isinstance(align_val, (int, float)) else
+            f"  [PNA-SUMMARY] align_004=N/A (no fi_ref)"
         )
 
         # 缓存到 cfg
         cfg._current_alpha_eff = alpha_eff
+        cfg._pna_diag = {
+            'eta_std': eta_std,
+            'temporal_frame_cos': temporal_frame_cos,
+            'pna_category': pna_category,
+            'alpha_eff': alpha_eff,
+            'std_gate_active': std_gate_active,
+            'relative_impact': relative_impact,
+        }
 
         return alpha_eff
 
@@ -1529,18 +1562,6 @@ class PFlowPipeline:
             f"layers={target_layers}, cache_mode={cfg.fi_cache_mode}"
         )
 
-        # ── PNA Bypass: FI 联动抑制 ──
-        # 当 SVD Bypass 触发时, 对 73号这类场景变换样本,
-        # 反演特征本身混乱, FI 注入同样有害, 需要联合抑制
-        bypass_fi_suppress = getattr(cfg, '_pna_bypass_fi_suppress', False)
-        if bypass_fi_suppress:
-            bypass_fi_factor = 0.02  # λ 压到原来的 2% (≈接近关闭)
-            quality_scale *= bypass_fi_factor
-            logger.info(
-                f"  [PNA-Bypass-FI] ★ FI SUPPRESSED! "
-                f"factor={bypass_fi_factor}, "
-                f"effective_quality_scale={quality_scale:.6f}"
-            )
         if cfg.fi_adaptive_gate:
             logger.info(
                 f"  [FI] 自适应门控: ON, temp={cfg.fi_adaptive_temp} "
