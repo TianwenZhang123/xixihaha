@@ -1174,6 +1174,26 @@ class PFlowPipeline:
         # pna_score = max(0.0, min(1.0, (pna_raw_g - pna_raw_lo * 0.5) / (pna_raw_hi - pna_raw_lo * 0.5)))
         # alpha_eff = cfg.pna_alpha_min + pna_score * (cfg.pna_alpha_max - cfg.pna_alpha_min)
 
+        # ════════════════════════════════════════════════════════════════════
+        # PNA v2: η_temporal std 门控 (Phase A 修复)
+        # 问题: temporal_frame_cos 只衡量帧间连贯性, 不衡量信号强度
+        #       Sample 73: std=0.3105(最低) 但 cos=0.42(适中) → 误判为高α
+        # 方案: std < 阈值时, 强制封顶 α, 防止弱信号过注入
+        # ════════════════════════════════════════════════════════════════════
+        eta_std = 0.0
+        std_gate_active = False
+        alpha_before_std_gate = alpha_eff
+        std_gate_threshold = 0.33   # 历史数据: std<0.33 的样本对α极度敏感
+        std_gate_cap_factor = 2.0    # 封顶到 pna_alpha_min * factor (≈0.001)
+
+        if eta_temporal is not None:
+            eta_std = eta_temporal.std().item()
+            if eta_std < std_gate_threshold:
+                alpha_cap = cfg.pna_alpha_min * std_gate_cap_factor
+                if alpha_eff > alpha_cap:
+                    alpha_eff = alpha_cap
+                    std_gate_active = True
+
         # ── 日志 ──
         logger.info(
             f"  [PNA] probe_t={t_probe:.2f}, layer={probe_layer}, "
@@ -1182,14 +1202,21 @@ class PFlowPipeline:
             f"pna_raw={pna_raw:.6f}"
         )
         logger.info(
-            f"  [PNA 新指标] temporal_frame_cos={temporal_frame_cos:.4f}"
+            f"  [PNA 新指标] temporal_frame_cos={temporal_frame_cos:.4f}, "
+            f"eta_temporal_std={eta_std:.4f}"
         )
         logger.info(
             f"  [PNA-Gauss] cos={temporal_frame_cos:.4f}, "
             f"exp={gauss_exp:.4f}, "
             f"α_base={gauss_floor + gauss_peak * gauss_exp:.6f}, "
             f"impact_scale={impact_scale:.4f}, "
-            f"α_eff={alpha_eff:.6f}"
+            f"α_pre_stdgate={alpha_before_std_gate:.6f}"
+        )
+        logger.info(
+            f"  [PNA-StdGate] η_std={eta_std:.4f}, threshold={std_gate_threshold:.2f}, "
+            f"active={'✅ YES' if std_gate_active else 'no'}, "
+            f"cap={cfg.pna_alpha_min * std_gate_cap_factor:.6f}, "
+            f"α_final={alpha_eff:.6f}"
         )
 
         # 缓存到 cfg
