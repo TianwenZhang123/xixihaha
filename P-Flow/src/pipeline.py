@@ -285,6 +285,7 @@ class PFlowPipeline:
         ref_latents_enc = None
         ref_trajectory_from_inversion = None  # 合并模式：反演时同时缓存的轨迹
         fi_ref_features_from_inversion = None  # 合并模式：反演时同时缓存的FI特征
+        svd_stats = None  # SVD 统计信息, 非SVD模式为None
         if cfg.use_inversion:
             # 判断是否需要在反演时同时缓存轨迹/FI特征
             need_trajectory = cfg.feature_inject
@@ -1253,6 +1254,14 @@ class PFlowPipeline:
                 logger.info(
                     f"  [PNA-Bypass] ★ HARD BYPASS TRIGGERED! reason={bypass_reason}"
                 )
+                # ★ 关键修复: 同时抑制 FI
+                # 对73号这类样本, SVD和FI都有害(反演特征本身混乱)
+                # 需要让系统尽可能退回到 baseline (纯随机生成)
+                cfg._pna_bypass_fi_suppress = True
+                logger.info(
+                    f"  [PNA-Bypass] ★ FI SUPPRESSION ACTIVATED! "
+                    f"FI λ will be scaled down to near-zero"
+                )
 
             # ── Level 2: Soft Warning (软警告, 仅日志) ──
             # 条件: 反演信号整体偏弱 (辅助诊断, 不阻止)
@@ -1519,6 +1528,19 @@ class PFlowPipeline:
             f"quality_scale={quality_scale:.4f}, "
             f"layers={target_layers}, cache_mode={cfg.fi_cache_mode}"
         )
+
+        # ── PNA Bypass: FI 联动抑制 ──
+        # 当 SVD Bypass 触发时, 对 73号这类场景变换样本,
+        # 反演特征本身混乱, FI 注入同样有害, 需要联合抑制
+        bypass_fi_suppress = getattr(cfg, '_pna_bypass_fi_suppress', False)
+        if bypass_fi_suppress:
+            bypass_fi_factor = 0.02  # λ 压到原来的 2% (≈接近关闭)
+            quality_scale *= bypass_fi_factor
+            logger.info(
+                f"  [PNA-Bypass-FI] ★ FI SUPPRESSED! "
+                f"factor={bypass_fi_factor}, "
+                f"effective_quality_scale={quality_scale:.6f}"
+            )
         if cfg.fi_adaptive_gate:
             logger.info(
                 f"  [FI] 自适应门控: ON, temp={cfg.fi_adaptive_temp} "
