@@ -1216,7 +1216,60 @@ class PFlowPipeline:
             f"  [PNA-StdGate] η_std={eta_std:.4f}, threshold={std_gate_threshold:.2f}, "
             f"active={'✅ YES' if std_gate_active else 'no'}, "
             f"cap={cfg.pna_alpha_min * std_gate_cap_factor:.6f}, "
+            f"α_after_stdgate={alpha_eff:.6f}"
+        )
+
+        # ════════════════════════════════════════════════════════════════════
+        # PNA v3: SVD Bypass Gate (完全绕过 SVD)
+        # 问题: StdGate 只能压 α 到 0.001, 但对 73号这类样本,
+        #       SVD 本身就有害 (无论 α 大小), 唯一正确做法是 α=0
+        # 方案: 二维条件 (η_std + temporal_frame_cos) 精准识别危险样本 → α=0
+        # ════════════════════════════════════════════════════════════════════
+        bypass_active = False
+        bypass_reason = ""
+        alpha_before_bypass = alpha_eff
+
+        if eta_temporal is not None:
+            # ── Level 1: Hard Bypass (硬绕过) ──
+            # 条件: 弱信号(低std) + 中等连贯性(中cos) = 场景变换/内容突变型视频
+            # 这类视频中 SVD 提取的是无意义噪声, 注入必有害
+            l1_std_threshold = 0.32          # η_std 上限 (73号=0.3105)
+            l1_cos_low = 0.35               # cos 区间下限
+            l1_cos_high = 0.50              # cos 区间上限 (73号=0.4214)
+
+            l1_hit_std = eta_std < l1_std_threshold
+            l1_hit_cos = l1_cos_low <= temporal_frame_cos <= l1_cos_high
+
+            logger.info(
+                f"  [PNA-Bypass-L1] check: "
+                f"std={eta_std:.4f}<{l1_std_threshold}? {'✅' if l1_hit_std else '❌'}, "
+                f"cos={temporal_frame_cos:.4f}∈[{l1_cos_low},{l1_cos_high}]? {'✅' if l1_hit_cos else '❌'}"
+            )
+
+            if l1_hit_std and l1_hit_cos:
+                alpha_eff = 0.0
+                bypass_active = True
+                bypass_reason = "L1_weak_signal_mid_coherence"
+                logger.info(
+                    f"  [PNA-Bypass] ★ HARD BYPASS TRIGGERED! reason={bypass_reason}"
+                )
+
+            # ── Level 2: Soft Warning (软警告, 仅日志) ──
+            # 条件: 反演信号整体偏弱 (辅助诊断, 不阻止)
+            # 注意: eta_inv_std 需要外部传入, 当前用 eta_std 近似判断
+            if eta_std < 0.33 and not bypass_active:
+                logger.warning(
+                    f"  [PNA-Bypass-L2] ⚠️ η_std={eta_std:.4f}<0.33, "
+                    f"SVD信号偏弱, 效果可能不佳 (但不阻止注入)"
+                )
+
+        # ── Bypass 最终日志 ──
+        logger.info(
+            f"  [PNA-Bypass] "
+            f"α_before_bypass={alpha_before_bypass:.6f} → "
             f"α_final={alpha_eff:.6f}"
+            f"{' ★ SVD DISABLED!' if bypass_active else ''}"
+            f" | reason={bypass_reason if bypass_active else 'none'}"
         )
 
         # 缓存到 cfg
