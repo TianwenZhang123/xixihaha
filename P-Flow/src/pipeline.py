@@ -124,18 +124,14 @@ class PFlowConfig:
     vlm_provider: str = "local"
     vlm_model_path: str = "models/Qwen2.5-VL-7B-Instruct"
 
-    # ── PNA (Prompt-Noise Alignment) 在线门控 ──
-    pna_probe: bool = False            # 启用 PNA 探测 (在线测量 η_temporal 方向是否有利)
-    pna_probe_step: float = 0.95       # 探测的 t 值 (接近1.0=纯噪声, 影响最大)
-    pna_alpha_max: float = 0.008        # PNA 门控的 α 上限
-    pna_alpha_min: float = 0.0005       # PNA 门控的 α 下限 (不允许完全为0)
-                                        # NOTE: 需与 pna_gauss_floor 一致, 否则 floor 被 max() 裁剪覆盖
-    pna_gauss_center: float = 0.41     # 高斯映射中心 cos 值 (peak 注入位置)
-    pna_gauss_sigma: float = 0.11      # 高斯映射宽度 σ
-    pna_gauss_peak: float = 0.006      # 高斯映射峰值 α (center 处的 α_eff)
-    pna_gauss_floor: float = 0.0005    # 高斯映射基底 α (cos 远离 center 时); 应 ≥ pna_alpha_min
-    pna_impact_ref: float = 0.015      # impact 归一化参考值 (relative_impact / ref → [0.5,1.0])
-                                        # 若日志显示 impact 普遍 < ref/2, 应调小此值; 否则 α 会被系统性砍半
+    # ── PNA v5: 固定 α + 双向 StdGate 门控 ──
+    pna_probe: bool = False            # 启用 PNA 探测 (在线诊断日志, 不改变 α)
+    pna_probe_step: float = 0.95       # 探测的 t 值
+    pna_std_gate: bool = True          # 双向 StdGate 开关
+    pna_std_low: float = 0.32          # η_std 低于此值 → 抬升 α (floor, 防欠注入)
+    pna_std_high: float = 0.39         # η_std 高于此值 → 降低 α (cap, 防过注入)
+    pna_std_floor_alpha: float = 0.006 # floor: 弱信号时 α 至少为此值 (> 基准)
+    pna_std_cap_alpha: float = 0.002   # cap: 强信号时 α 至多为此值 (< 基准)
 
     # ── 其他 ──
     seed: int = 42
@@ -149,10 +145,7 @@ class PFlowConfig:
             flags.append("svd")
         if self.use_blend:
             blend_parts = []
-            if self.adaptive_alpha:
-                blend_parts.append(f"α=[Gaussian, center={self.pna_gauss_center}, σ={self.pna_gauss_sigma}]")
-            else:
-                blend_parts.append(f"α={self.alpha}")
+            blend_parts.append(f"α={self.alpha}")
             if self.beta > 0:
                 blend_parts.append(f"β={self.beta}")
             flags.append(f"blend({', '.join(blend_parts)})")
@@ -940,354 +933,147 @@ class PFlowPipeline:
         fi_ref_features: Optional[Dict[str, Any]] = None,
     ) -> float:
         """
-        PNA (Prompt-Noise Alignment): 在线测量 η_temporal 方向对模型是否有利。
-
-        诊断模式 (fi_ref_features 可用时):
-            1. 多个 α_test 试探注入, 算 delta_inject = feat_mixed - feat_random
-            2. 取参考特征 feat_ref (对应 t_probe 的 step_index)
-            3. align = cos(delta_inject, delta_ref), delta_ref = feat_ref - feat_random
-            4. align > 0 → 注入方向朝参考 → 有利; align < 0 → 远离参考 → 有害
-            5. 同时输出旧的 relative_impact / temporal_frame_cos 供对比
-
-        映射: 高斯映射 (保留兼容), 后续根据 align 设计新映射
+        PNA v5: 固定 α + 双向 StdGate 门控 (可选在线探测诊断)。
+        
+        基于 v4 日志数据分析 (30 cases):
+          - Q1 (η_std < 0.328): mean_diff=-0.0606, 75% 更差 → 需要抬升 α
+          - Q2 (0.332~0.359):    mean_diff=+0.0283, 最佳甜点区 → 保持基准
+          - Q4 (η_std > 0.377): mean_diff=-0.0531, 75% 更差 → 需要降低 α
+        
+        门控策略:
+          η_std < low  → α = max(α, floor_alpha)   (防欠注入)
+          η_std > high → α = min(α, cap_alpha)     (防过注入)
+          中间区域     → 保持 cfg.alpha 不变
         """
         cfg = self.config
+
+        # ── Step 1: 基准 α ──
+        alpha_eff = cfg.alpha
+
+        # ── Step 2: 双向 StdGate ──
+        gate_action = "none"
+        if getattr(cfg, 'pna_std_gate', False) and eta_temporal is not None:
+            eta_std = eta_temporal.std().item()
+            std_low = getattr(cfg, 'pna_std_low', 0.32)
+            std_high = getattr(cfg, 'pna_std_high', 0.39)
+            floor_alpha = getattr(cfg, 'pna_std_floor_alpha', 0.006)
+            cap_alpha = getattr(cfg, 'pna_std_cap_alpha', 0.002)
+
+            if eta_std < std_low:
+                # 弱信号区: 抬升到 floor
+                if alpha_eff < floor_alpha:
+                    alpha_eff_old = alpha_eff
+                    alpha_eff = floor_alpha
+                    gate_action = f"FLOOR(↑{floor_alpha})"
+                    logger.info(
+                        f"  [PNA-v5] ★ BidiStdGate FLOOR: η_std={eta_std:.4f} < {std_low}, "
+                        f"α {alpha_eff_old:.6f} → {alpha_eff:.6f}"
+                    )
+                else:
+                    gate_action = "skip(already≥floor)"
+                    logger.info(f"  [PNA-v5] BidiStdGate: η_std={eta_std:.4f}<low, but α={alpha_eff:.6f}≥{floor_alpha}, skip")
+            elif eta_std > std_high:
+                # 强信号区: 降低到 cap
+                if alpha_eff > cap_alpha:
+                    alpha_eff_old = alpha_eff
+                    alpha_eff = cap_alpha
+                    gate_action = f"CAP(↓{cap_alpha})"
+                    logger.info(
+                        f"  [PNA-v5] ★ BidiStdGate CAP: η_std={eta_std:.4f} > {std_high}, "
+                        f"α {alpha_eff_old:.6f} → {alpha_eff:.6f}"
+                    )
+                else:
+                    gate_action = "skip(already≤cap)"
+                    logger.info(f"  [PNA-v5] BidiStdGate: η_std={eta_std:.4f}>high, but α={alpha_eff:.6f}≤{cap_alpha}, skip")
+            else:
+                # 甜点区: 保持不变
+                gate_action = "sweet_spot"
+                logger.info(
+                    f"  [PNA-v5] BidiStdGate: η_std={eta_std:.4f} in [{std_low},{std_high}] "
+                    f"sweet zone, α={alpha_eff:.6f} unchanged"
+                )
+
+        logger.info(f"  [PNA-v5] strategy=bidi_std_gate, α_final={alpha_eff:.6f}, action={gate_action}")
+
+        # ── Step 3: 可选在线探测 (诊断信息, 不影响 α) ──
         transformer = self.pipe.transformer
 
-        # ── 构造两种噪声 ──
-        # 用独立 generator 避免消耗主采样 RNG 状态, 保证 PNA 与基线可严格对比
-        alpha_test = 0.004
-        probe_seed = getattr(cfg, 'seed', 42) + 1
-        probe_generator = torch.Generator(device=eta_temporal.device).manual_seed(probe_seed)
-        eta_random = torch.randn(
-            eta_temporal.shape,
-            dtype=eta_temporal.dtype,
-            device=eta_temporal.device,
-            generator=probe_generator,
-        )
-        sqrt_a = math.sqrt(alpha_test)
-        sqrt_1ma = math.sqrt(1.0 - alpha_test)
-        eta_mixed = sqrt_a * eta_temporal + sqrt_1ma * eta_random
-
-        # ── 探测步 ──
-        t_probe = cfg.pna_probe_step
-        t_tensor = torch.full(
-            (eta_temporal.shape[0],), t_probe,
-            device=self.device, dtype=eta_temporal.dtype
-        )
-
-        # ── mid 层 hook ──
-        num_layers = len(transformer.blocks) if hasattr(transformer, 'blocks') else 30
-        probe_layer = num_layers // 2
-        captured = {}
-
-        def probe_hook(module, input, output):
-            if isinstance(output, tuple):
-                captured['feat'] = output[0].detach()
-            else:
-                captured['feat'] = output.detach()
-
-        handle = transformer.blocks[probe_layer].register_forward_hook(probe_hook)
-
+        # ── 快速探测 (可选诊断信息) ──
         try:
-            captured.clear()
-            _ = transformer(
-                hidden_states=eta_mixed, timestep=t_tensor,
-                encoder_hidden_states=prompt_embeds, return_dict=False,
+            probe_seed = getattr(cfg, 'seed', 42) + 1
+            probe_generator = torch.Generator(device=eta_temporal.device).manual_seed(probe_seed)
+            eta_random = torch.randn_like(eta_temporal, generator=probe_generator)
+            sqrt_a = math.sqrt(alpha_eff)
+            sqrt_1ma = math.sqrt(max(0.0, 1.0 - alpha_eff))
+            if sqrt_1ma < 1e-8:
+                # α ≈ 1: 等于直接用 temporal
+                eta_mixed = eta_temporal
+            else:
+                eta_mixed = sqrt_a * eta_temporal + sqrt_1ma * eta_random
+
+            t_probe = cfg.pna_probe_step
+            t_tensor = torch.full(
+                (eta_temporal.shape[0],), t_probe,
+                device=self.device, dtype=eta_temporal.dtype
             )
-            feat_mixed = captured.get('feat')
-            if feat_mixed is None:
-                logger.warning("  [PNA] 无法捕获混合噪声特征, 跳过 PNA")
-                cfg._current_alpha_eff = cfg.alpha
-                return cfg.alpha
+            num_layers = len(transformer.blocks) if hasattr(transformer, 'blocks') else 30
+            probe_layer = num_layers // 2
+            captured = {}
 
-            captured.clear()
-            _ = transformer(
-                hidden_states=eta_random, timestep=t_tensor,
-                encoder_hidden_states=prompt_embeds, return_dict=False,
-            )
-            feat_random = captured.get('feat')
-            if feat_random is None:
-                logger.warning("  [PNA] 无法捕获随机噪声特征, 跳过 PNA")
-                cfg._current_alpha_eff = cfg.alpha
-                return cfg.alpha
-        finally:
-            handle.remove()
+            def probe_hook(module, input, output):
+                captured['feat'] = output[0].detach() if isinstance(output, tuple) else output.detach()
 
-        # ── 特征差异 ──
-        delta_feat = feat_mixed - feat_random
-        delta_norm = delta_feat.norm().item()
-        feat_norm = feat_random.norm().item()
-        relative_impact = delta_norm / max(feat_norm, 1e-8)
-
-        # ── 差异方向一致性 ──
-        delta_flat = delta_feat.flatten()
-        half = delta_flat.shape[0] // 2
-        if half > 0:
-            cos_consistency = torch.nn.functional.cosine_similarity(
-                delta_flat[:half].unsqueeze(0),
-                delta_flat[half:2*half].unsqueeze(0)
-            ).item()
-        else:
-            cos_consistency = 0.0
-
-        pna_raw = relative_impact * (0.5 + 0.5 * cos_consistency)
-
-        # ── η_temporal 帧间余弦 ──
-        temporal_frame_cos = 0.0
-        if eta_temporal is not None:
-            et = eta_temporal
-            if et.dim() == 5 and et.shape[2] >= 2:
-                nf = et.shape[2]
-                tc_list = []
-                for f in range(nf - 1):
-                    f1 = et[0, :, f, :, :].flatten()
-                    f2 = et[0, :, f+1, :, :].flatten()
-                    tc = torch.nn.functional.cosine_similarity(
-                        f1.unsqueeze(0), f2.unsqueeze(0)
-                    ).item()
-                    tc_list.append(tc)
-                temporal_frame_cos = sum(tc_list) / len(tc_list) if tc_list else 0.0
-
-        # ════════════════════════════════════════════════════════════════════
-        # 诊断模式: 多α试探 + align 指标 (需要 fi_ref_features)
-        # 目的: 获知 align = cos(delta_inject, delta_ref) 与最优注入量的关系
-        # ════════════════════════════════════════════════════════════════════
-        diag_align_info = {}
-        if fi_ref_features is not None and len(fi_ref_features) > 1:
-            # 找到 t_probe 对应的 step_index
-            # 生成: step_index 完成后 t = 1 - (step_index+1)/N
-            # t_probe=0.95 → step_index ≈ round((1-0.95)*N - 1) ≈ 0
-            num_steps_gen = fi_ref_features.get("_meta", {}).get("num_steps", 30)
-            probe_step_idx = max(0, min(num_steps_gen - 1,
-                                        int(round((1.0 - t_probe) * num_steps_gen - 1))))
-            step_features = fi_ref_features.get(probe_step_idx, {})
-            feat_ref = step_features.get(probe_layer, None)
-
-            if feat_ref is not None:
-                # feat_ref 在 CPU, 移到正确设备
-                feat_ref = feat_ref.to(device=feat_random.device, dtype=feat_random.dtype)
-                # 展平用于 cos 计算
-                fr_flat = feat_random.flatten()
-                fm_flat = feat_mixed.flatten()
-                fref_flat = feat_ref.flatten()
-
-                # delta_ref = feat_ref - feat_random (朝参考靠拢的方向)
-                delta_ref = fref_flat - fr_flat
-                # delta_inject (α_test=0.004) = feat_mixed - feat_random
-                delta_inject_004 = fm_flat - fr_flat
-
-                # align: 注入方向与"朝参考方向"的对齐度
-                align_004 = torch.nn.functional.cosine_similarity(
-                    delta_inject_004.unsqueeze(0), delta_ref.unsqueeze(0)
-                ).item()
-
-                # cos(feat_mixed, feat_ref) vs cos(feat_random, feat_ref)
-                # align_diff > 0 → 注入后更接近参考 → 有利
-                cos_mixed_ref = torch.nn.functional.cosine_similarity(
-                    fm_flat.unsqueeze(0), fref_flat.unsqueeze(0)
-                ).item()
-                cos_random_ref = torch.nn.functional.cosine_similarity(
-                    fr_flat.unsqueeze(0), fref_flat.unsqueeze(0)
-                ).item()
-                align_diff = cos_mixed_ref - cos_random_ref
-
-                # ── 多 α_test 试探: 验证 align 对不同α是否稳定 ──
-                # 对小α, delta_inject ≈ √α · J · η_temporal, 方向应几乎不变
-                # 注意: 此时 hook 已 remove, 需要重新注册
-                multi_alpha_results = []
-                handle2 = transformer.blocks[probe_layer].register_forward_hook(probe_hook)
-                try:
-                    for alpha_t in [0.001, 0.002, 0.004, 0.006, 0.008]:
-                        sa = math.sqrt(alpha_t)
-                        s1ma = math.sqrt(1.0 - alpha_t)
-                        eta_mixed_t = sa * eta_temporal + s1ma * eta_random
-                        captured.clear()
-                        _ = transformer(
-                            hidden_states=eta_mixed_t, timestep=t_tensor,
-                            encoder_hidden_states=prompt_embeds, return_dict=False,
-                        )
-                        feat_t = captured.get('feat')
-                        if feat_t is not None:
-                            ft_flat = feat_t.flatten()
-                            di = ft_flat - fr_flat
-                            a_t = torch.nn.functional.cosine_similarity(
-                                di.unsqueeze(0), delta_ref.unsqueeze(0)
-                            ).item()
-                            ri_t = di.norm().item() / max(feat_random.norm().item(), 1e-8)
-                            cos_t_ref = torch.nn.functional.cosine_similarity(
-                                ft_flat.unsqueeze(0), fref_flat.unsqueeze(0)
-                            ).item()
-                            multi_alpha_results.append({
-                                'alpha': alpha_t, 'align': a_t,
-                                'relative_impact': ri_t,
-                                'cos_with_ref': cos_t_ref,
-                                'align_diff': cos_t_ref - cos_random_ref,
-                            })
-                finally:
-                    handle2.remove()
-
-                # 多层 align: 看不同层的 align 是否一致
-                multi_layer_align = {}
-                for l in list(step_features.keys())[:5]:  # 前5个缓存层
-                    fr_l = step_features[l].to(device=feat_random.device, dtype=feat_random.dtype).flatten()
-                    # 需要重新hook该层 — 但为节省时间, 用已有的 feat_mixed/feat_random 的近似
-                    # (probe_layer 的结果代表性强, 多层仅作参考)
-                    multi_layer_align[l] = None  # 占位, 实际需要额外forward
-
-                diag_align_info = {
-                    'probe_step': probe_step_idx,
-                    'align_004': align_004,
-                    'align_diff_004': align_diff,
-                    'cos_mixed_ref': cos_mixed_ref,
-                    'cos_random_ref': cos_random_ref,
-                    'multi_alpha': multi_alpha_results,
-                }
-
-                logger.info(
-                    f"  [PNA-Diag] probe_step={probe_step_idx}, layer={probe_layer}"
+            handle = transformer.blocks[probe_layer].register_forward_hook(probe_hook)
+            try:
+                captured.clear()
+                _ = transformer(
+                    hidden_states=eta_mixed, timestep=t_tensor,
+                    encoder_hidden_states=prompt_embeds, return_dict=False,
                 )
-                logger.info(
-                    f"  [PNA-Diag] align(cos(delta_inject, delta_ref))={align_004:.6f}, "
-                    f"align_diff(cos_mixed_ref - cos_random_ref)={align_diff:.6f}"
+                feat_mixed = captured.get('feat')
+                captured.clear()
+                _ = transformer(
+                    hidden_states=eta_random, timestep=t_tensor,
+                    encoder_hidden_states=prompt_embeds, return_dict=False,
                 )
-                logger.info(
-                    f"  [PNA-Diag] cos_mixed_ref={cos_mixed_ref:.6f}, "
-                    f"cos_random_ref={cos_random_ref:.6f}"
-                )
-                for r in multi_alpha_results:
-                    logger.info(
-                        f"  [PNA-Diag] α_test={r['alpha']:.4f}: "
-                        f"align={r['align']:.6f}, "
-                        f"impact={r['relative_impact']:.6f}, "
-                        f"cos_with_ref={r['cos_with_ref']:.6f}, "
-                        f"align_diff={r['align_diff']:.6f}"
-                    )
-            else:
-                logger.info(f"  [PNA-Diag] feat_ref 不可用 (step={probe_step_idx}, layer={probe_layer}), 跳过 align 诊断")
-        else:
-            logger.info(f"  [PNA-Diag] fi_ref_features 不可用, 跳过 align 诊断")
+                feat_random = captured.get('feat')
+            finally:
+                handle.remove()
 
-        # ════════════════════════════════════════════════════════════════════
-        # ★★★ PNA v4: 固定 α + StdGate floor 保护 ★★★
-        #
-        # [废弃] 高斯映射 (frame_cos → α):
-        #   经 30-case 实验验证, frame_cos 与 XC 收益几乎零相关 (r=0.05)
-        #   原因: frame_cos 衡量的是参考视频帧间连贯性(内容特性),
-        #         不代表 SVD 先验的质量或适用度
-        #   下方保留原代码注释供参考.
-        #
-        # [当前策略] 固定 α = alpha_test (默认0.0004),
-        #   仅当 η_std < 阈值时做 floor 保护(防止极端弱信号过注入).
-        #   这是最简单稳健的方案: 不试图预测最优α, 只做底线防护.
-        # ════════════════════════════════════════════════════════════════════
+            if feat_mixed is not None and feat_random is not None:
+                delta_norm = (feat_mixed - feat_random).norm().item()
+                feat_r_norm = feat_random.norm().item()
+                impact = delta_norm / max(feat_r_norm, 1e-8)
+                eta_std = eta_temporal.std().item() if eta_temporal is not None else 0.0
 
-        # ── [已废弃] 高斯映射原始代码 (保留注释) ──
-        # gauss_center = cfg.pna_gauss_center
-        # gauss_sigma = cfg.pna_gauss_sigma
-        # gauss_peak = cfg.pna_gauss_peak
-        # gauss_floor = cfg.pna_gauss_floor
-        # gauss_exp = math.exp(-((temporal_frame_cos - gauss_center) ** 2) / (2 * gauss_sigma ** 2))
-        # alpha_eff = gauss_floor + gauss_peak * gauss_exp
-        # impact_ref = cfg.pna_impact_ref
-        # impact_scale = max(0.5, min(1.0, relative_impact / impact_ref))
-        # alpha_eff = alpha_eff * impact_scale
-        # alpha_eff = max(cfg.pna_alpha_min, min(cfg.pna_alpha_max, alpha_eff))
-
-        # ★ v4 策略: 固定 α
-        alpha_eff = alpha_test  # 固定为探测用的 α (默认 0.0004)
-
-        # StdGate floor 保护 (仅设下限, 不封顶)
-        eta_std = 0.0
-        std_gate_active = False
-        std_gate_threshold = 0.33
-
-        if eta_temporal is not None:
-            eta_std = eta_temporal.std().item()
-            if eta_std < std_gate_threshold:
-                # 弱信号样本: 设一个安全的 floor, 但不关闭 SVD
-                safe_floor = 0.001  # 比默认值小但非零
-                if alpha_eff > safe_floor:
-                    alpha_eff = safe_floor
-                    std_gate_active = True
-
-        # ── 日志 (v4 简化版) ──
-        logger.info(
-            f"  [PNA-v4] strategy=fixed_α+StdGate_floor, "
-            f"α_fixed={alpha_test:.6f}, "
-            f"relative_impact={relative_impact:.6f}, "
-            f"cos_consistency={cos_consistency:.4f}"
-        )
-        logger.info(
-            f"  [PNA-v4] temporal_frame_cos={temporal_frame_cos:.4f} (NOT used for α), "
-            f"eta_std={eta_std:.4f}"
-        )
-        logger.info(
-            f"  [PNA-v4-StdGate] η_std={eta_std:.4f}, threshold={std_gate_threshold:.2f}, "
-            f"active={'✅ FLOOR' if std_gate_active else 'no'}, "
-            f"α_final={alpha_eff:.6f}"
-        )
-
-        # ════════════════════════════════════════════════════════════════════
-        # PNA v4 诊断汇总 (固定α策略)
-        # ════════════════════════════════════════════════════════════════════
-        if eta_std > 0:
-            if eta_std < 0.33:
-                std_tag = "WEAK_SIGNAL"
-            elif eta_std < 0.40:
-                std_tag = "MODERATE"
-            else:
-                std_tag = "STRONG"
-        else:
-            std_tag = "N/A"
-
-        if temporal_frame_cos > 0:
-            if temporal_frame_cos < 0.30:
-                cos_tag = "LOW_COS(incoherent)"
-            elif temporal_frame_cos < 0.50:
-                cos_tag = "MID_COS(transitional)"
-            else:
-                cos_tag = "HIGH_COS(coherent)"
-        else:
-            cos_tag = "N/A"
-
-        pna_category = f"{std_tag}|{cos_tag}"
-
-        fixed_alpha_default = alpha_test
-        alpha_vs_fixed = alpha_eff - fixed_alpha_default
-
-        logger.info(
-            f"  [PNA-v4-SUMMARY] ═════════════════════════════════════════"
-        )
-        logger.info(
-            f"  [PNA-v4-SUMMARY] category={pna_category}"
-        )
-        logger.info(
-            f"  [PNA-v4-SUMMARY] η_std={eta_std:.4f} ({std_tag}), "
-            f"frame_cos={temporal_frame_cos:.4f} ({cos_tag})"
-        )
-        logger.info(
-            f"  [PNA-v4-SUMMARY] α_fixed={fixed_alpha_default:.6f}, "
-            f"α_final={alpha_eff:.6f}, delta={alpha_vs_fixed:+.6f}, "
-            f"std_gate={'FLOOR' if std_gate_active else 'off'}"
-        )
-        align_val = diag_align_info.get('align_004', None)
-        logger.info(
-            f"  [PNA-SUMMARY] align_004={align_val:.6f}" if isinstance(align_val, (int, float)) else
-            f"  [PNA-SUMMARY] align_004=N/A (no fi_ref)"
-        )
+                # align 诊断 (如果有参考特征)
+                if fi_ref_features is not None and len(fi_ref_features) > 1:
+                    num_steps_gen = fi_ref_features.get("_meta", {}).get("num_steps", 30)
+                    probe_step_idx = max(0, min(num_steps_gen - 1,
+                                                int(round((1.0 - t_probe) * num_steps_gen - 1))))
+                    step_features = fi_ref_features.get(probe_step_idx, {})
+                    feat_ref = step_features.get(probe_layer, None)
+                    if feat_ref is not None:
+                        feat_ref = feat_ref.to(device=feat_random.device, dtype=feat_random.dtype)
+                        di = (feat_mixed - feat_random).flatten()
+                        dr = (feat_ref - feat_random).flatten()
+                        align = torch.nn.functional.cosine_similarity(
+                            di.unsqueeze(0), dr.unsqueeze(0)).item()
+                        cos_mr = torch.nn.functional.cosine_similarity(
+                            feat_mixed.flatten().unsqueeze(0),
+                            feat_ref.flatten().unsqueeze(0)).item()
+                        logger.info(f"  [PNA-v5-Diag] impact={impact:.6f}, "
+                                    f"η_std={eta_std:.4f}, align={align:.6f}, "
+                                    f"cos(mixed,ref)={cos_mr:.6f}")
+                    else:
+                        logger.info(f"  [PNA-v5-Diag] impact={impact:.6f}, η_std={eta_std:.4f} (no ref)")
+                else:
+                    logger.info(f"  [PNA-v5-Diag] impact={impact:.6f}, η_std={eta_std:.4f}")
+        except Exception as e:
+            logger.warning(f"  [PNA-v5] 探测异常, 跳过诊断: {e}")
 
         # 缓存到 cfg
         cfg._current_alpha_eff = alpha_eff
-        cfg._pna_diag = {
-            'eta_std': eta_std,
-            'temporal_frame_cos': temporal_frame_cos,
-            'pna_category': pna_category,
-            'alpha_eff': alpha_eff,
-            'std_gate_active': std_gate_active,
-            'relative_impact': relative_impact,
-        }
-
         return alpha_eff
 
 

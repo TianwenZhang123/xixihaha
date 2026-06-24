@@ -108,27 +108,22 @@ def parse_args():
     p.add_argument("--fi_adaptive_temp", type=float, default=5.0,
                    help="FI 自适应门控温度 (越大越敏感, 推荐 3~10; 默认 5.0)")
 
-    # ── PNA (Prompt-Noise Alignment) 在线门控 ──
+    # ── PNA v5: 在线探测 + 双向 StdGate 门控 ──
     p.add_argument("--pna_probe", action="store_true", default=False,
-                   help="启用 PNA 在线门控 (默认关闭). "
-                        "用模型一步前向测量 η_temporal 方向是否有利，替代 LLM M_d 离线判断")
+                   help="启用 PNA 在线探测 (默认关闭). "
+                        "用模型一步前向测量 η_temporal 方向是否有利, 仅用于诊断日志, 不改变 α")
     p.add_argument("--pna_probe_step", type=float, default=0.95,
                    help="PNA 探测的 t 值 (默认 0.95, 接近1.0=纯噪声, 影响最大)")
-    p.add_argument("--pna_alpha_max", type=float, default=0.006,
-                   help="PNA 门控的 α 上限 (默认 0.006)")
-    p.add_argument("--pna_alpha_min", type=float, default=0.0005,
-                   help="PNA 门控的 α 下限 (默认 0.0005, 不允许完全为0)")
-    p.add_argument("--pna_gauss_center", type=float, default=0.41,
-                   help="高斯映射中心 cos 值 (默认 0.41, peak 注入位置)")
-    p.add_argument("--pna_gauss_sigma", type=float, default=0.11,
-                   help="高斯映射宽度 σ (默认 0.11)")
-    p.add_argument("--pna_gauss_peak", type=float, default=0.006,
-                   help="高斯映射峰值 α (默认 0.006, center 处的 α_eff)")
-    p.add_argument("--pna_gauss_floor", type=float, default=0.0005,
-                   help="高斯映射基底 α (默认 0.0005, cos 远离 center 时); 应 ≥ --pna_alpha_min")
-    p.add_argument("--pna_impact_ref", type=float, default=0.015,
-                   help="impact 归一化参考值 (默认 0.015). 若日志显示 impact 普遍偏低, "
-                        "调小此值避免 α 被系统性砍半")
+    p.add_argument("--no_pna_std_gate", action="store_true",
+                   help="禁用双向 StdGate 门控")
+    p.add_argument("--pna_std_low", type=float, default=0.32,
+                   help="双向 StdGate 低阈值: η_std < 此值 → 抬升 α 到 floor (默认 0.32)")
+    p.add_argument("--pna_std_high", type=float, default=0.39,
+                   help="双向 StdGate 高阈值: η_std > 此值 → 降低 α 到 cap (默认 0.39)")
+    p.add_argument("--pna_std_floor_alpha", type=float, default=0.006,
+                   help="StdGate floor 值: 弱信号时 α 至少为此值 (默认 0.006 > baseline 0.004)")
+    p.add_argument("--pna_std_cap_alpha", type=float, default=0.002,
+                   help="StdGate cap 值: 强信号时 α 至多为此值 (默认 0.002 < baseline 0.004)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
@@ -195,16 +190,14 @@ def build_config(args) -> PFlowConfig:
         fi_cache_mode=args.fi_cache_mode,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
-        # PNA 在线门控
+        # PNA v5: 在线探测 + 双向 StdGate 门控
         pna_probe=args.pna_probe,
         pna_probe_step=args.pna_probe_step,
-        pna_alpha_max=args.pna_alpha_max,
-        pna_alpha_min=args.pna_alpha_min,
-        pna_gauss_center=args.pna_gauss_center,
-        pna_gauss_sigma=args.pna_gauss_sigma,
-        pna_gauss_peak=args.pna_gauss_peak,
-        pna_gauss_floor=args.pna_gauss_floor,
-        pna_impact_ref=args.pna_impact_ref,
+        pna_std_gate=not args.no_pna_std_gate,
+        pna_std_low=args.pna_std_low,
+        pna_std_high=args.pna_std_high,
+        pna_std_floor_alpha=args.pna_std_floor_alpha,
+        pna_std_cap_alpha=args.pna_std_cap_alpha,
     )
 
 
