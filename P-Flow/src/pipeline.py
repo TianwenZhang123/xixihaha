@@ -595,6 +595,9 @@ class PFlowPipeline:
             eta_temporal, svd_stats = svd_filter.filter(eta_inv, return_stats=True)
 
             logger.info(
+                f"  [SVD] η_spatial std={svd_stats.get('spatial_std', 'N/A')}, "
+                f"η_temporal std={eta_temporal.std():.4f}"
+            )
         else:
             eta_temporal = eta_inv
 
