@@ -46,9 +46,6 @@ from .vlm_client import create_vlm_client
 
 logger = logging.getLogger(__name__)
 
-from .constants import NEGATIVE_PROMPT
-
-
 @dataclass
 class PFlowConfig:
     """所有可配置参数，一个 dataclass 搞定。"""
@@ -754,7 +751,6 @@ class PFlowPipeline:
         cfg = self.config
         kwargs = {
             "prompt": prompt,
-            "negative_prompt": NEGATIVE_PROMPT,
             "height": cfg.height,
             "width": cfg.width,
             "num_frames": cfg.num_frames,
@@ -1337,7 +1333,6 @@ class PFlowPipeline:
             # ── 构建生成参数 ──
             kwargs = {
                 "prompt": prompt,
-            "negative_prompt": NEGATIVE_PROMPT,
             "height": cfg.height,
             "width": cfg.width,
             "num_frames": cfg.num_frames,
