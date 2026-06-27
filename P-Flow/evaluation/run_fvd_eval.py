@@ -42,6 +42,7 @@ from evaluation.clip_utils import extract_numeric_id, format_float
 DEFAULT_ORIG_DIR = Path("data/videos")
 DEFAULT_GEN_DIR = Path("outputs/baseline_batch")
 DEFAULT_OUTPUT_DIR = Path("outputs/eval_results/fvd")
+DEFAULT_R3D18_WEIGHTS = "models/r3d18-kinetics400/r3d18_kinetics400.pth"
 
 
 # ============================================================
@@ -108,93 +109,56 @@ def load_video_frames_as_tensor(
 # ============================================================
 
 def load_i3d_model(device: str, model_path: str = ""):
-    """Load I3D model for feature extraction.
+    """Load I3D/ResNet3D model for feature extraction from local weights.
 
-    Uses a simple 3D CNN approach: average-pool temporal I3D features.
-    Falls back to computing I3D-style features via 2D CNN + temporal averaging
-    if the full I3D model is unavailable.
+    Same pattern as CLIP/XCLIP: uses local_files_only by default.
+    Falls back to ResNet3D-18 if I3D is not available.
 
     Returns a callable that takes (B, T, C, H, W) and returns (B, D) features.
     """
-    # Try loading from pytorch-fvd if available
-    try:
-        from fvd import I3D
-        i3d = I3D(num_classes=400, in_channels=3)
-        if model_path and Path(model_path).exists():
-            i3d.load_state_dict(torch.load(model_path, map_location="cpu"))
-            print(f"Loaded I3D from: {model_path}", flush=True)
-        else:
-            # Try HuggingFace cache
-            from huggingface_hub import hf_hub_download
-            weight_path = hf_hub_download(
-                repo_id="chenkai/pytorch-i3d",
-                filename="rgb_imagenet.pt",
-            )
-            i3d.load_state_dict(torch.load(weight_path, map_location="cpu"))
-            print(f"Loaded I3D from HuggingFace cache", flush=True)
-        i3d = i3d.to(device)
-        i3d.eval()
+    from torchvision.models.video import r3d_18
 
-        @torch.inference_mode()
-        def extract_i3d_features(videos: torch.Tensor) -> np.ndarray:
-            """Extract I3D features from video batch.
-
-            Args:
-                videos: (B, T, C, H, W) in [0, 1], will be normalized to [-1, 1].
-            Returns:
-                (B, 400) feature array.
-            """
-            B = videos.shape[0]
-            # I3D expects (B, C, T, H, W) in [-1, 1]
-            videos = (videos * 2.0 - 1.0).permute(0, 2, 1, 3, 4)
-            features = i3d(videos)
-            return features.cpu().numpy()
-
-        return extract_i3d_features
-
-    except ImportError:
-        print(
-            "WARNING: pytorch-fvd or I3D not available. "
-            "Falling back to ResNet3D-18 based feature extraction.",
-            flush=True,
-        )
-        # Fallback: use torchvision 3D ResNet
-        from torchvision.models.video import r3d_18, R3D_18_Weights
-
+    model = r3d_18(weights=None)
+    if model_path and Path(model_path).exists():
+        model.load_state_dict(torch.load(model_path, map_location="cpu", weights_only=True))
+        print(f"  Loaded R3D18 from: {model_path}", flush=True)
+    else:
+        # Try default weights
+        from torchvision.models.video import R3D_18_Weights
         model = r3d_18(weights=R3D_18_Weights.KINETICS400_V1)
-        model = model.to(device)
-        model.eval()
+        print(f"  Loaded R3D18 from torchvision default weights", flush=True)
+    model = model.to(device)
+    model.eval()
 
-        # Remove the classification head, use the avgpool output
-        feature_extractor = torch.nn.Sequential(
-            model.stem,
-            model.layer1,
-            model.layer2,
-            model.layer3,
-            model.layer4,
-            model.avgpool,
-            torch.nn.Flatten(),
-        )
+    # Remove the classification head, use the avgpool output
+    feature_extractor = torch.nn.Sequential(
+        model.stem,
+        model.layer1,
+        model.layer2,
+        model.layer3,
+        model.layer4,
+        model.avgpool,
+        torch.nn.Flatten(),
+    )
 
-        @torch.inference_mode()
-        def extract_i3d_features(videos: torch.Tensor) -> np.ndarray:
-            """Extract 3D ResNet features as I3D substitute.
+    @torch.inference_mode()
+    def extract_i3d_features(videos: torch.Tensor) -> np.ndarray:
+        """Extract 3D ResNet features.
 
-            Args:
-                videos: (B, T, C, H, W) in [0, 1], will be normalized.
-            Returns:
-                (B, 512) feature array.
-            """
-            B = videos.shape[0]
-            # 3D ResNet expects (B, C, T, H, W) normalized with ImageNet stats
-            videos = videos.permute(0, 2, 1, 3, 4)  # (B, C, T, H, W)
-            mean = torch.tensor([0.45, 0.45, 0.45]).view(1, 3, 1, 1, 1).to(videos.device)
-            std = torch.tensor([0.225, 0.225, 0.225]).view(1, 3, 1, 1, 1).to(videos.device)
-            videos = (videos - mean) / std
-            features = feature_extractor(videos)
-            return features.cpu().numpy()
+        Args:
+            videos: (B, T, C, H, W) in [0, 1], will be normalized.
+        Returns:
+            (B, 512) feature array.
+        """
+        B = videos.shape[0]
+        videos = videos.permute(0, 2, 1, 3, 4)  # (B, C, T, H, W)
+        mean = torch.tensor([0.45, 0.45, 0.45]).view(1, 3, 1, 1, 1).to(videos.device)
+        std = torch.tensor([0.225, 0.225, 0.225]).view(1, 3, 1, 1, 1).to(videos.device)
+        videos = (videos - mean) / std
+        features = feature_extractor(videos)
+        return features.cpu().numpy()
 
-        return extract_i3d_features
+    return extract_i3d_features
 
 
 # ============================================================
@@ -352,8 +316,8 @@ def parse_args() -> argparse.Namespace:
                         help="Directory to save evaluation results")
     parser.add_argument("--num-frames", type=int, default=16,
                         help="Number of frames to sample per video for I3D")
-    parser.add_argument("--i3d-model", type=str, default="",
-                        help="Path to I3D pretrained weights (empty = auto-download)")
+    parser.add_argument("--i3d-model", type=str, default=DEFAULT_R3D18_WEIGHTS,
+                        help="Path to R3D18/I3D pretrained weights (default: models/r3d18-kinetics400/r3d18_kinetics400.pth)")
     parser.add_argument("--batch-size", type=int, default=8,
                         help="Batch size for feature extraction")
     parser.add_argument("--device", type=str,

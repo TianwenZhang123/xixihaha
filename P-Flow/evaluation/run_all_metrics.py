@@ -40,6 +40,8 @@ METRICS = [
         "needs_orig": True,
         "output_subdir": "eval_fvd",
         "json_file": "fvd_results.json",
+        "weight_arg": "--i3d-model",
+        "weight_key": "r3d18_weights",
     },
     {
         "name": "DINO-Score",
@@ -47,6 +49,8 @@ METRICS = [
         "needs_orig": True,
         "output_subdir": "eval_dino",
         "json_file": "dino_results.json",
+        "weight_arg": "--dinov2-model",
+        "weight_key": "dinov2_model",
     },
     {
         "name": "Flow EPE",
@@ -55,6 +59,8 @@ METRICS = [
         "output_subdir": "eval_flow",
         "json_file": "flow_results.json",
         "skip_flag": "skip_flow",
+        "weight_arg": "--raft-weights",
+        "weight_key": "raft_weights",
     },
     {
         "name": "LPIPS",
@@ -62,6 +68,8 @@ METRICS = [
         "needs_orig": True,
         "output_subdir": "eval_lpips",
         "json_file": "lpips_results.json",
+        "weight_arg": "--lpips-weights",
+        "weight_key": "lpips_weights",
     },
     {
         "name": "Temporal",
@@ -70,6 +78,8 @@ METRICS = [
         "output_subdir": "eval_temporal",
         "json_file": "temporal_results.json",
         "skip_flag": "skip_temporal",
+        "weight_arg": "--raft-weights",
+        "weight_key": "raft_weights",
     },
 ]
 
@@ -96,6 +106,15 @@ def parse_args() -> argparse.Namespace:
                         help="Skip Temporal evaluation")
     parser.add_argument("--skip-fvd", action="store_true",
                         help="Skip FVD evaluation (I3D download may be slow)")
+    # Model weight paths (local, same pattern as CLIP/XCLIP)
+    parser.add_argument("--dinov2-model", type=str, default="models/dinov2-vitb14",
+                        help="DINOv2 model local path")
+    parser.add_argument("--r3d18-weights", type=str, default="models/r3d18-kinetics400/r3d18_kinetics400.pth",
+                        help="R3D18 weights path for FVD")
+    parser.add_argument("--raft-weights", type=str, default="models/raft-large/raft_large.pth",
+                        help="RAFT weights path for Flow EPE / Dynamic Degree")
+    parser.add_argument("--lpips-weights", type=str, default="models/lpips-vgg/vgg_lpips.pth",
+                        help="LPIPS VGG weights path")
     return parser.parse_args()
 
 
@@ -114,6 +133,14 @@ def run_metric(metric: dict, args: argparse.Namespace, project_root: Path) -> di
         cmd.extend(["--limit", str(args.limit)])
     if args.sample_frames > 0:
         cmd.extend(["--sample-frames", str(args.sample_frames)])
+
+    # Pass model weight paths through to sub-scripts
+    weight_arg = metric.get("weight_arg")
+    weight_key = metric.get("weight_key")
+    if weight_arg and weight_key and hasattr(args, weight_key):
+        weight_path = getattr(args, weight_key)
+        if weight_path:
+            cmd.extend([weight_arg, str(weight_path)])
 
     print(f"\n{'=' * 60}", flush=True)
     print(f"  Running: {metric['name']}", flush=True)

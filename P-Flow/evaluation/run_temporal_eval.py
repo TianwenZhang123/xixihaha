@@ -41,6 +41,7 @@ from evaluation.clip_utils import extract_numeric_id, format_float, mean_of
 # ============================================================
 DEFAULT_GEN_DIR = Path("outputs/baseline_batch")
 DEFAULT_OUTPUT_DIR = Path("outputs/eval_results/temporal")
+DEFAULT_RAFT_WEIGHTS = "models/raft-large/raft_large.pth"
 
 
 # ============================================================
@@ -161,11 +162,19 @@ def compute_pixel_dynamic_degree(frames: list[np.ndarray]) -> float:
     return float(np.mean(diffs))
 
 
-def load_raft_model(device: str):
-    """Load RAFT optical flow model."""
-    raft = torch.hub.load(
-        "intel-isc/raft", "raft_large", pretrained=True, verbose=False
-    )
+def load_raft_model(device: str, weights_path: str = ""):
+    """Load RAFT optical flow model from local weights."""
+    import torchvision
+
+    raft = torchvision.models.optical_flow.raft_large(weights=None, progress=False)
+    if weights_path and Path(weights_path).exists():
+        raft.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
+        print(f"  Loaded RAFT weights from: {weights_path}", flush=True)
+    else:
+        raft = torchvision.models.optical_flow.raft_large(
+            weights=torchvision.models.optical_flow.Raft_Large_Weights.DEFAULT
+        )
+        print(f"  Loaded RAFT from torchvision default weights", flush=True)
     raft = raft.to(device)
     raft.eval()
     return raft
@@ -223,6 +232,8 @@ def parse_args() -> argparse.Namespace:
                         help="Resize height before flow estimation (0 = keep original)")
     parser.add_argument("--use-raft", action="store_true",
                         help="Use RAFT for dynamic degree (slower but more accurate)")
+    parser.add_argument("--raft-weights", type=str, default=DEFAULT_RAFT_WEIGHTS,
+                        help="Path to RAFT large weights (default: models/raft-large/raft_large.pth)")
     parser.add_argument("--device", type=str,
                         default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--limit", type=int, default=0,
@@ -286,7 +297,7 @@ def main() -> None:
     raft_model = None
     if args.use_raft:
         print(f"Loading RAFT model on {args.device}...", flush=True)
-        raft_model = load_raft_model(args.device)
+        raft_model = load_raft_model(args.device, args.raft_weights)
 
     # Evaluate each sample
     rows = []

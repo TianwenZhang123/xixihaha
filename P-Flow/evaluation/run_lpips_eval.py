@@ -34,6 +34,7 @@ from evaluation.clip_utils import extract_numeric_id, format_float, mean_of
 DEFAULT_ORIG_DIR = Path("data/videos")
 DEFAULT_GEN_DIR = Path("outputs/baseline_batch")
 DEFAULT_OUTPUT_DIR = Path("outputs/eval_results/lpips")
+DEFAULT_LPIPS_WEIGHTS = "models/lpips-vgg/vgg_lpips.pth"
 
 
 # ============================================================
@@ -133,10 +134,23 @@ def load_aligned_frames(
 # LPIPS computation
 # ============================================================
 
-def load_lpips_net(device: str):
-    """Load LPIPS network (VGG backbone)."""
+def load_lpips_net(device: str, weights_path: str = ""):
+    """Load LPIPS network (VGG backbone) from local weights (same pattern as CLIP/XCLIP).
+
+    Args:
+        device: Device string.
+        weights_path: Path to vgg_lpips.pth (pre-downloaded).
+    """
     import lpips
-    net = lpips.LPIPS(net="vgg").to(device)
+
+    if weights_path and Path(weights_path).exists():
+        net = lpips.LPIPS(net="vgg", pretrained=False)
+        net.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
+        print(f"  Loaded LPIPS weights from: {weights_path}", flush=True)
+    else:
+        net = lpips.LPIPS(net="vgg")
+        print(f"  Loaded LPIPS from default cache", flush=True)
+    net = net.to(device)
     net.eval()
     return net
 
@@ -208,6 +222,8 @@ def parse_args() -> argparse.Namespace:
                         help="Resize height before LPIPS (0 = keep original)")
     parser.add_argument("--batch-size", type=int, default=8,
                         help="Batch size for LPIPS inference")
+    parser.add_argument("--lpips-weights", type=str, default=DEFAULT_LPIPS_WEIGHTS,
+                        help="Path to LPIPS VGG weights (default: models/lpips-vgg/vgg_lpips.pth)")
     parser.add_argument("--device", type=str,
                         default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--limit", type=int, default=0,
@@ -275,7 +291,7 @@ def main() -> None:
 
     # Load LPIPS
     print(f"Loading LPIPS (VGG) on {args.device}...", flush=True)
-    lpips_net = load_lpips_net(args.device)
+    lpips_net = load_lpips_net(args.device, args.lpips_weights)
 
     # Evaluate each sample
     rows = []

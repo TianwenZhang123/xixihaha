@@ -45,7 +45,7 @@ from evaluation.clip_utils import (
 DEFAULT_ORIG_DIR = Path("data/videos")
 DEFAULT_GEN_DIR = Path("outputs/baseline_batch")
 DEFAULT_OUTPUT_DIR = Path("outputs/eval_results/dino")
-DEFAULT_DINOV2_MODEL = "facebook/dinov2-vitb14"
+DEFAULT_DINOV2_MODEL = "models/dinov2-vitb14"
 
 
 # ============================================================
@@ -115,17 +115,12 @@ def get_dinov2_frame_features(
 
 
 def load_dinov2_model(model_name: str, device: str):
-    """Load DINOv2 model and processor."""
+    """Load DINOv2 model and processor from local path (same pattern as CLIP/XCLIP)."""
     from transformers import AutoImageProcessor, AutoModel
 
     print(f"Loading DINOv2 model from: {model_name}", flush=True)
-    try:
-        processor = AutoImageProcessor.from_pretrained(model_name, local_files_only=True)
-        model = AutoModel.from_pretrained(model_name, local_files_only=True)
-    except Exception:
-        print(f"  Local loading failed, trying HuggingFace Hub...", flush=True)
-        processor = AutoImageProcessor.from_pretrained(model_name)
-        model = AutoModel.from_pretrained(model_name)
+    processor = AutoImageProcessor.from_pretrained(model_name, local_files_only=True)
+    model = AutoModel.from_pretrained(model_name, local_files_only=True)
 
     model = model.to(device).eval()
     return processor, model
@@ -201,7 +196,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
                         help="Directory to save evaluation results")
     parser.add_argument("--dinov2-model", type=str, default=DEFAULT_DINOV2_MODEL,
-                        help="DINOv2 model name or local path (default: facebook/dinov2-vitb14)")
+                        help="DINOv2 model local path (default: models/dinov2-vitb14, local_files_only)")
     parser.add_argument("--sample-frames", type=int, default=8,
                         help="Number of frames to uniformly sample per video")
     parser.add_argument("--device", type=str,
