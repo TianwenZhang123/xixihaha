@@ -63,13 +63,7 @@ def parse_args():
     p.add_argument("--full", action="store_true", help="快捷: --inversion --svd --blend --feature_inject")
 
     # ── 参数调节 ──
-    p.add_argument("--alpha", type=float, default=0.003, help="噪声混合权重 (推荐 0.001~0.01, P-Flow论文用 0.001)")
-    p.add_argument("--adaptive_alpha", action="store_true",
-                   help="启用 TSR-guided 自适应 α: 根据 Temporal Signal Reliability 自动调节 blend 系数")
-    p.add_argument("--alpha_max", type=float, default=0.006,
-                   help="自适应 α 上限 (TSR=1 且 M_d=1 时 α_fusion 可达此值)")
-    p.add_argument("--alpha_min", type=float, default=0.0,
-                   help="自适应 α 下限 (TSR=0 时取此值, 0=完全关闭 SVD blend)")
+    p.add_argument("--alpha", type=float, default=0.004, help="SVD 噪声混合权重 (v5 fixed, 推荐 0.004)")
     p.add_argument("--beta", type=float, default=0.0,
                    help="外观分量混合权重 β (推荐 0.0~0.005, 需 α+β<1.0). "
                         "启用后将 SVD Stage 1 分离的外观/内容分量也注入混合噪声, "
@@ -100,6 +94,12 @@ def parse_args():
                    help="FI λ 调度策略")
     p.add_argument("--fi_no_quality_gate", action="store_true",
                    help="禁用 FI 质量门控")
+    p.add_argument("--fi_quality_threshold", type=float, default=0.05,
+                   help="FI 质量门控阈值 (mean_cos < threshold → 弱引导; 默认 0.05; 设为 0.00 可基本跳过门控)")
+    p.add_argument("--fi_quality_k", type=float, default=20.0,
+                   help="FI 质量门控 sigmoid 斜率 (越大越陡峭; 默认 20.0)")
+    p.add_argument("--fi_quality_min_scale", type=float, default=0.1,
+                   help="FI 质量门控最低注入比例 (默认 0.1, 即最少保留 10%% 注入)")
     p.add_argument("--fi_cache_mode", type=str, default="attention",
                    choices=["attention", "hidden", "mlp"],
                    help="FI 缓存特征类型: attention=cross-attn输出(推荐), hidden=block输出, mlp=ffn输出")
@@ -108,22 +108,17 @@ def parse_args():
     p.add_argument("--fi_adaptive_temp", type=float, default=5.0,
                    help="FI 自适应门控温度 (越大越敏感, 推荐 3~10; 默认 5.0)")
 
-    # ── PNA v5: 在线探测 + 双向 StdGate 门控 ──
-    p.add_argument("--pna_probe", action="store_true", default=False,
-                   help="启用 PNA 在线探测 (默认关闭). "
-                        "用模型一步前向测量 η_temporal 方向是否有利, 仅用于诊断日志, 不改变 α")
-    p.add_argument("--pna_probe_step", type=float, default=0.95,
-                   help="PNA 探测的 t 值 (默认 0.95, 接近1.0=纯噪声, 影响最大)")
+    # ── SVD 双向门控 (Floor + CAP) ──
     p.add_argument("--no_pna_std_gate", action="store_true",
-                   help="禁用双向 StdGate 门控")
+                   help="禁用双向门控 (默认启用: Floor+CAP)")
     p.add_argument("--pna_std_low", type=float, default=0.32,
-                   help="双向 StdGate 低阈值: η_std < 此值 → 抬升 α 到 floor (默认 0.32)")
-    p.add_argument("--pna_std_high", type=float, default=0.39,
-                   help="双向 StdGate 高阈值: η_std > 此值 → 降低 α 到 cap (默认 0.39)")
+                   help="Floor 低阈值: η_std < 此值 → 抬升 α (默认 0.32)")
     p.add_argument("--pna_std_floor_alpha", type=float, default=0.006,
-                   help="StdGate floor 值: 弱信号时 α 至少为此值 (默认 0.006 > baseline 0.004)")
+                   help="Floor 值: 弱信号时 α 至少为此值 (默认 0.006)")
+    p.add_argument("--pna_std_high", type=float, default=0.45,
+                   help="CAP 高阈值: η_std > 此值 → 降低 α (默认 0.45)")
     p.add_argument("--pna_std_cap_alpha", type=float, default=0.002,
-                   help="StdGate cap 值: 强信号时 α 至多为此值 (默认 0.002 < baseline 0.004)")
+                   help="CAP 值: 强信号时 α 至多为此值 (默认 0.002)")
 
     # ── 模型路径 ──
     p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
@@ -169,9 +164,6 @@ def build_config(args) -> PFlowConfig:
         use_midpoint=args.midpoint,
         use_composite=args.composite,
         alpha=args.alpha,
-        adaptive_alpha=args.adaptive_alpha,
-        alpha_max=args.alpha_max,
-        alpha_min=args.alpha_min,
         beta=args.beta,
         rho_s=args.rho_s,
         rho_m=args.rho_m,
@@ -187,16 +179,17 @@ def build_config(args) -> PFlowConfig:
         fi_lambda=args.fi_lambda,
         fi_schedule=args.fi_schedule,
         fi_quality_gate=not args.fi_no_quality_gate,
+        fi_quality_threshold=args.fi_quality_threshold,
+        fi_quality_k=args.fi_quality_k,
+        fi_quality_min_scale=args.fi_quality_min_scale,
         fi_cache_mode=args.fi_cache_mode,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
-        # PNA v5: 在线探测 + 双向 StdGate 门控
-        pna_probe=args.pna_probe,
-        pna_probe_step=args.pna_probe_step,
+        # SVD 双向门控 (Floor + CAP)
         pna_std_gate=not args.no_pna_std_gate,
         pna_std_low=args.pna_std_low,
-        pna_std_high=args.pna_std_high,
         pna_std_floor_alpha=args.pna_std_floor_alpha,
+        pna_std_high=args.pna_std_high,
         pna_std_cap_alpha=args.pna_std_cap_alpha,
     )
 
@@ -304,7 +297,7 @@ def main():
     print(f"P-Flow | {config.experiment_name()}")
     print(f"  Flags: {flags or ['baseline (无改动)']}")
     if config.use_blend:
-        alpha_str = f"alpha={config.alpha}" if not config.adaptive_alpha else f"alpha=[{config.alpha_min}~{config.alpha_max}], TSR-guided"
+        alpha_str = f"alpha={config.alpha}"
         beta_str = f", beta={config.beta}" if config.beta > 0 else ""
         print(f"  {alpha_str}{beta_str}, rho_s={config.rho_s}, rho_m={config.rho_m}")
     if config.feature_inject:

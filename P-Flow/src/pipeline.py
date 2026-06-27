@@ -38,7 +38,7 @@ import torch
 
 from .distributed import setup_single_gpu, load_model_single_gpu, cleanup_gpu_memory
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
-from .svd_filter import SVDFilter, SVDFilterConfig, compute_temporal_signal_reliability
+from .svd_filter import SVDFilter, SVDFilterConfig
 from .video_utils import (
     load_video, save_video_tensor, normalize_video, denormalize_video,
     create_vertical_composite,
@@ -79,11 +79,8 @@ class PFlowConfig:
     use_midpoint: bool = False     # Midpoint ODE Solver
     use_composite: bool = False    # Vertical Composite for VLM
     # ── Noise Prior 参数 ──
-    alpha: float = 0.003           # 混合权重 (√α·η_temporal + √(1-α-β)·η_random)
-                                  # P-Flow论文用 0.001, 推荐搜索范围: 0.001 ~ 0.01
-    adaptive_alpha: bool = False   # 是否启用 PNA 自适应 α
-    alpha_max: float = 0.008       # 自适应 α 的上限
-    alpha_min: float = 0.0         # 自适应 α 的下限 (0=完全关闭SVD blend)
+    alpha: float = 0.004           # SVD 混合权重 (v5 fixed, 推荐 0.004)
+                                  # √α·η_temporal + √(1-α-β)·η_random
     beta: float = 0.0              # 外观分量混合权重 (√β·η_spatial), 0=不使用外观分量
                                   # 推荐范围: 0.0~0.005, 需 α+β < 1.0
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
@@ -112,6 +109,8 @@ class PFlowConfig:
     fi_adaptive_gate: bool = True         # 是否启用特征对齐自适应门控
     fi_adaptive_temp: float = 5.0          # 自适应门控温度 (越大越敏感, 推荐 3~10)
     fi_quality_threshold: float = 0.05    # 质量门控阈值 (mean_cos < threshold → 弱引导)
+    fi_quality_k: float = 20.0            # 质量门控 sigmoid 斜率 (越大越陡峭)
+    fi_quality_min_scale: float = 0.1     # 质量门控最低注入比例 (保留的最小引导量)
     fi_cache_mode: str = "attention"      # 缓存什么特征:
     #   attention: cross-attention 输出 (语义对齐, 推荐)
     #   hidden: 完整 hidden_states (信息丰富但维度大)
@@ -124,14 +123,12 @@ class PFlowConfig:
     vlm_provider: str = "local"
     vlm_model_path: str = "models/Qwen2.5-VL-7B-Instruct"
 
-    # ── PNA v5: 固定 α + 双向 StdGate 门控 ──
-    pna_probe: bool = False            # 启用 PNA 探测 (在线诊断日志, 不改变 α)
-    pna_probe_step: float = 0.95       # 探测的 t 值
-    pna_std_gate: bool = True          # 双向 StdGate 开关
-    pna_std_low: float = 0.32          # η_std 低于此值 → 抬升 α (floor, 防欠注入)
-    pna_std_high: float = 0.39         # η_std 高于此值 → 降低 α (cap, 防过注入)
-    pna_std_floor_alpha: float = 0.006 # floor: 弱信号时 α 至少为此值 (> 基准)
-    pna_std_cap_alpha: float = 0.002   # cap: 强信号时 α 至多为此值 (< 基准)
+    # ── SVD 双向门控 (Floor + CAP) ──
+    pna_std_gate: bool = True          # 门控开关 (opt-out: --no_pna_std_gate 关闭)
+    pna_std_low: float = 0.32          # Floor: η_std 低于此值 → 抬升 α 到 floor_alpha
+    pna_std_floor_alpha: float = 0.006 # floor 值: 弱信号时 α 至少为此值
+    pna_std_high: float = 0.45         # CAP:  η_std 高于此值 → 降低 α 到 cap_alpha
+    pna_std_cap_alpha: float = 0.002   # cap 值:  强信号时 α 至多为此值
 
     # ── 其他 ──
     seed: int = 42
@@ -594,22 +591,10 @@ class PFlowPipeline:
                 f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}"
             )
 
-            # 使用 return_stats 获取 S_temporal (避免 TSR 计算时重复 SVD)
+            # 使用 return_stats 获取 S_temporal
             eta_temporal, svd_stats = svd_filter.filter(eta_inv, return_stats=True)
 
-            # 如果启用自适应 α, 计算 TSR
-            if self.config.adaptive_alpha and svd_stats is not None:
-                tsr_result = compute_temporal_signal_reliability(
-                    eta_temporal,
-                    S_temporal=svd_stats.get("S_temporal"),
-                )
-                # 将 TSR 结果存入 svd_stats, 供 _get_latents 使用
-                svd_stats["tsr"] = tsr_result
-                logger.info(
-                    f"  [TSR] TCR={tsr_result['tcr']:.4f}, "
-                    f"TAC={tsr_result['tac']:.4f}, "
-                    f"TSR={tsr_result['tsr']:.4f}"
-                )
+            logger.info(
         else:
             eta_temporal = eta_inv
 
@@ -639,10 +624,11 @@ class PFlowPipeline:
             η_spatial:  SVD Stage 1 分离的外观/内容分量 (运动迁移时丢弃, 完全复原时有用)
             η_random:   纯随机噪声
 
-        当 adaptive_alpha=True 时, α 由 TSR (Temporal Signal Reliability) 自适应决定:
-            α_adaptive = α_min + TSR × (α_max - α_min)
-        TSR 越高 → η_temporal 中的运动信号越可靠 → α 越大 → 注入越强
-        TSR 越低 → η_temporal 中的运动信号不可靠 → α 越小 → 注入越弱甚至关闭
+        v5 fixed 策略: 固定 α = cfg.alpha (默认 0.004)
+        双向门控自动调节:
+          Floor: η_std 过低 → 抬升 α 防止欠注入
+          CAP:   η_std过高 → 降低 α 防止过注入
+        opt-out: --no_pna_std_gate 关闭全部门控
         """
         if eta_temporal is None or not self.config.use_blend:
             logger.info(
@@ -659,38 +645,32 @@ class PFlowPipeline:
             generator=generator,
         )
 
-        # ── Determine α ──
+        # ── Determine α (v5 fixed: 固定 α + 双向门控) ──
         cfg = self.config
-        if cfg.adaptive_alpha:
-            # ── PNA 在线门控 (替代 M_d × TSR) ──
-            if getattr(cfg, 'pna_probe', False):
-                # 用模型一步前向测量 η_temporal 的方向是否有利
-                prompt_embeds = getattr(cfg, '_current_prompt_embeds', None)
-                if prompt_embeds is not None:
-                    alpha_eff = self._compute_pna_score(
-                        eta_temporal, prompt_embeds, generator,
-                        fi_ref_features=fi_ref_features,
-                    )
-                    # _compute_pna_score 已计算 α_eff 并缓存到 cfg._current_alpha_eff
-                    alpha = getattr(cfg, '_current_alpha_eff', cfg.alpha)
-                else:
-                    # fallback: prompt_embeds 不可用, 使用固定 α
-                    logger.warning("  [PNA] prompt_embeds 不可用, 使用固定 α")
-                    alpha = cfg.alpha
-                    cfg._current_alpha_eff = alpha
-            else:
-                # 简单 TSR-guided adaptive α (无 PNA 探测时)
-                tsr_info = svd_stats.get("tsr", {}) if svd_stats else {}
-                tsr = tsr_info.get("tsr", 0.0)
-                alpha = cfg.alpha_min + tsr * (cfg.alpha_max - cfg.alpha_min)
-                cfg._current_alpha_eff = alpha
+        alpha = cfg.alpha
+        # ── 双向门控: Floor(防欠注入) + CAP(防过注入) ──
+        # opt-out: --no_pna_std_gate 即可关闭全部
+        if getattr(cfg, 'pna_std_gate', False) and eta_temporal is not None:
+            eta_std = eta_temporal.std().item()
+            std_low = getattr(cfg, 'pna_std_low', 0.32)
+            floor_alpha = getattr(cfg, 'pna_std_floor_alpha', 0.006)
+            std_high = getattr(cfg, 'pna_std_high', 0.45)
+            cap_alpha = getattr(cfg, 'pna_std_cap_alpha', 0.002)
+
+            if eta_std < std_low and alpha < floor_alpha:
+                # Floor: 弱信号 → 抬升 α 防欠注入
                 logger.info(
-                    f"  [Adaptive α] TSR={tsr:.4f}, "
-                    f"α_eff={alpha:.6f} (range: [{cfg.alpha_min}, {cfg.alpha_max}])"
+                    f"  [SVD-Floor] η_std={eta_std:.4f} < {std_low}, "
+                    f"α {alpha:.6f} → {floor_alpha:.6f}"
                 )
-        else:
-            # Fixed α (原行为)
-            alpha = cfg.alpha
+                alpha = floor_alpha
+            elif eta_std > std_high and alpha > cap_alpha:
+                # CAP: 强信号 → 降低 α 防过注入
+                logger.info(
+                    f"  [SVD-CAP] η_std={eta_std:.4f} > {std_high}, "
+                    f"α {alpha:.6f} → {cap_alpha:.6f}"
+                )
+                alpha = cap_alpha
 
         beta = cfg.beta
         remaining = max(0.0, 1.0 - alpha - beta)
@@ -908,9 +888,9 @@ class PFlowPipeline:
         mean_cos = sum(frame_cos_sims) / len(frame_cos_sims)
 
         # ── 软门控: sigmoid 映射 ──
-        min_scale = 0.1
+        min_scale = self.config.fi_quality_min_scale
         threshold = self.config.fi_quality_threshold
-        k = 20.0
+        k = self.config.fi_quality_k
         exp_arg = -k * (mean_cos - threshold)
         exp_arg = max(min(exp_arg, 500.0), -500.0)
         sigmoid_val = 1.0 / (1.0 + math.exp(exp_arg))
@@ -923,159 +903,6 @@ class PFlowPipeline:
         )
 
         return scale
-
-    @torch.no_grad()
-    def _compute_pna_score(
-        self,
-        eta_temporal: torch.Tensor,
-        prompt_embeds: torch.Tensor,
-        generator: torch.Generator,
-        fi_ref_features: Optional[Dict[str, Any]] = None,
-    ) -> float:
-        """
-        PNA v5: 固定 α + 双向 StdGate 门控 (可选在线探测诊断)。
-        
-        基于 v4 日志数据分析 (30 cases):
-          - Q1 (η_std < 0.328): mean_diff=-0.0606, 75% 更差 → 需要抬升 α
-          - Q2 (0.332~0.359):    mean_diff=+0.0283, 最佳甜点区 → 保持基准
-          - Q4 (η_std > 0.377): mean_diff=-0.0531, 75% 更差 → 需要降低 α
-        
-        门控策略:
-          η_std < low  → α = max(α, floor_alpha)   (防欠注入)
-          η_std > high → α = min(α, cap_alpha)     (防过注入)
-          中间区域     → 保持 cfg.alpha 不变
-        """
-        cfg = self.config
-
-        # ── Step 1: 基准 α ──
-        alpha_eff = cfg.alpha
-
-        # ── Step 2: 双向 StdGate ──
-        gate_action = "none"
-        if getattr(cfg, 'pna_std_gate', False) and eta_temporal is not None:
-            eta_std = eta_temporal.std().item()
-            std_low = getattr(cfg, 'pna_std_low', 0.32)
-            std_high = getattr(cfg, 'pna_std_high', 0.39)
-            floor_alpha = getattr(cfg, 'pna_std_floor_alpha', 0.006)
-            cap_alpha = getattr(cfg, 'pna_std_cap_alpha', 0.002)
-
-            if eta_std < std_low:
-                # 弱信号区: 抬升到 floor
-                if alpha_eff < floor_alpha:
-                    alpha_eff_old = alpha_eff
-                    alpha_eff = floor_alpha
-                    gate_action = f"FLOOR(↑{floor_alpha})"
-                    logger.info(
-                        f"  [PNA-v5] ★ BidiStdGate FLOOR: η_std={eta_std:.4f} < {std_low}, "
-                        f"α {alpha_eff_old:.6f} → {alpha_eff:.6f}"
-                    )
-                else:
-                    gate_action = "skip(already≥floor)"
-                    logger.info(f"  [PNA-v5] BidiStdGate: η_std={eta_std:.4f}<low, but α={alpha_eff:.6f}≥{floor_alpha}, skip")
-            elif eta_std > std_high:
-                # 强信号区: 降低到 cap
-                if alpha_eff > cap_alpha:
-                    alpha_eff_old = alpha_eff
-                    alpha_eff = cap_alpha
-                    gate_action = f"CAP(↓{cap_alpha})"
-                    logger.info(
-                        f"  [PNA-v5] ★ BidiStdGate CAP: η_std={eta_std:.4f} > {std_high}, "
-                        f"α {alpha_eff_old:.6f} → {alpha_eff:.6f}"
-                    )
-                else:
-                    gate_action = "skip(already≤cap)"
-                    logger.info(f"  [PNA-v5] BidiStdGate: η_std={eta_std:.4f}>high, but α={alpha_eff:.6f}≤{cap_alpha}, skip")
-            else:
-                # 甜点区: 保持不变
-                gate_action = "sweet_spot"
-                logger.info(
-                    f"  [PNA-v5] BidiStdGate: η_std={eta_std:.4f} in [{std_low},{std_high}] "
-                    f"sweet zone, α={alpha_eff:.6f} unchanged"
-                )
-
-        logger.info(f"  [PNA-v5] strategy=bidi_std_gate, α_final={alpha_eff:.6f}, action={gate_action}")
-
-        # ── Step 3: 可选在线探测 (诊断信息, 不影响 α) ──
-        transformer = self.pipe.transformer
-
-        # ── 快速探测 (可选诊断信息) ──
-        try:
-            probe_seed = getattr(cfg, 'seed', 42) + 1
-            probe_generator = torch.Generator(device=eta_temporal.device).manual_seed(probe_seed)
-            eta_random = torch.randn_like(eta_temporal, generator=probe_generator)
-            sqrt_a = math.sqrt(alpha_eff)
-            sqrt_1ma = math.sqrt(max(0.0, 1.0 - alpha_eff))
-            if sqrt_1ma < 1e-8:
-                # α ≈ 1: 等于直接用 temporal
-                eta_mixed = eta_temporal
-            else:
-                eta_mixed = sqrt_a * eta_temporal + sqrt_1ma * eta_random
-
-            t_probe = cfg.pna_probe_step
-            t_tensor = torch.full(
-                (eta_temporal.shape[0],), t_probe,
-                device=self.device, dtype=eta_temporal.dtype
-            )
-            num_layers = len(transformer.blocks) if hasattr(transformer, 'blocks') else 30
-            probe_layer = num_layers // 2
-            captured = {}
-
-            def probe_hook(module, input, output):
-                captured['feat'] = output[0].detach() if isinstance(output, tuple) else output.detach()
-
-            handle = transformer.blocks[probe_layer].register_forward_hook(probe_hook)
-            try:
-                captured.clear()
-                _ = transformer(
-                    hidden_states=eta_mixed, timestep=t_tensor,
-                    encoder_hidden_states=prompt_embeds, return_dict=False,
-                )
-                feat_mixed = captured.get('feat')
-                captured.clear()
-                _ = transformer(
-                    hidden_states=eta_random, timestep=t_tensor,
-                    encoder_hidden_states=prompt_embeds, return_dict=False,
-                )
-                feat_random = captured.get('feat')
-            finally:
-                handle.remove()
-
-            if feat_mixed is not None and feat_random is not None:
-                delta_norm = (feat_mixed - feat_random).norm().item()
-                feat_r_norm = feat_random.norm().item()
-                impact = delta_norm / max(feat_r_norm, 1e-8)
-                eta_std = eta_temporal.std().item() if eta_temporal is not None else 0.0
-
-                # align 诊断 (如果有参考特征)
-                if fi_ref_features is not None and len(fi_ref_features) > 1:
-                    num_steps_gen = fi_ref_features.get("_meta", {}).get("num_steps", 30)
-                    probe_step_idx = max(0, min(num_steps_gen - 1,
-                                                int(round((1.0 - t_probe) * num_steps_gen - 1))))
-                    step_features = fi_ref_features.get(probe_step_idx, {})
-                    feat_ref = step_features.get(probe_layer, None)
-                    if feat_ref is not None:
-                        feat_ref = feat_ref.to(device=feat_random.device, dtype=feat_random.dtype)
-                        di = (feat_mixed - feat_random).flatten()
-                        dr = (feat_ref - feat_random).flatten()
-                        align = torch.nn.functional.cosine_similarity(
-                            di.unsqueeze(0), dr.unsqueeze(0)).item()
-                        cos_mr = torch.nn.functional.cosine_similarity(
-                            feat_mixed.flatten().unsqueeze(0),
-                            feat_ref.flatten().unsqueeze(0)).item()
-                        logger.info(f"  [PNA-v5-Diag] impact={impact:.6f}, "
-                                    f"η_std={eta_std:.4f}, align={align:.6f}, "
-                                    f"cos(mixed,ref)={cos_mr:.6f}")
-                    else:
-                        logger.info(f"  [PNA-v5-Diag] impact={impact:.6f}, η_std={eta_std:.4f} (no ref)")
-                else:
-                    logger.info(f"  [PNA-v5-Diag] impact={impact:.6f}, η_std={eta_std:.4f}")
-        except Exception as e:
-            logger.warning(f"  [PNA-v5] 探测异常, 跳过诊断: {e}")
-
-        # 缓存到 cfg
-        cfg._current_alpha_eff = alpha_eff
-        return alpha_eff
-
 
 
 

@@ -673,4 +673,322 @@ $$
 
 ---
 
+### 3.8 门控系统现状与实验设计（2026-06-25）
+
+> 本节记录当前代码中**实际运行**的门控状态，以及基于此的实验设计。
+> 不同于 §3.3.5–§3.3.6 和 §3.4.3 中的理论设计，以下描述的是代码中的真实行为。
+
+#### 3.8.1 SVD α 门控：双向门控（Floor + CAP，默认启用）
+
+**当前状态：已实现，默认启用（2026-06-25 更新）**
+
+**设计哲学**：v5 fixed 策略 = 固定 α=0.004 + 极简双向门控。Floor 防欠注入、CAP 防过注入，零新参数、零额外开销、默认自动生效。
+
+**演进背景**：
+| 版本 | α 值 | 门控 | 问题 |
+|------|------|------|------|
+| v1-v3 | adaptive | 复杂高斯映射+TSR | 单指标不准 |
+| **v4 StdGate** | **0.0004** ❌ | FLOOR 保底 | α 小了10倍！ |
+| v5 fixed | 0.004 ✅ | **无（裸奔）** | 命令缺参数导致门控未触发 |
+| **v5+双向门控 (当前)** | **0.004** ✅ | **Floor + CAP** | ✅ 最终方案 |
+
+**门控逻辑**（`pipeline.py`，在固定 α 路径内直接执行）：
+
+$$
+\alpha_{\text{eff}} =
+\begin{cases}
+\max(\alpha_{\text{base}}, \; \alpha_{\text{floor}}) & \text{if } \eta_{\text{std}} < \theta_{\text{low}} \;\; \text{(Floor: 弱信号区抬升)} \\
+\min(\alpha_{\text{base}}, \; \alpha_{\text{cap}}) & \text{if } \eta_{\text{std}} > \theta_{\text{high}} \;\; \text{(CAP: 强信号区压低)} \\
+\alpha_{\text{base}} & \text{otherwise} \;\; \text{(甜点区：保持不变)}
+\end{cases}
+\tag{48}
+$$
+
+**关键特性**：
+
+| 特性 | 说明 |
+|------|------|
+| **零新参数** | 复用已有 `pna_std_gate`(默认True) |
+| **零额外开销** | 只算一次 `eta_temporal.std()`，无需 DiT forward |
+| **opt-out** | 加 `--no_pna_std_gate` 即可关闭，回到纯固定 α |
+| **双向保护** | Floor（防欠注入）+ CAP（防过注入） |
+
+**参数配置**：
+
+| 参数 | 默认值 | CLI 参数 | 含义 |
+|------|--------|----------|------|
+| $\theta_{\text{low}}$ | 0.32 | `--pna_std_low` | Floor 低阈值 |
+| $\theta_{\text{high}}$ | 0.45 | `--pna_std_high` | CAP 高阈值 |
+| $\alpha_{\text{floor}}$ | 0.006 | `--pna_std_floor_alpha` | 弱信号时最低 α |
+| $\alpha_{\text{cap}}$ | 0.002 | `--pna_std_cap_alpha` | 强信号时最高 α |
+
+**30 cases η_std 分布与门控触发预测**：
+
+| 区域 | η_std 范围 | case 数量 | 占比 | 门控行为 |
+|------|-----------|----------|------|---------|
+| **Floor 区** | $< 0.32$ | 4 个 | 13% | **α: 0.004 → 0.006** ↑ |
+| **甜点区** | $[0.32, 0.45]$ | ~20 个 | ~67% | α 保持 0.004 不变 |
+| **CAP 区** | $> 0.45$ | ~6 个 | ~20% | **α: 0.004 → 0.002** ↓ |
+
+统计: min=0.279, max=0.516, mean=0.360
+
+#### 3.8.2 FI λ 门控链：三层压缩模型
+
+FI 注入强度经过三层调制：
+
+$$
+\lambda_{\text{actual}} = \underbrace{\lambda_{\text{max}}}_{\text{用户设定}} \times \underbrace{\text{QS}}_{\substack{\text{质量尺度} \\ \text{(逐样本)}}} \times \underbrace{g^{(l,i)}}_{\substack{\text{自适应门控} \\ \text{(逐步×逐层)}}}
+\tag{49}
+$$
+
+##### 层级 1：时间调度 $\lambda_{\text{base}}(i)$
+
+$$
+\lambda_{\text{base}}(i) = \lambda_{\max} \cdot S(i)
+\tag{50}
+$$
+
+调度策略 $S(i)$ 支持：
+- `middle_peak`: $S(i) = \sin(\pi i / (N-1))$ — 中间高两端低（默认）
+- `constant`: $S(i) = 1$
+- `warmup_decay`: 前 20% 线性预热 + 余弦衰减
+- `cosine_decay`: $S(i) = \cos(\frac{\pi}{2} \cdot i / (N-1))$
+
+##### 层级 2：质量尺度 QS（Quality Scale）
+
+$$
+\bar{s}_{\text{frame}} = \frac{1}{F-1} \sum_{i=1}^{F-1} \cos(\eta_{\text{temporal}}^{(i)},\; \eta_{\text{temporal}}^{(i+1)})
+\tag{51}
+$$
+
+$$
+\text{QS} = s_{\min} + (1 - s_{\min}) \cdot \sigma\big(k_{\text{qs}} \cdot (\bar{s}_{\text{frame}} - \theta_{\text{qs}})\big)
+\tag{52}
+$$
+
+| 参数 | 默认值 | CLI 参数 | 说明 |
+|------|--------|----------|------|
+| $\theta_{\text{qs}}$ | 0.05 | `--fi_quality_threshold` | sigmoid 中心点 |
+| $k_{\text{qs}}$ | 20.0 | `--fi_quality_k` | sigmoid 斜率（越大越陡峭）|
+| $s_{\min}$ | 0.1 | `--fi_quality_min_scale` | 最低注入比例 |
+
+**实测分布（10 cases）**: QS ∈ [0.196, 0.966], **mean=0.550**
+— 平均只保留名义量的 55%
+
+##### 层级 3：自适应门控 $g^{(l,i)}$
+
+$$
+s^{(l,i)} = \cos(h_{\text{gen}}^{(l,i)},\; \tilde{h}_{\text{ref}}^{(l,i)}) \in [-1, 1]
+\tag{53}
+$$
+
+$$
+g^{(l,i)} = 1 - \sigma\big(\tau \cdot (s^{(l,i)} - 0.5)\big) \in [0, 1]
+\tag{54}
+$$
+
+| 参数 | 默认值 | CLI 参数 | 说明 |
+|------|--------|----------|------|
+| $\tau$ | 5.0 | `--fi_adaptive_temp` | 温度（越大越敏感）|
+
+**实测分布（10 cases）**: g ∈ [0.206, 0.471], **mean=0.313**, cos_sim_mean=0.660
+— 平均只保留 scheduled λ 的 31%
+
+**数学验证**: 当 cos_sim=0.660, τ=5.0 时：
+$$
+g = 1 - \sigma(5.0 \times 0.160) = 1 - \sigma(0.8) = 1 - 0.690 = 0.310 \approx 0.313 \;\checkmark
+$$
+
+##### 实际注入效率汇总
+
+| 配置 | QS 压缩 | gate 压缩 | **最终注入率** |
+|------|---------|-----------|---------------|
+| 当前默认 (τ=5.0, k=20, θ=0.05, s_min=0.1) | ~55% | ~31% | **~17%** |
+| M1 (τ=2.5) | ~55% | ~40% | **~22%** |
+| M2 (θ=0.0, k=10, s_min=0.3) | ~80% | ~31% | **~25%** |
+| **M3 (关闭 gate)** | **~55%** | **100%** | **~55%** |
+
+#### 3.8.3 四个关键实验
+
+以下实验均针对上述门控问题设计。每个实验明确标注其修改的门控层级和预期效果。
+
+---
+
+**实验 L1：SVD 双向门控验证（SVD α 门控，默认启用）**
+
+> 目标：验证双向门控（Floor+CAP）是否对 η_std 极端 case 有正向效果
+>
+> 修改位置：§3.8.1 — 门控已内置到固定 α 路径，默认自动启用，无需额外参数
+
+```bash
+# ===== 生成 (30 case) =====
+cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/PNA_v5_bidiGate_30cases \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+                50 70 72 73 74 76 78 79 80 81 82 83 84 85 88 99 104 105 106 111 \
+    --inversion --svd --blend --alpha 0.004 \
+    --feature_inject --fi_layers mid --fi_lambda 0.05 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
+    --seed 42 --verbose
+```
+
+```bash
+# ===== 评测 =====
+cd /root/xixihaha/P-Flow && OMP_NUM_THREADS=4 python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/PNA_v5_bidiGate_30cases \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/PNA_v5_bidiGate_30cases/eval_clip
+```
+
+**门控逻辑变化：**
+
+| 维度 | PNA v5 裸奔 (旧) | L1 (新, 双向门控默认启用) |
+|------|------------------|------------------------|
+| α 基准 | 0.004 (全部固定) | 0.004 (大部分保持) |
+| pna_std_gate | True 但未生效（路径不通） | **真正生效!** |
+| **预期 α 调整** | 全部 0.004 不变 | **~10/30 case 被调整**: 4→Floor(0.006), ~6→CAP(0.002) |
+
+**预期结果：**
+- Floor 区 ~4 case（η_std<0.32）：α 从 0.004 抬升到 0.006 → 预期 XCLIP 提升
+- CAP 区 ~6 case（η_std>0.45）：α 从 0.004 降低到 0.002 → 防过注入，稳定或略降
+- 甜点区 ~20 case：α 保持 0.004 不变 → 应与 v5 基线一致
+
+---
+
+**实验 M1：降低 FI 自适应门控温度 τ=5.0→2.5**
+
+> 目标：缓解 adaptive_gate 过度压缩（31%→45%）
+>
+> 修改位置：§3.8.2 Level 3 — 降低 fi_adaptive_temp
+
+```bash
+cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/FI_adaptive_temp25_10cases \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --inversion --svd --blend --alpha 0.004 \
+    --feature_inject --fi_layers mid --fi_lambda 0.10 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
+    --fi_adaptive_temp 2.5 \
+    --seed 42 --verbose
+```
+
+```bash
+cd /root/xixihaha/P-Flow && OMP_NUM_THREADS=4 python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/FI_adaptive_temp25_10cases \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/FI_adaptive_temp25_10cases/eval_clip
+```
+
+**门控逻辑变化：**
+
+| 维度 | 默认配置 | M1 |
+|------|---------|-----|
+| fi_adaptive_temp (τ) | **5.0** | **2.5** |
+| gate 公式 | $1-\sigma(5(s-0.5))$ | $1-\sigma(2.5(s-0.5))$ |
+| cos_sim=0.66 时 gate | 0.310 | **0.406** |
+| **预期平均注入率** | **17%** | **~22%** |
+
+**核心假设**: τ=5.0 把"中等相似度"(cos_sim≈0.66) 误判为"高对齐"而过度抑制。
+降低到 2.5 使门控曲线更平缓，允许更多注入。
+
+---
+
+**实验 M3：完全关闭 FI 自适应门控**
+
+> 目标：验证 adaptive_gate 是否为性能瓶颈（注入量从 17%→55%，翻 3 倍）
+>
+> 修改位置：§3.8.2 Level 3 — 用 `--fi_no_adaptive_gate` 关闭
+
+```bash
+cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/FI_no_adaptive_10cases \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --inversion --svd --blend --alpha 0.004 \
+    --feature_inject --fi_layers mid --fi_lambda 0.05 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
+    --fi_no_adaptive_gate \
+    --seed 42 --verbose
+```
+
+```bash
+cd /root/xixihaha/P-Flow && OMP_NUM_THREADS=4 python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/FI_no_adaptive_10cases \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/FI_no_adaptive_10cases/eval_clip
+```
+
+**门控逻辑变化：**
+
+| 维度 | 默认配置 | M3 |
+|------|---------|-----|
+| adaptive_gate | ✅ ON (gate_mean=0.313) | **❌ OFF (gate=1.0)** |
+| λ 调制链 | λ_max × schedule × **QS × gate** | λ_max × schedule × **QS** |
+| 最终注入率 | **~17%** (QS×gate ≈ 55%×31%) | **~55%** (只有 QS≈55%) |
+| 风险 | 无 | ⚠️ 可能过注 |
+
+**风险分析**: 注入量暴增 3x 可能导致部分 case 过注（尤其是 Case 31 这种"抗注入"case）。
+如果 M3 效果好则说明 adaptive_gate 的设计逻辑有问题；如果效果差则说明它确实在保护。
+
+---
+
+**实验 M4：关闭自适应门控 + 低 λ（M3 的安全版）**
+
+> 目标：在关闭 gate 的同时降低基础 λ 来平衡总注入量，避免过注
+>
+> 修改位置：§3.8.2 Level 1 (λ_max) + Level 3 (gate)
+
+```bash
+cd /root/xixihaha/P-Flow && python run.py \
+    --data_dir data/videos \
+    --caption_dir /root/xixihaha/test-v200/test-v200/captions \
+    --output_dir outputs/FI_noAdaptive_lambda003_10cases \
+    --sample_ids 7 17 21 31 32 33 34 43 46 47 \
+    --inversion --svd --blend --alpha 0.004 \
+    --feature_inject --fi_layers mid --fi_lambda 0.03 \
+    --fi_schedule middle_peak --fi_cache_mode attention \
+    --fi_no_adaptive_gate \
+    --seed 42 --verbose
+```
+
+```bash
+cd /root/xixihaha/P-Flow && OMP_NUM_THREADS=4 python evaluation/run_clip_xclip_eval.py \
+    --orig-dir data/videos \
+    --gen-dir outputs/FI_noAdaptive_lambda003_10cases \
+    --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+    --output-dir outputs/FI_noAdaptive_lambda003_10cases/eval_clip
+```
+
+**门控逻辑变化与对比：**
+
+| 配置 | λ_max | QS | gate | 最终注入率 | 相对默认 |
+|------|-------|----|------|-----------|---------|
+| 默认 (F) | 0.05 | 55% | 31% | **~8.6%** | 1.0x (基准) |
+| M3 | 0.05 | 55% | **100%** | **~27.5%** | **3.2x** |
+| **M4** | **0.03** | **55%** | **100%** | **~16.5%** | **1.9x** |
+
+**设计思路**: M3 的 27.5% 可能过高（接近原始无门控水平），用 λ=0.03 将目标注入率降到 ~16.5%
+（约为默认的 1.9 倍），在"增强引导"和"避免过注"之间取得平衡。
+
+#### 3.8.4 实验决策矩阵
+
+| 实验 | 修改层级 | 样本数 | 额外开销 | 预期收益 | 风险 |
+|------|---------|-------|---------|---------|------|
+| **L1** | SVD α (双向门控) | 30 | **零** (仅一次 std) | ~10/30 case α 被优化 | 极低 — 双向保护 |
+| **M1** | FI gate (温度) | 10 | 无 | 注入 +29% | 低 — 温度微调 |
+| **M3** | FI gate (完全关闭) | 10 | 无 | 注入 **+220%** | 中 — 可能过注 |
+| **M4** | FI λ+gate | 10 | 无 | 注入 **+90%** | 低 — 有 λ 保护 |
+
+**推荐执行顺序：L1/M1/M3/M4 可全部并行。L1 零额外开销（~5h 仅因30cases），M1/M3/M4 各 ~1.5h。根据第 1 批结果决定第 2 批（M2/L2/G）。**
+
+---
+
 *方法章节结束*
