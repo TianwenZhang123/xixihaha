@@ -1,0 +1,13 @@
+"""
+Shared constants for P-Flow.
+
+Centralized to avoid duplication across files.
+"""
+
+NEGATIVE_PROMPT = (
+    "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, "
+    "images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, "
+    "incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, "
+    "misshapen limbs, fused fingers, still picture, messy background, three legs, many people "
+    "in the background, walking backwards"
+)

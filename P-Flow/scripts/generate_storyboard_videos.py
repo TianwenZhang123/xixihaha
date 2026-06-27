@@ -43,14 +43,7 @@ OUTPUT_DIR = PROJECT_ROOT / "data" / "generated_videos"
 # 模型路径（AutoDL 服务器）
 MODEL_DIR = Path("/root/autodl-tmp/models/Wan2.1-T2V-1.3B-Diffusers")
 
-# 负面提示词（与 Video2Prompt 对齐）
-NEGATIVE_PROMPT = (
-    "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, "
-    "images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, "
-    "incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, "
-    "misshapen limbs, fused fingers, still picture, messy background, three legs, many people "
-    "in the background, walking backwards"
-)
+from src.constants import NEGATIVE_PROMPT
 
 # 类别列表
 CATEGORIES = ["human_action", "animal_nature", "physics_motion"]

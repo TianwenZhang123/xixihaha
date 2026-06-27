@@ -24,7 +24,6 @@ P-Flow Unified Pipeline.
     full pflow:     --inversion --svd --blend --feature_inject --iter 10 --composite
 """
 
-import os
 import json
 import time
 import shutil
@@ -36,7 +35,7 @@ from dataclasses import dataclass, field
 
 import torch
 
-from .distributed import setup_single_gpu, load_model_single_gpu, cleanup_gpu_memory
+from .distributed import setup_single_gpu, load_model_single_gpu
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
 from .svd_filter import SVDFilter, SVDFilterConfig
 from .video_utils import (
@@ -47,12 +46,7 @@ from .vlm_client import create_vlm_client
 
 logger = logging.getLogger(__name__)
 
-NEGATIVE_PROMPT = (
-    "Bright tones, overexposed, static, blurred details, subtitles, style, work, "
-    "paintings, images, static, overall gray, worst quality, low quality, JPEG compression "
-    "residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn face, "
-    "deformed, blurry, watermark"
-)
+from .constants import NEGATIVE_PROMPT
 
 
 @dataclass

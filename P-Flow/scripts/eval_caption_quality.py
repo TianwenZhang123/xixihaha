@@ -20,14 +20,19 @@ Caption Quality Evaluation — 轻量级 CLIP/X-CLIP text-video 相似度对比
 """
 
 import argparse
-import sys
 from pathlib import Path
 
-import cv2
-import numpy as np
 import torch
-from PIL import Image
-from transformers import AutoProcessor, CLIPModel, CLIPProcessor, XCLIPModel
+
+from evaluation.clip_utils import (
+    cosine_similarity,
+    sample_video_frames,
+    build_models,
+    get_clip_text_feature,
+    get_clip_video_feature,
+    get_xclip_text_feature,
+    get_xclip_video_feature,
+)
 
 
 # ============================================================
@@ -57,94 +62,17 @@ def parse_args():
     return parser.parse_args()
 
 
-# ============================================================
-# Video/Text feature extraction
-# ============================================================
-
-def sample_video_frames(video_path: Path, num_frames: int) -> list:
-    """均匀采样视频帧"""
-    cap = cv2.VideoCapture(str(video_path))
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if frame_count <= 0:
-        cap.release()
-        raise RuntimeError(f"Cannot read video: {video_path}")
-
-    indices = np.linspace(0, max(frame_count - 1, 0), num=num_frames, dtype=int)
-    frames = []
-    wanted = set(int(i) for i in indices.tolist())
-    current = 0
-
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        if current in wanted:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(Image.fromarray(rgb))
-        current += 1
-        if len(frames) >= len(wanted):
-            break
-
-    cap.release()
-    while len(frames) < num_frames:
-        frames.append(frames[-1].copy())
-    return frames[:num_frames]
-
-
-@torch.inference_mode()
-def get_clip_text_feature(text: str, processor, model, device: str) -> np.ndarray:
-    inputs = processor(text=[text], return_tensors="pt", truncation=True, max_length=77).to(device)
-    features = model.get_text_features(**inputs)
-    return features[0].detach().float().cpu().numpy()
-
-
-@torch.inference_mode()
-def get_clip_video_feature(frames: list, processor, model, device: str) -> np.ndarray:
-    inputs = processor(images=frames, return_tensors="pt").to(device)
-    features = model.get_image_features(**inputs)
-    mean_feature = features.detach().float().cpu().numpy().mean(axis=0)
-    return mean_feature
-
-
-@torch.inference_mode()
-def get_xclip_text_feature(text: str, processor, model, device: str) -> np.ndarray:
-    inputs = processor(text=[text], return_tensors="pt", truncation=True, max_length=77).to(device)
-    features = model.get_text_features(**inputs)
-    return features[0].detach().float().cpu().numpy()
-
-
-@torch.inference_mode()
-def get_xclip_video_feature(frames: list, processor, model, device: str) -> np.ndarray:
-    np_frames = [np.array(frame) for frame in frames]
-    inputs = processor(videos=[np_frames], return_tensors="pt").to(device)
-    features = model.get_video_features(**inputs)
-    return features[0].detach().float().cpu().numpy()
-
-
-def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
-    a = a / (np.linalg.norm(a) + 1e-8)
-    b = b / (np.linalg.norm(b) + 1e-8)
-    return float(np.dot(a, b))
-
-
-# ============================================================
-# Main
-# ============================================================
-
 def main():
     args = parse_args()
 
-    # 设置 caption 名称
     if args.caption_names and len(args.caption_names) == len(args.caption_dirs):
         names = args.caption_names
     else:
         names = [d.name for d in args.caption_dirs]
 
-    # 确定要评估的样本 ID
     if args.sample_ids:
         sample_ids = [str(sid) for sid in args.sample_ids]
     else:
-        # 从第一个 caption 目录获取样本列表
         all_ids = sorted(
             [p.stem for p in args.caption_dirs[0].glob("*.txt") if p.stem.isdigit()],
             key=lambda x: int(x)
@@ -158,19 +86,11 @@ def main():
     print(f"设备: {args.device}")
     print()
 
-    # 加载模型
-    print("加载 CLIP 模型...", flush=True)
-    clip_processor = CLIPProcessor.from_pretrained(args.clip_model, local_files_only=True)
-    clip_model = CLIPModel.from_pretrained(args.clip_model, local_files_only=True).to(args.device)
-    clip_model.eval()
-
-    print("加载 X-CLIP 模型...", flush=True)
-    xclip_processor = AutoProcessor.from_pretrained(args.xclip_model, local_files_only=True)
-    xclip_model = XCLIPModel.from_pretrained(args.xclip_model, local_files_only=True).to(args.device)
-    xclip_model.eval()
+    clip_processor, clip_model, xclip_processor, xclip_model = build_models(
+        args.device, args.clip_model, args.xclip_model
+    )
     print("模型加载完成\n", flush=True)
 
-    # 结果存储: {caption_name: {sample_id: {clip: x, xclip: x}}}
     results = {name: {} for name in names}
 
     for idx, sid in enumerate(sample_ids, 1):
@@ -179,7 +99,6 @@ def main():
             print(f"  [{idx}/{len(sample_ids)}] {sid}: 视频不存在，跳过")
             continue
 
-        # 提取视频特征（只需一次）
         frames = sample_video_frames(video_path, args.sample_frames)
         clip_video_feat = get_clip_video_feature(frames, clip_processor, clip_model, args.device)
         xclip_video_feat = get_xclip_video_feature(frames, xclip_processor, xclip_model, args.device)
@@ -195,13 +114,11 @@ def main():
 
             caption = cap_file.read_text(encoding="utf-8").strip()
 
-            # CLIP score
             clip_text_feat = get_clip_text_feature(caption, clip_processor, clip_model, args.device)
-            clip_score = cosine_sim(clip_video_feat, clip_text_feat)
+            clip_score = cosine_similarity(clip_video_feat, clip_text_feat)
 
-            # X-CLIP score
             xclip_text_feat = get_xclip_text_feature(caption, xclip_processor, xclip_model, args.device)
-            xclip_score = cosine_sim(xclip_video_feat, xclip_text_feat)
+            xclip_score = cosine_similarity(xclip_video_feat, xclip_text_feat)
 
             results[name][sid] = {"clip": clip_score, "xclip": xclip_score}
             print(f"    {name:20s}: CLIP={clip_score:.4f}  X-CLIP={xclip_score:.4f}")
@@ -216,7 +133,6 @@ def main():
     print("=" * 80)
     print()
 
-    # 表头
     header = f"{'Sample':<8}" + "".join(f"{name:<20}" for name in names)
     print(header)
     print("-" * len(header))
@@ -231,7 +147,6 @@ def main():
                 row += f"{'N/A':<20}"
         print(row)
 
-    # 均值
     print("-" * len(header))
     avg_row = f"{'AVG':<8}"
     for name in names:

@@ -34,9 +34,9 @@ Usage:
 import argparse
 import csv
 import json
-import math
-import re
 from pathlib import Path
+
+from evaluation.clip_utils import extract_numeric_id, format_float
 
 import cv2
 import numpy as np
@@ -85,11 +85,6 @@ def parse_args() -> argparse.Namespace:
 # ============================================================
 # Utility functions
 # ============================================================
-
-def extract_numeric_id(path: Path) -> str | None:
-    match = re.match(r"(\d+)", path.stem)
-    return match.group(1) if match else None
-
 
 def list_eval_items(orig_dir: Path, gen_dir: Path, limit: int = 0) -> list[dict]:
     """Find aligned pairs: original video + generated video."""
@@ -243,12 +238,6 @@ def prepare_npy_datasets(
 # ============================================================
 # Output formatting
 # ============================================================
-
-def format_float(value: float) -> str:
-    if math.isnan(value):
-        return "nan"
-    return f"{value:.6f}"
-
 
 def write_markdown_summary(output_path: Path, summary: dict) -> None:
     resize_text = "original resolution"

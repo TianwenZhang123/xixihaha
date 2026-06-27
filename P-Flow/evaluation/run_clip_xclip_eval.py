@@ -32,16 +32,24 @@ Models used (same as Video2Prompt collaborator):
 
 import argparse
 import csv
-import math
-import re
-import sys
+import json
 from pathlib import Path
 
-import cv2
-import numpy as np
 import torch
-from PIL import Image
-from transformers import AutoProcessor, CLIPModel, CLIPProcessor, XCLIPModel
+
+from evaluation.clip_utils import (
+    cosine_similarity,
+    sample_video_frames,
+    build_models,
+    get_clip_text_feature,
+    get_clip_video_feature,
+    get_xclip_text_feature,
+    get_xclip_video_feature,
+    format_float,
+    mean_of,
+    read_text,
+    extract_numeric_id,
+)
 
 
 # ============================================================
@@ -80,32 +88,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-# ============================================================
-# Utility functions
-# ============================================================
-
-def l2_normalize(array: np.ndarray) -> np.ndarray:
-    norm = np.linalg.norm(array)
-    if norm == 0:
-        return array
-    return array / norm
-
-
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    a = l2_normalize(a.astype(np.float32))
-    b = l2_normalize(b.astype(np.float32))
-    return float(np.dot(a, b))
-
-
-def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8").strip()
-
-
-def extract_numeric_id(path: Path) -> str | None:
-    match = re.match(r"(\d+)", path.stem)
-    return match.group(1) if match else None
-
-
 def list_eval_items(orig_dir: Path, gen_dir: Path, caption_dir: Path,
                     limit: int = 0) -> list[dict]:
     """Find aligned triplets: original video + generated video + caption.
@@ -117,18 +99,15 @@ def list_eval_items(orig_dir: Path, gen_dir: Path, caption_dir: Path,
     orig_map = {p.stem: p for p in orig_dir.glob("*.mp4")}
     caption_map = {p.stem: p for p in caption_dir.glob("*.txt")}
 
-    # Collect generated videos from both flat and nested layouts
     gen_map: dict[str, Path] = {}
-    # Flat: gen_dir/*.mp4
     for p in gen_dir.glob("*.mp4"):
         sid = extract_numeric_id(p)
         if sid and sid not in gen_map:
             gen_map[sid] = p
-    # Nested: gen_dir/sample_*/*.mp4
     for p in gen_dir.glob("sample_*/*.mp4"):
         sid = extract_numeric_id(p)
         if sid:
-            gen_map[sid] = p  # nested takes priority (actual output)
+            gen_map[sid] = p
 
     items = []
     for sample_id in sorted(gen_map.keys(), key=lambda x: int(x)):
@@ -147,115 +126,6 @@ def list_eval_items(orig_dir: Path, gen_dir: Path, caption_dir: Path,
     if limit > 0:
         items = items[:limit]
     return items
-
-
-def sample_video_frames(video_path: Path, num_frames: int) -> list[Image.Image]:
-    """Uniformly sample frames from a video file."""
-    cap = cv2.VideoCapture(str(video_path))
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if frame_count <= 0:
-        cap.release()
-        raise RuntimeError(f"Cannot read video frame count: {video_path}")
-
-    indices = np.linspace(0, max(frame_count - 1, 0), num=num_frames, dtype=int)
-    frames = []
-    wanted = set(int(i) for i in indices.tolist())
-    current = 0
-
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        if current in wanted:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(Image.fromarray(rgb))
-        current += 1
-        if len(frames) >= len(wanted):
-            break
-
-    cap.release()
-
-    if not frames:
-        raise RuntimeError(f"Failed to sample frames from video: {video_path}")
-
-    # Pad if needed
-    while len(frames) < num_frames:
-        frames.append(frames[-1].copy())
-
-    return frames[:num_frames]
-
-
-# ============================================================
-# Model loading
-# ============================================================
-
-def build_models(device: str, clip_model_name: str, xclip_model_name: str):
-    """Load CLIP and X-CLIP models."""
-    print(f"Loading CLIP model from: {clip_model_name}", flush=True)
-    clip_processor = CLIPProcessor.from_pretrained(clip_model_name, local_files_only=True)
-    clip_model = CLIPModel.from_pretrained(clip_model_name, local_files_only=True).to(device)
-    clip_model.eval()
-
-    print(f"Loading X-CLIP model from: {xclip_model_name}", flush=True)
-    xclip_processor = AutoProcessor.from_pretrained(xclip_model_name, local_files_only=True)
-    xclip_model = XCLIPModel.from_pretrained(xclip_model_name, local_files_only=True).to(device)
-    xclip_model.eval()
-
-    return clip_processor, clip_model, xclip_processor, xclip_model
-
-
-# ============================================================
-# Feature extraction
-# ============================================================
-
-@torch.inference_mode()
-def get_clip_text_feature(text: str, processor, model, device: str) -> np.ndarray:
-    """Get CLIP text embedding."""
-    inputs = processor(text=[text], return_tensors="pt", truncation=True).to(device)
-    features = model.get_text_features(**inputs)
-    return features[0].detach().float().cpu().numpy()
-
-
-@torch.inference_mode()
-def get_clip_video_feature(frames: list[Image.Image], processor, model, device: str) -> np.ndarray:
-    """Get CLIP image embedding (mean over frames)."""
-    inputs = processor(images=frames, return_tensors="pt").to(device)
-    features = model.get_image_features(**inputs)
-    mean_feature = features.detach().float().cpu().numpy().mean(axis=0)
-    return mean_feature
-
-
-@torch.inference_mode()
-def get_xclip_text_feature(text: str, processor, model, device: str) -> np.ndarray:
-    """Get X-CLIP text embedding."""
-    inputs = processor(text=[text], return_tensors="pt", truncation=True).to(device)
-    features = model.get_text_features(**inputs)
-    return features[0].detach().float().cpu().numpy()
-
-
-@torch.inference_mode()
-def get_xclip_video_feature(frames: list[Image.Image], processor, model, device: str) -> np.ndarray:
-    """Get X-CLIP video embedding (temporal-aware)."""
-    np_frames = [np.array(frame) for frame in frames]
-    inputs = processor(videos=[np_frames], return_tensors="pt").to(device)
-    features = model.get_video_features(**inputs)
-    return features[0].detach().float().cpu().numpy()
-
-
-# ============================================================
-# Output formatting
-# ============================================================
-
-def format_float(value: float) -> str:
-    if math.isnan(value):
-        return "nan"
-    return f"{value:.6f}"
-
-
-def mean_of(rows: list[dict], key: str) -> float:
-    if not rows:
-        return float("nan")
-    return float(sum(row[key] for row in rows) / len(rows))
 
 
 def write_markdown_summary(output_path: Path, rows: list[dict], summary: dict) -> None:
@@ -391,7 +261,6 @@ def main() -> None:
     write_markdown_summary(md_path, rows, summary)
 
     # Save JSON summary
-    import json
     json_path = args.output_dir / "eval_results.json"
     json_path.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

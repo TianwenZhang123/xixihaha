@@ -267,6 +267,89 @@ def _extract_frames(video_path: str, num_frames: int = 8) -> List:
     return pil_frames
 
 
+def upload_video_to_dashscope(video_path: str, api_key: str, model_name: str) -> Optional[str]:
+    """Upload a local video file to DashScope OSS and return an oss:// URL.
+
+    Module-level function extracted from VLMClient._upload_video_to_dashscope
+    to be shared with scripts/rewrite_minimal.py.
+    """
+    if not HAS_REQUESTS:
+        logger.warning("requests package not available, cannot upload video")
+        return None
+
+    if not os.path.isfile(video_path):
+        logger.warning(f"Video file not found: {video_path}")
+        return None
+
+    try:
+        cert_url = "https://dashscope.aliyuncs.com/api/v1/uploads"
+        headers = {"Authorization": f"Bearer {api_key}"}
+        params = {"action": "getPolicy", "model": model_name}
+
+        cert_resp = _requests.get(cert_url, headers=headers, params=params, timeout=30)
+        cert_resp.raise_for_status()
+        cert_data = cert_resp.json()
+
+        if cert_data.get("status_code") != 200 and "output" not in cert_data:
+            output = cert_data.get("data", cert_data.get("output", {}))
+        else:
+            output = cert_data.get("output", {})
+
+        upload_dir = output.get("upload_dir", "")
+        upload_host = output.get("upload_host", "")
+        oss_access_key_id = output.get("oss_access_key_id", "")
+        signature = output.get("signature", "")
+        policy = output.get("policy", "")
+        x_oss_object_acl = output.get("x_oss_object_acl", "private")
+        x_oss_forbid_overwrite = output.get("x_oss_forbid_overwrite", "true")
+
+        if not all([upload_dir, upload_host, oss_access_key_id, signature, policy]):
+            logger.warning(f"Incomplete upload certificate: {cert_data}")
+            return None
+
+        filename = os.path.basename(video_path)
+        object_key = f"{upload_dir}/{filename}"
+        content_type = mimetypes.guess_type(video_path)[0] or "video/mp4"
+
+        form_data = {
+            "OSSAccessKeyId": (None, oss_access_key_id),
+            "Signature": (None, signature),
+            "policy": (None, policy),
+            "key": (None, object_key),
+            "x-oss-object-acl": (None, x_oss_object_acl),
+            "x-oss-forbid-overwrite": (None, x_oss_forbid_overwrite),
+            "success_action_status": (None, "200"),
+            "x-oss-content-type": (None, content_type),
+        }
+
+        with open(video_path, "rb") as f:
+            files = {"file": (filename, f, content_type)}
+            upload_resp = _requests.post(
+                upload_host,
+                data={k: v[1] for k, v in form_data.items()},
+                files=files,
+                timeout=120,
+            )
+
+        if upload_resp.status_code == 200:
+            from urllib.parse import urlparse
+            parsed = urlparse(upload_host)
+            bucket = parsed.hostname.split(".")[0] if parsed.hostname else "dashscope"
+            oss_url = f"oss://{bucket}/{object_key}"
+            logger.info(f"Video uploaded successfully: {oss_url}")
+            return oss_url
+        else:
+            logger.warning(
+                f"OSS upload failed with status {upload_resp.status_code}: "
+                f"{upload_resp.text[:200]}"
+            )
+            return None
+
+    except Exception as e:
+        logger.warning(f"Video upload failed: {e}")
+        return None
+
+
 # =============================================================================
 # Local Qwen2.5-VL Client (runs on GPU)
 # =============================================================================
@@ -652,84 +735,7 @@ class VLMClient:
         self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
 
     def _upload_video_to_dashscope(self, video_path: str) -> Optional[str]:
-        """
-        Upload a local video file to DashScope OSS and return a temporary URL.
-        """
-        if not HAS_REQUESTS:
-            logger.warning("requests package not available, cannot upload video")
-            return None
-
-        if not os.path.isfile(video_path):
-            logger.warning(f"Video file not found: {video_path}")
-            return None
-
-        try:
-            cert_url = "https://dashscope.aliyuncs.com/api/v1/uploads"
-            headers = {"Authorization": f"Bearer {self._api_key}"}
-            params = {"action": "getPolicy", "model": self.model_name}
-
-            cert_resp = _requests.get(cert_url, headers=headers, params=params, timeout=30)
-            cert_resp.raise_for_status()
-            cert_data = cert_resp.json()
-
-            if cert_data.get("status_code") != 200 and "output" not in cert_data:
-                output = cert_data.get("data", cert_data.get("output", {}))
-            else:
-                output = cert_data.get("output", {})
-
-            upload_dir = output.get("upload_dir", "")
-            upload_host = output.get("upload_host", "")
-            oss_access_key_id = output.get("oss_access_key_id", "")
-            signature = output.get("signature", "")
-            policy = output.get("policy", "")
-            x_oss_object_acl = output.get("x_oss_object_acl", "private")
-            x_oss_forbid_overwrite = output.get("x_oss_forbid_overwrite", "true")
-
-            if not all([upload_dir, upload_host, oss_access_key_id, signature, policy]):
-                logger.warning(f"Incomplete upload certificate: {cert_data}")
-                return None
-
-            filename = os.path.basename(video_path)
-            object_key = f"{upload_dir}/{filename}"
-            content_type = mimetypes.guess_type(video_path)[0] or "video/mp4"
-
-            form_data = {
-                "OSSAccessKeyId": (None, oss_access_key_id),
-                "Signature": (None, signature),
-                "policy": (None, policy),
-                "key": (None, object_key),
-                "x-oss-object-acl": (None, x_oss_object_acl),
-                "x-oss-forbid-overwrite": (None, x_oss_forbid_overwrite),
-                "success_action_status": (None, "200"),
-                "x-oss-content-type": (None, content_type),
-            }
-
-            with open(video_path, "rb") as f:
-                files = {"file": (filename, f, content_type)}
-                upload_resp = _requests.post(
-                    upload_host,
-                    data={k: v[1] for k, v in form_data.items()},
-                    files=files,
-                    timeout=120,
-                )
-
-            if upload_resp.status_code == 200:
-                from urllib.parse import urlparse
-                parsed = urlparse(upload_host)
-                bucket = parsed.hostname.split(".")[0] if parsed.hostname else "dashscope"
-                oss_url = f"oss://{bucket}/{object_key}"
-                logger.info(f"Video uploaded successfully: {oss_url}")
-                return oss_url
-            else:
-                logger.warning(
-                    f"OSS upload failed with status {upload_resp.status_code}: "
-                    f"{upload_resp.text[:200]}"
-                )
-                return None
-
-        except Exception as e:
-            logger.warning(f"Video upload failed: {e}")
-            return None
+        return upload_video_to_dashscope(video_path, self._api_key, self.model_name)
 
     def analyze_and_refine(
         self,

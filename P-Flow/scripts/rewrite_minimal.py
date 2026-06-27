@@ -43,8 +43,6 @@ import sys
 import time
 import json
 import logging
-import base64
-import io
 from pathlib import Path
 from typing import Optional, List
 
@@ -234,115 +232,24 @@ def call_openai_compatible(prompt: str, system: str, model: str,
 # ============================================================================
 
 def _extract_frames_base64(video_path: str, num_frames: int = 16) -> List[str]:
-    """Extract evenly-spaced frames from video as base64 JPEG"""
-    import numpy as np
-
-    if not os.path.exists(video_path):
-        return []
-
-    try:
-        from decord import VideoReader, cpu
-        vr = VideoReader(video_path, ctx=cpu(0))
-        total_frames = len(vr)
-        indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
-        frames = vr.get_batch(indices).asnumpy()
-    except (ImportError, Exception):
-        try:
-            import imageio.v3 as iio
-            all_frames = iio.imread(video_path, plugin="pyav")
-            total_frames = len(all_frames)
-            indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
-            frames = all_frames[indices]
-        except Exception:
-            return []
-
+    """Extract evenly-spaced frames from video as base64 JPEG."""
+    from src.vlm_client import _extract_frames
     from PIL import Image
+    import io, base64
 
+    pil_frames = _extract_frames(video_path, num_frames)
     frames_b64 = []
-    for frame in frames:
-        img = Image.fromarray(frame)
-        max_dim = 1280
-        if max(img.size) > max_dim:
-            ratio = max_dim / max(img.size)
-            new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
-            img = img.resize(new_size, Image.LANCZOS)
+    for img in pil_frames:
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG", quality=85)
         frames_b64.append(base64.b64encode(buffer.getvalue()).decode("utf-8"))
-
     return frames_b64
 
 
 def _upload_video_to_dashscope(video_path: str, api_key: str, model: str) -> Optional[str]:
-    """Upload video to DashScope OSS, return oss:// URL"""
-    try:
-        import requests as _requests
-        import mimetypes
-        from urllib.parse import urlparse
-    except ImportError:
-        return None
-
-    if not os.path.isfile(video_path):
-        return None
-
-    try:
-        cert_url = "https://dashscope.aliyuncs.com/api/v1/uploads"
-        headers = {"Authorization": f"Bearer {api_key}"}
-        params = {"action": "getPolicy", "model": model}
-
-        cert_resp = _requests.get(cert_url, headers=headers, params=params, timeout=30)
-        cert_resp.raise_for_status()
-        cert_data = cert_resp.json()
-
-        if cert_data.get("status_code") != 200 and "output" not in cert_data:
-            output = cert_data.get("data", cert_data.get("output", {}))
-        else:
-            output = cert_data.get("output", {})
-
-        upload_dir = output.get("upload_dir", "")
-        upload_host = output.get("upload_host", "")
-        oss_access_key_id = output.get("oss_access_key_id", "")
-        signature = output.get("signature", "")
-        policy = output.get("policy", "")
-        x_oss_object_acl = output.get("x_oss_object_acl", "private")
-        x_oss_forbid_overwrite = output.get("x_oss_forbid_overwrite", "true")
-
-        if not all([upload_dir, upload_host, oss_access_key_id, signature, policy]):
-            return None
-
-        filename = os.path.basename(video_path)
-        object_key = f"{upload_dir}/{filename}"
-        content_type = mimetypes.guess_type(video_path)[0] or "video/mp4"
-
-        with open(video_path, "rb") as f:
-            files = {"file": (filename, f, content_type)}
-            upload_resp = _requests.post(
-                upload_host,
-                data={
-                    "OSSAccessKeyId": oss_access_key_id,
-                    "Signature": signature,
-                    "policy": policy,
-                    "key": object_key,
-                    "x-oss-object-acl": x_oss_object_acl,
-                    "x-oss-forbid-overwrite": x_oss_forbid_overwrite,
-                    "success_action_status": "200",
-                    "x-oss-content-type": content_type,
-                },
-                files=files,
-                timeout=120,
-            )
-
-        if upload_resp.status_code == 200:
-            parsed = urlparse(upload_host)
-            bucket = parsed.hostname.split(".")[0] if parsed.hostname else "dashscope"
-            oss_url = f"oss://{bucket}/{object_key}"
-            return oss_url
-        else:
-            return None
-
-    except Exception as e:
-        logger.warning(f"Video upload failed: {e}")
-        return None
+    """Upload video to DashScope OSS, return oss:// URL."""
+    from src.vlm_client import upload_video_to_dashscope as _upload
+    return _upload(video_path, api_key, model)
 
 
 def call_vlm_dashscope(video_path: str, user_msg: str, system_msg: str,

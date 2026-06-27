@@ -47,7 +47,7 @@ except ImportError:
 
 try:
     from scenedetect import detect as _sd_detect
-    from scenedetect import ContentDetector, ThresholdDetector
+    from scenedetect import ContentDetector
     HAS_PYSCENEDETECT = True
 except ImportError:
     HAS_PYSCENEDETECT = False

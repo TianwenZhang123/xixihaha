@@ -15,6 +15,16 @@ from PIL import Image
 from transformers import AutoProcessor, CLIPModel, CLIPProcessor, XCLIPModel
 
 
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8").strip()
+
+
+def extract_numeric_id(path: Path) -> str | None:
+    import re
+    match = re.match(r"(\d+)", path.stem)
+    return match.group(1) if match else None
+
+
 def l2_normalize(array: np.ndarray) -> np.ndarray:
     norm = np.linalg.norm(array)
     if norm == 0:
