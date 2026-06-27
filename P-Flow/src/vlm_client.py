@@ -23,7 +23,7 @@ import time
 import logging
 import mimetypes
 import gc
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +265,101 @@ def _extract_frames(video_path: str, num_frames: int = 8) -> List:
         pil_frames.append(img)
 
     return pil_frames
+
+
+def _describe_video(
+    video_path: str,
+    generate_func,
+    extract_content_func,
+    use_video_mode: bool = True,
+    max_retries: int = 3,
+    upload_video_func=None,
+    prepare_model_func=None,
+) -> str:
+    """
+    用 VLM 观看视频并生成结构化 caption（用于 baseline caption 生成）。
+
+    按 SUBJECT->ACTION->SCENE->CAMERA->STYLE 模板输出，
+    严格限制在 80-100 英文词，适配 Wan2.1-1.3B T5 encoder 有效窗口。
+
+    Args:
+        video_path: 视频文件路径
+        generate_func: 生成函数，接受消息列表，返回响应文本
+        extract_content_func: 提取内容函数，接受视频路径和帧数，返回内容列表
+        use_video_mode: 是否使用视频模式
+        max_retries: 最大重试次数
+        upload_video_func: 上传视频函数（仅VLMClient需要）
+        prepare_model_func: 准备模型函数（仅LocalVLMClient需要）
+
+    Returns:
+        结构化 caption 字符串（英文，80-100 词）
+    """
+    # 准备模型（如果需要）
+    if prepare_model_func:
+        prepare_model_func()
+
+    describe_instruction = (
+        "You are a professional text-to-video prompt engineer. "
+        "Write a structured prompt for a text-to-video model based on the given video. "
+        "Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text."
+    )
+
+    structured_request = (
+        "Watch this video carefully and write a structured text-to-video prompt in English. "
+        "Follow this exact content order:\n"
+        "1. SUBJECT: who/what the main subject(s) are, their appearance and count.\n"
+        "2. ACTION: what motion/action is happening, movement direction, speed, gestures.\n"
+        "3. SCENE: environment, background, lighting, time of day, weather.\n"
+        "4. CAMERA: shot type (close-up/medium/wide), angle (low/high/eye-level), "
+        "movement (static/pan/zoom/tracking).\n"
+        "5. STYLE: color palette, mood, atmosphere, visual quality.\n\n"
+        "STRICT RULES:\n"
+        "- Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text.\n"
+        "- Total length: strictly 80-100 English words. Count carefully before outputting.\n"
+        "- Put subject and action in the FIRST 40 words (highest priority for the model).\n"
+        "- Be specific and vivid (e.g. 'a golden retriever sprinting left to right across green grass' "
+        "not 'a dog moving')."
+    )
+
+    # 构建内容
+    content = [{"type": "text", "text": structured_request}]
+
+    # 根据模式添加视频或帧
+    if use_video_mode and upload_video_func:
+        video_url = upload_video_func(video_path)
+        if video_url:
+            content.append({"type": "video_url", "video_url": {"url": video_url}})
+        else:
+            # 回退到帧提取
+            frames_content = extract_content_func(video_path, 16)
+            if not frames_content:
+                return ""
+            content.extend(frames_content)
+    else:
+        frames_content = extract_content_func(video_path, 8)
+        if not frames_content:
+            return ""
+        content.extend(frames_content)
+
+    # 构建消息
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": describe_instruction}]},
+        {"role": "user", "content": content},
+    ]
+
+    # 调用VLM
+    for attempt in range(max_retries):
+        try:
+            response_text = generate_func(messages)
+            return response_text.strip()
+        except Exception as e:
+            logger.warning(
+                f"VLM describe_video failed (attempt {attempt + 1}/{max_retries}): {e}"
+            )
+            if attempt < max_retries - 1:
+                time.sleep(1)
+
+    return ""
 
 
 def upload_video_to_dashscope(video_path: str, api_key: str, model_name: str) -> Optional[str]:
@@ -592,11 +687,18 @@ class LocalVLMClient:
     def _parse_response(self, response_text: str, fallback_prompt: str) -> Dict[str, Any]:
         return _parse_response(response_text, fallback_prompt)
 
-    def _validate_response(self, result: Dict[str, Any], fallback_prompt: str) -> Dict[str, Any]:
-        return _validate_response(result, fallback_prompt)
-
     def _fallback_response(self, prompt: str) -> Dict[str, Any]:
         return _fallback_response(prompt)
+
+    def _extract_frames_for_describe(self, video_path: str, num_frames: int) -> List[Dict]:
+        """为 _describe_video 提供帧内容列表。"""
+        frames_pil = self._extract_frames_pil(video_path, num_frames)
+        if not frames_pil:
+            return []
+        content_list = []
+        for img in frames_pil:
+            content_list.append({"type": "image", "image": img})
+        return content_list
 
     def describe_video(self, video_path: str) -> str:
         """
@@ -611,62 +713,14 @@ class LocalVLMClient:
         Returns:
             结构化 caption 字符串（英文，80-100 词）
         """
-        self._load_model()
-
-        num_frames = 16 if self.use_video_mode else 8
-        frames_pil = self._extract_frames_pil(video_path, num_frames=num_frames)
-        if not frames_pil:
-            logger.warning(f"No frames extracted from {video_path}, returning empty caption")
-            return ""
-
-        describe_instruction = (
-            "You are a professional text-to-video prompt engineer. "
-            "Write a structured prompt for a text-to-video model based on the given video frames. "
-            "Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text."
+        return _describe_video(
+            video_path=video_path,
+            generate_func=self._generate,
+            extract_content_func=self._extract_frames_for_describe,
+            use_video_mode=self.use_video_mode,
+            max_retries=self.max_retries,
+            prepare_model_func=self._load_model,
         )
-
-        structured_request = (
-            "Watch these video frames carefully and write a structured text-to-video prompt in English. "
-            "Follow this exact content order:\n"
-            "1. SUBJECT: who/what the main subject(s) are, their appearance and count.\n"
-            "2. ACTION: what motion/action is happening, movement direction, speed, gestures.\n"
-            "3. SCENE: environment, background, lighting, time of day, weather.\n"
-            "4. CAMERA: shot type (close-up/medium/wide), angle (low/high/eye-level), "
-            "movement (static/pan/zoom/tracking).\n"
-            "5. STYLE: color palette, mood, atmosphere, visual quality.\n\n"
-            "STRICT RULES:\n"
-            "- Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text.\n"
-            "- Total length: strictly 80-100 English words. Count carefully before outputting.\n"
-            "- Put subject and action in the FIRST 40 words (highest priority for the model).\n"
-            "- Be specific and vivid (e.g. 'a golden retriever sprinting left to right across green grass' "
-            "not 'a dog moving')."
-        )
-
-        content_list = []
-        for img in frames_pil:
-            content_list.append({"type": "image", "image": img})
-        content_list.append({
-            "type": "text",
-            "text": structured_request,
-        })
-
-        messages = [
-            {"role": "system", "content": [{"type": "text", "text": describe_instruction}]},
-            {"role": "user", "content": content_list},
-        ]
-
-        for attempt in range(self.max_retries):
-            try:
-                response_text = self._generate(messages)
-                return response_text.strip()
-            except Exception as e:
-                logger.warning(
-                    f"VLM describe_video failed (attempt {attempt + 1}/{self.max_retries}): {e}"
-                )
-                if attempt < self.max_retries - 1:
-                    time.sleep(1)
-
-        return ""
 
 
 
@@ -855,8 +909,18 @@ class VLMClient:
     def _parse_response(self, response_text: str, fallback_prompt: str) -> Dict[str, Any]:
         return _parse_response(response_text, fallback_prompt)
 
-    def _validate_response(self, result: Dict[str, Any], fallback_prompt: str) -> Dict[str, Any]:
-        return _validate_response(result, fallback_prompt)
+    def _extract_frames_for_describe(self, video_path: str, num_frames: int) -> List[Dict]:
+        """为 _describe_video 提供帧内容列表。"""
+        frames_base64 = self._extract_frames_base64(video_path, num_frames)
+        if not frames_base64:
+            return []
+        content_list = []
+        for frame_b64 in frames_base64:
+            content_list.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}
+            })
+        return content_list
 
     def describe_video(self, video_path: str) -> str:
         """
@@ -871,72 +935,23 @@ class VLMClient:
         Returns:
             结构化 caption 字符串（英文，80-100 词）
         """
-        describe_instruction = (
-            "You are a professional text-to-video prompt engineer. "
-            "Write a structured prompt for a text-to-video model based on the given video. "
-            "Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text."
+        def generate_func(messages):
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            return response.choices[0].message.content
+
+        return _describe_video(
+            video_path=video_path,
+            generate_func=generate_func,
+            extract_content_func=self._extract_frames_for_describe,
+            use_video_mode=self.use_video_mode,
+            max_retries=self.max_retries,
+            upload_video_func=self._upload_video_to_dashscope,
         )
-
-        structured_request = (
-            "Watch this video carefully and write a structured text-to-video prompt in English. "
-            "Follow this exact content order:\n"
-            "1. SUBJECT: who/what the main subject(s) are, their appearance and count.\n"
-            "2. ACTION: what motion/action is happening, movement direction, speed, gestures.\n"
-            "3. SCENE: environment, background, lighting, time of day, weather.\n"
-            "4. CAMERA: shot type (close-up/medium/wide), angle (low/high/eye-level), "
-            "movement (static/pan/zoom/tracking).\n"
-            "5. STYLE: color palette, mood, atmosphere, visual quality.\n\n"
-            "STRICT RULES:\n"
-            "- Output ONLY the prompt text as ONE continuous paragraph. No labels, no JSON, no extra text.\n"
-            "- Total length: strictly 80-100 English words. Count carefully before outputting.\n"
-            "- Put subject and action in the FIRST 40 words (highest priority for the model).\n"
-            "- Be specific and vivid (e.g. 'a golden retriever sprinting left to right across green grass' "
-            "not 'a dog moving')."
-        )
-
-        content = [{"type": "text", "text": structured_request}]
-
-        if self.use_video_mode:
-            video_url = self._upload_video_to_dashscope(video_path)
-            if video_url:
-                content.append({"type": "video_url", "video_url": {"url": video_url}})
-            else:
-                frames_base64 = self._extract_frames_base64(video_path, num_frames=16)
-                if not frames_base64:
-                    return ""
-                for frame_b64 in frames_base64:
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}
-                    })
-        else:
-            frames_base64 = self._extract_frames_base64(video_path, num_frames=8)
-            if not frames_base64:
-                return ""
-            for frame_b64 in frames_base64:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}
-                })
-
-        for attempt in range(self.max_retries):
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": describe_instruction},
-                        {"role": "user", "content": content},
-                    ],
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                )
-                return response.choices[0].message.content.strip()
-            except Exception as e:
-                logger.warning(f"VLM describe_video failed (attempt {attempt + 1}/{self.max_retries}): {e}")
-                if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
-
-        return ""
 
     def _fallback_response(self, prompt: str) -> Dict[str, Any]:
         return _fallback_response(prompt)
