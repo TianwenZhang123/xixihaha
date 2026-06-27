@@ -47,11 +47,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 导入改写函数
-from scripts.run_hybrid_iter import (
-    REWRITE_SYSTEM,
-    call_llm,
-    _compute_edit_ratio,
-)
+# 注意: run_hybrid_iter 已不存在，此脚本需配合 rewrite_minimal.py 使用的 API 格式
+# 以下为保留脚本结构使用的占位定义
+def _compute_edit_ratio(a: str, b: str) -> float:
+    from difflib import SequenceMatcher
+    return 1.0 - SequenceMatcher(None, a.split(), b.split()).ratio()
+
+REWRITE_SYSTEM = "You are a helpful assistant that restructures video captions."
+call_llm = None  # 需要根据实际 LLM API 重新实现
 
 
 # ─── 已知的正确主体（用于验证主体识别）───

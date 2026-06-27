@@ -387,32 +387,4 @@ def encode_video_to_latents(
     return latents
 
 
-def decode_latents_to_video(
-    pipe,
-    latents: torch.Tensor,
-    device: str = "cuda",
-) -> torch.Tensor:
-    """
-    Decode latents to video space using VAE decoder.
 
-    Args:
-        pipe: Pipeline with VAE.
-        latents: Latent tensor.
-        device: Target device.
-
-    Returns:
-        Video tensor (B, C, F, H, W) in [0, 1].
-    """
-    with torch.no_grad():
-        latents = latents.to(device=device, dtype=pipe.vae.dtype)
-
-        scaling_factor = getattr(pipe.vae.config, "scaling_factor", None)
-        if scaling_factor is None:
-            scaling_factor = getattr(pipe, "vae_scaling_factor", 0.18215)
-        latents = latents / scaling_factor
-
-        video = pipe.vae.decode(latents).sample
-        video = (video + 1.0) / 2.0
-        video = video.clamp(0, 1)
-
-    return video

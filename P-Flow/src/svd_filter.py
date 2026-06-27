@@ -44,10 +44,9 @@ class SVDFilter:
     """
     V2 SVD Motion Prior Extractor.
 
-    三阶段流水线:
+    两阶段流水线:
         Stage 1: Spatial Decontenting (去内容/外观)
         Stage 2: Temporal Retention (保运动动态)
-        Stage 3: Frequency Band Selection + Renormalization (频段选择 + 标准化)
     """
 
     def __init__(self, config: Optional[SVDFilterConfig] = None, **kwargs):
@@ -105,8 +104,6 @@ class SVDFilter:
                 return result, stats
             return result
 
-    # 向后兼容
-    filter_efficient = filter
 
     def _process_single(self, noise_inv: torch.Tensor, return_stats: bool = False):
         """
@@ -134,8 +131,7 @@ class SVDFilter:
         # ── Stage 2: Temporal Retention ──
         noise_temporal, S_temporal, k_m = self._stage2_temporal(noise_after_spatial)
 
-        # ── Stage 3: v1 模式 (直接返回 Stage 2 输出) ──
-        result = self._stage3_postprocess(noise_temporal)
+        result = noise_temporal  # v1 模式: 直接返回 Stage 2 输出
 
         # 恢复原始 dtype
         if result.dtype != original_dtype:
@@ -220,14 +216,6 @@ class SVDFilter:
         logger.debug(f"  [Stage2] Temporal: kept top-{k_m}/{len(S_m)} components")
 
         return noise_temporal, S_m, k_m
-
-    # ─────────────────────────────────────────────────────────────
-    # Stage 3: 频段选择 + Renormalization
-    # ─────────────────────────────────────────────────────────────
-
-    def _stage3_postprocess(self, noise_temporal: torch.Tensor) -> torch.Tensor:
-        """Stage 3: v1 模式直接返回 Stage 2 输出."""
-        return noise_temporal
 
     # ─────────────────────────────────────────────────────────────
     # 辅助方法

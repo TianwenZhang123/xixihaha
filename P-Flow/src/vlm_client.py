@@ -133,6 +133,141 @@ Focus on the biggest remaining differences first. Output as JSON."""
 
 
 # =============================================================================
+# 模块级工具函数（提取自两个 client 的重复方法）
+# =============================================================================
+
+def _format_history(history: Optional[List[Dict[str, Any]]]) -> str:
+    """Format optimization history as concise text summary."""
+    if not history:
+        return ""
+    lines = []
+    for entry in history[-5:]:
+        iter_num = entry.get("iteration", "?")
+        prompt = entry.get("prompt", "")[:100]
+        analysis = entry.get("analysis", {})
+        if isinstance(analysis, dict):
+            comparison = analysis.get("comparison", "")[:150]
+        else:
+            comparison = str(analysis)[:150]
+        lines.append(f"  Iter {iter_num}: prompt=\"{prompt}...\" | differences=\"{comparison}...\"")
+    return "\n".join(lines)
+
+
+def _parse_response(response_text: str, fallback_prompt: str) -> Dict[str, Any]:
+    """Parse VLM response into structured format."""
+    import re
+
+    try:
+        result = json.loads(response_text)
+        return _validate_response(result, fallback_prompt)
+    except json.JSONDecodeError:
+        pass
+
+    json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response_text, re.DOTALL)
+    if json_match:
+        try:
+            result = json.loads(json_match.group(1))
+            return _validate_response(result, fallback_prompt)
+        except json.JSONDecodeError:
+            pass
+
+    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+    if json_match:
+        try:
+            result = json.loads(json_match.group(0))
+            return _validate_response(result, fallback_prompt)
+        except json.JSONDecodeError:
+            pass
+
+    logger.warning("Failed to parse VLM response as JSON, using fallback")
+    return {
+        "analysis": {
+            "reference_description": "",
+            "last_generated_description": "",
+            "new_generated_description": "",
+            "comparison": response_text[:500],
+        },
+        "refined_prompt": fallback_prompt,
+        "parse_error": True,
+    }
+
+
+def _validate_response(result: Dict[str, Any], fallback_prompt: str) -> Dict[str, Any]:
+    """Validate and normalize the parsed response."""
+    analysis = result.get("analysis", {})
+    if isinstance(analysis, str):
+        analysis = {
+            "reference_description": "",
+            "last_generated_description": "",
+            "new_generated_description": "",
+            "comparison": analysis,
+        }
+    validated = {
+        "analysis": {
+            "reference_description": str(analysis.get("reference_description", "")),
+            "last_generated_description": str(analysis.get("last_generated_description", "")),
+            "new_generated_description": str(analysis.get("new_generated_description", "")),
+            "comparison": str(analysis.get("comparison", "")),
+        },
+        "refined_prompt": str(result.get("refined_prompt", fallback_prompt)),
+    }
+    if not validated["refined_prompt"].strip():
+        validated["refined_prompt"] = fallback_prompt
+    return validated
+
+
+def _fallback_response(prompt: str) -> Dict[str, Any]:
+    """Fallback when VLM is unavailable."""
+    return {
+        "analysis": {
+            "reference_description": "[VLM call failed]",
+            "last_generated_description": "",
+            "new_generated_description": "",
+            "comparison": "[unavailable]",
+        },
+        "refined_prompt": prompt,
+        "vlm_error": True,
+    }
+
+
+def _extract_frames(video_path: str, num_frames: int = 8) -> List:
+    """Extract evenly-spaced frames from video as PIL Images."""
+    import numpy as np
+    from PIL import Image
+
+    if not os.path.exists(video_path):
+        return []
+
+    try:
+        from decord import VideoReader, cpu
+        vr = VideoReader(video_path, ctx=cpu(0))
+        total_frames = len(vr)
+        indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+        frames = vr.get_batch(indices).asnumpy()
+    except (ImportError, Exception):
+        try:
+            import imageio.v3 as iio
+            all_frames = iio.imread(video_path, plugin="pyav")
+            total_frames = len(all_frames)
+            indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+            frames = all_frames[indices]
+        except Exception:
+            return []
+
+    pil_frames = []
+    for frame in frames:
+        img = Image.fromarray(frame)
+        max_dim = 1280
+        if max(img.size) > max_dim:
+            ratio = max_dim / max(img.size)
+            new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+            img = img.resize(new_size, Image.LANCZOS)
+        pil_frames.append(img)
+
+    return pil_frames
+
+
+# =============================================================================
 # Local Qwen2.5-VL Client (runs on GPU)
 # =============================================================================
 
@@ -365,126 +500,20 @@ class LocalVLMClient:
         return output_text
 
     def _extract_frames_pil(self, video_path: str, num_frames: int = 8) -> List[Any]:
-        """
-        Extract evenly-spaced frames from video as PIL Images.
-
-        Returns list of PIL.Image objects for Qwen2.5-VL processing.
-        """
-        import numpy as np
-        from PIL import Image
-
-        if not os.path.exists(video_path):
-            return []
-
-        try:
-            from decord import VideoReader, cpu
-            vr = VideoReader(video_path, ctx=cpu(0))
-            total_frames = len(vr)
-            indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
-            frames = vr.get_batch(indices).asnumpy()
-        except (ImportError, Exception):
-            try:
-                import imageio.v3 as iio
-                all_frames = iio.imread(video_path, plugin="pyav")
-                total_frames = len(all_frames)
-                indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
-                frames = all_frames[indices]
-            except Exception:
-                return []
-
-        pil_frames = []
-        for frame in frames:
-            img = Image.fromarray(frame)
-            # Resize if too large (save GPU memory during inference)
-            max_dim = 1280
-            if max(img.size) > max_dim:
-                ratio = max_dim / max(img.size)
-                new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
-                img = img.resize(new_size, Image.LANCZOS)
-            pil_frames.append(img)
-
-        return pil_frames
+        """Extract evenly-spaced frames from video as PIL Images."""
+        return _extract_frames(video_path, num_frames)
 
     def _format_history(self, history: Optional[List[Dict[str, Any]]]) -> str:
-        """Format optimization history as concise text summary."""
-        if not history:
-            return ""
-        lines = []
-        for entry in history[-5:]:
-            iter_num = entry.get("iteration", "?")
-            prompt = entry.get("prompt", "")[:100]
-            analysis = entry.get("analysis", {})
-            if isinstance(analysis, dict):
-                comparison = analysis.get("comparison", "")[:150]
-            else:
-                comparison = str(analysis)[:150]
-            lines.append(f"  Iter {iter_num}: prompt=\"{prompt}...\" | differences=\"{comparison}...\"")
-        return "\n".join(lines)
+        return _format_history(history)
 
     def _parse_response(self, response_text: str, fallback_prompt: str) -> Dict[str, Any]:
-        """Parse VLM response into structured format."""
-        import re
-
-        # Try direct JSON parse
-        try:
-            result = json.loads(response_text)
-            return self._validate_response(result, fallback_prompt)
-        except json.JSONDecodeError:
-            pass
-
-        # Try to extract JSON from markdown code blocks
-        json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response_text, re.DOTALL)
-        if json_match:
-            try:
-                result = json.loads(json_match.group(1))
-                return self._validate_response(result, fallback_prompt)
-            except json.JSONDecodeError:
-                pass
-
-        # Try to find JSON object in text
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            try:
-                result = json.loads(json_match.group(0))
-                return self._validate_response(result, fallback_prompt)
-            except json.JSONDecodeError:
-                pass
-
-        # Fallback
-        logger.warning("Failed to parse local VLM response as JSON, using fallback")
-        return {
-            "analysis": {
-                "reference_description": "",
-                "last_generated_description": "",
-                "new_generated_description": "",
-                "comparison": response_text[:500],
-            },
-            "refined_prompt": fallback_prompt,
-            "parse_error": True,
-        }
+        return _parse_response(response_text, fallback_prompt)
 
     def _validate_response(self, result: Dict[str, Any], fallback_prompt: str) -> Dict[str, Any]:
-        """Validate and normalize the parsed response."""
-        analysis = result.get("analysis", {})
-        if isinstance(analysis, str):
-            analysis = {
-                "reference_description": "",
-                "last_generated_description": "",
-                "new_generated_description": "",
-                "comparison": analysis,
-            }
-        validated = {
-            "analysis": {
-                "reference_description": str(analysis.get("reference_description", "")),
-                "last_generated_description": str(analysis.get("last_generated_description", "")),
-                "new_generated_description": str(analysis.get("new_generated_description", "")),
-                "comparison": str(analysis.get("comparison", "")),
-            },
-            "refined_prompt": str(result.get("refined_prompt", fallback_prompt)),
-        }
-        if not validated["refined_prompt"].strip():
-            validated["refined_prompt"] = fallback_prompt
-        return validated
+        return _validate_response(result, fallback_prompt)
+
+    def _fallback_response(self, prompt: str) -> Dict[str, Any]:
+        return _fallback_response(prompt)
 
     def describe_video(self, video_path: str) -> str:
         """
@@ -556,18 +585,6 @@ class LocalVLMClient:
 
         return ""
 
-    def _fallback_response(self, prompt: str) -> Dict[str, Any]:
-        """Fallback when VLM is unavailable."""
-        return {
-            "analysis": {
-                "reference_description": "[VLM call failed]",
-                "last_generated_description": "",
-                "new_generated_description": "",
-                "comparison": "[unavailable]",
-            },
-            "refined_prompt": prompt,
-            "vlm_error": True,
-        }
 
 
 # =============================================================================
@@ -815,130 +832,25 @@ class VLMClient:
         return self._fallback_response(current_prompt)
 
     def _extract_frames_base64(self, video_path: str, num_frames: int = 8) -> List[str]:
-        """Extract evenly-spaced frames from composite video and encode as base64 JPEG."""
-        import numpy as np
-
-        if not os.path.exists(video_path):
-            return []
-
-        try:
-            from decord import VideoReader, cpu
-            vr = VideoReader(video_path, ctx=cpu(0))
-            total_frames = len(vr)
-            indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
-            frames = vr.get_batch(indices).asnumpy()
-        except (ImportError, Exception):
-            try:
-                import imageio.v3 as iio
-                all_frames = iio.imread(video_path, plugin="pyav")
-                total_frames = len(all_frames)
-                indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
-                frames = all_frames[indices]
-            except Exception:
-                return []
-
+        """Extract evenly-spaced frames from video and encode as base64 JPEG."""
         from PIL import Image
 
+        pil_frames = _extract_frames(video_path, num_frames)
         frames_b64 = []
-        for frame in frames:
-            img = Image.fromarray(frame)
-            max_dim = 1280
-            if max(img.size) > max_dim:
-                ratio = max_dim / max(img.size)
-                new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
-                img = img.resize(new_size, Image.LANCZOS)
+        for img in pil_frames:
             buffer = io.BytesIO()
             img.save(buffer, format="JPEG", quality=85)
             frames_b64.append(base64.b64encode(buffer.getvalue()).decode("utf-8"))
-
         return frames_b64
 
     def _format_history(self, history: Optional[List[Dict[str, Any]]]) -> str:
-        """Format optimization history as concise text summary."""
-        if not history:
-            return ""
-
-        lines = []
-        for entry in history[-5:]:  # Keep last 5 iterations for context
-            iter_num = entry.get("iteration", "?")
-            prompt = entry.get("prompt", "")[:100]
-            analysis = entry.get("analysis", {})
-            if isinstance(analysis, dict):
-                comparison = analysis.get("comparison", "")[:150]
-            else:
-                comparison = str(analysis)[:150]
-            lines.append(f"  Iter {iter_num}: prompt=\"{prompt}...\" | differences=\"{comparison}...\"")
-
-        return "\n".join(lines)
+        return _format_history(history)
 
     def _parse_response(self, response_text: str, fallback_prompt: str) -> Dict[str, Any]:
-        """Parse VLM response into structured format."""
-        import re
-
-        # Try direct JSON parse
-        try:
-            result = json.loads(response_text)
-            return self._validate_response(result, fallback_prompt)
-        except json.JSONDecodeError:
-            pass
-
-        # Try to extract JSON from markdown code blocks
-        json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response_text, re.DOTALL)
-        if json_match:
-            try:
-                result = json.loads(json_match.group(1))
-                return self._validate_response(result, fallback_prompt)
-            except json.JSONDecodeError:
-                pass
-
-        # Try to find JSON object in text
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            try:
-                result = json.loads(json_match.group(0))
-                return self._validate_response(result, fallback_prompt)
-            except json.JSONDecodeError:
-                pass
-
-        # Fallback: create structured response from raw text
-        logger.warning("Failed to parse VLM response as JSON, using fallback")
-        return {
-            "analysis": {
-                "reference_description": "",
-                "last_generated_description": "",
-                "new_generated_description": "",
-                "comparison": response_text[:500],
-            },
-            "refined_prompt": fallback_prompt,
-            "parse_error": True,
-        }
+        return _parse_response(response_text, fallback_prompt)
 
     def _validate_response(self, result: Dict[str, Any], fallback_prompt: str) -> Dict[str, Any]:
-        """Validate and normalize the parsed response."""
-        analysis = result.get("analysis", {})
-        if isinstance(analysis, str):
-            analysis = {
-                "reference_description": "",
-                "last_generated_description": "",
-                "new_generated_description": "",
-                "comparison": analysis,
-            }
-
-        validated = {
-            "analysis": {
-                "reference_description": str(analysis.get("reference_description", "")),
-                "last_generated_description": str(analysis.get("last_generated_description", "")),
-                "new_generated_description": str(analysis.get("new_generated_description", "")),
-                "comparison": str(analysis.get("comparison", "")),
-            },
-            "refined_prompt": str(result.get("refined_prompt", fallback_prompt)),
-        }
-
-        # If refined_prompt is empty, use fallback
-        if not validated["refined_prompt"].strip():
-            validated["refined_prompt"] = fallback_prompt
-
-        return validated
+        return _validate_response(result, fallback_prompt)
 
     def describe_video(self, video_path: str) -> str:
         """
@@ -1021,17 +933,7 @@ class VLMClient:
         return ""
 
     def _fallback_response(self, prompt: str) -> Dict[str, Any]:
-        """Fallback when VLM is unavailable."""
-        return {
-            "analysis": {
-                "reference_description": "[VLM call failed]",
-                "last_generated_description": "",
-                "new_generated_description": "",
-                "comparison": "[unavailable]",
-            },
-            "refined_prompt": prompt,
-            "vlm_error": True,
-        }
+        return _fallback_response(prompt)
 
 
 class MockVLMClient:

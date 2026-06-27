@@ -167,7 +167,6 @@ def resize_video(video: torch.Tensor, height: int, width: int) -> torch.Tensor:
 
 def create_vertical_composite(
     videos: List[torch.Tensor],
-    labels: Optional[List[str]] = None,
     padding: int = 4,
     label_height: int = 24,
 ) -> torch.Tensor:
@@ -181,7 +180,6 @@ def create_vertical_composite(
 
     Args:
         videos: List of (C, F, H, W) tensors in [0, 1].
-        labels: Text labels for each panel.
         padding: Pixels between panels.
         label_height: Height for label strips.
 
@@ -218,18 +216,6 @@ def create_vertical_composite(
         y_offset += h + padding
 
     return composite
-
-
-def extract_key_frames(
-    video: torch.Tensor,
-    num_frames: int = 8,
-) -> List[torch.Tensor]:
-    """Extract uniformly spaced key frames."""
-    if video.dim() == 5:
-        video = video[0]
-    total = video.shape[1]
-    indices = torch.linspace(0, total - 1, num_frames).long()
-    return [video[:, idx] for idx in indices]
 
 
 def normalize_video(video: torch.Tensor) -> torch.Tensor:

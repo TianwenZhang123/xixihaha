@@ -16,7 +16,7 @@ Hardware: 1x RTX 4090 (24GB)
 import os
 import torch
 import logging
-from typing import Optional, Dict, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def load_model_single_gpu(
     Args:
         model_path: Path to model weights.
         dtype: Model dtype (bfloat16 recommended).
-        model_type: "t2v" for Text-to-Video, "i2v" for Image-to-Video.
+        model_type: "t2v" for Text-to-Video.
         enable_vae_slicing: Enable VAE slicing for memory efficiency.
         enable_vae_tiling: Enable VAE tiling for large resolutions.
 
@@ -73,25 +73,11 @@ def load_model_single_gpu(
     logger.info(f"Loading Wan 2.1-1.3B ({model_type}) from: {model_path}")
     logger.info(f"  Mode: single GPU (full model on VRAM), dtype={dtype}")
 
-    if model_type == "i2v":
-        try:
-            from diffusers import WanImageToVideoPipeline
-            pipe = WanImageToVideoPipeline.from_pretrained(
-                model_path,
-                torch_dtype=dtype,
-            )
-        except (ImportError, ValueError):
-            from diffusers import WanPipeline
-            pipe = WanPipeline.from_pretrained(
-                model_path,
-                torch_dtype=dtype,
-            )
-    else:
-        from diffusers import WanPipeline
-        pipe = WanPipeline.from_pretrained(
-            model_path,
-            torch_dtype=dtype,
-        )
+    from diffusers import WanPipeline
+    pipe = WanPipeline.from_pretrained(
+        model_path,
+        torch_dtype=dtype,
+    )
 
     # Move entire model to GPU — 1.3B fits comfortably
     pipe = pipe.to("cuda")
@@ -129,6 +115,4 @@ def cleanup_gpu_memory():
         torch.cuda.synchronize()
 
 
-# Keep old names as aliases for compatibility
-setup_distributed_env = setup_single_gpu
-load_model_distributed = load_model_single_gpu
+
