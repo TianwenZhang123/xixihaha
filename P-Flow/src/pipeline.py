@@ -1210,6 +1210,7 @@ class PFlowPipeline:
         def make_injection_hook(layer_idx):
             """创建注入 hook: h_injected = (1-λ)*h_current + λ*h_ref"""
             def hook_fn(module, input, output):
+                nonlocal running_norm
                 if layer_idx not in current_ref[0]:
                     return output
 
