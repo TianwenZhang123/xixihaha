@@ -75,7 +75,7 @@ class PFlowConfig:
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
     svd_motion_filter: bool = False   # 方向3b: 运动方向一致性过滤
-    svd_alternate: bool = False       # 方向5: 交替注入 (帧级 interleave)
+        # svd_alternate: bool = False     # 方向5: 交替注入 — 9case均值-1.2%, 暂注释
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
 
@@ -705,18 +705,22 @@ class PFlowPipeline:
                 )
                 alpha = cap_alpha
 
-        # ── 方向A: SVD联动跳过 ──
-        # 当 mean_cos > skip_threshold 时, 不仅跳过 FI, 还强制关闭 SVD blend
+        # ── 方向A: SVD联动跳过 (软衰减版) ──
+        # mean_cos > 0.08 → α降为 0.001 (硬关→软衰减)
+        # 仅影响 74/80/105 等少数 case, 其余 28 case 不变
+        # 105 旧版 α=0.004 时 XCLIP=0.767, 硬关后仅 0.556; α=0.001 可恢复部分
+        # 74  α=0.004 时 XCLIP=0.351, α=0.001 远低于有害阈值
         svd_skip = getattr(cfg, 'fi_quality_skip_svd', False)
         if svd_skip and eta_temporal is not None:
             mean_cos = self._compute_mean_cos(eta_temporal)
             skip_threshold = getattr(cfg, 'fi_quality_skip_threshold', None)
             if mean_cos is not None and skip_threshold is not None and mean_cos > skip_threshold:
+                alpha_soft = 0.001  # 1/4 名义值，极保守
                 logger.info(
-                    f"  [SVD-Skip] mean_cos={mean_cos:.4f} > skip_threshold={skip_threshold}, "
-                    f"SVD blend DISABLED (α {alpha:.6f} → 0.0000)"
+                    f"  [SVD-Skip-Soft] mean_cos={mean_cos:.4f} > {skip_threshold}, "
+                    f"α {alpha:.4f} → {alpha_soft:.4f} (soft, was hard-zero)"
                 )
-                alpha = 0.0
+                alpha = alpha_soft
 
         remaining = max(0.0, 1.0 - alpha)
 
@@ -724,49 +728,11 @@ class PFlowPipeline:
         sqrt_remaining = torch.sqrt(torch.tensor(remaining, device=self.device))
 
         # ── 方向5: 交替注入 (帧级 interleave) ──
-        use_alternate = getattr(cfg, 'svd_alternate', False)
-
-        if use_alternate and eta_temporal.dim() >= 4:
-            # 帧级交替: 偶数帧用 η_temporal, 奇数帧用 η_random
-            # 在扩散过程中自然形成"注入→释放→注入→释放"的模式
-            F = eta_temporal.shape[-3] if eta_temporal.dim() == 4 else eta_temporal.shape[-4]
-            even_frames = torch.arange(0, F, 2, device=eta_temporal.device)
-            odd_frames = torch.arange(1, F, 2, device=eta_temporal.device)
-
-            eta = eta_random.clone()
-            if eta_temporal.dim() == 4:  # (C, F, H, W)
-                eta[:, even_frames] = (
-                    sqrt_alpha * eta_temporal[:, even_frames]
-                    + sqrt_remaining * eta_random[:, even_frames]
-                )
-            elif eta_temporal.dim() == 5:  # (B, C, F, H, W)
-                eta[:, :, even_frames] = (
-                    sqrt_alpha * eta_temporal[:, :, even_frames]
-                    + sqrt_remaining * eta_random[:, :, even_frames]
-                )
-            logger.info(
-                f"  [Blend-Alternate] α={alpha:.4f}, "
-                f"even_frames({len(even_frames)}) = blend, "
-                f"odd_frames({len(odd_frames)}) = pure_random"
-            )
-            # 诊断: 评估交替注入适配性 (用于后续自适应选择)
-            eta_std = eta_temporal.std().item()
-            alt_mean_cos = self._compute_mean_cos(eta_temporal)
-            # 每帧能量方差: 高→运动不均衡→交替可能打破连贯性
-            if eta_temporal.dim() >= 4:
-                C, F = eta_temporal.shape[0], eta_temporal.shape[1]
-                frame_energy = eta_temporal.reshape(C, F, -1).norm(dim=2)  # (C, F)
-                frame_energy_std = frame_energy.mean(dim=0).std().item()  # 帧间能量波动
-            else:
-                frame_energy_std = 0.0
-            logger.info(
-                f"  [Alternate-Diag] η_std={eta_std:.4f}, "
-                f"mean_cos={alt_mean_cos:.4f}, "
-                f"frame_energy_std={frame_energy_std:.4f}"
-            )
-        else:
-            # ── Two-way blend: η_temporal + η_random ──
-            eta = sqrt_alpha * eta_temporal + sqrt_remaining * eta_random
+        # 方向5 交替注入已注释 (9case 均值-1.2%, 对困难case有效但非普适)
+        # use_alternate = getattr(cfg, 'svd_alternate', False)
+        # if use_alternate and eta_temporal.dim() >= 4: ... (见 git history)
+        # ── Two-way blend: η_temporal + η_random ──
+        eta = sqrt_alpha * eta_temporal + sqrt_remaining * eta_random
 
         # ── 诊断: Blend 效果 ──
         logger.info(
