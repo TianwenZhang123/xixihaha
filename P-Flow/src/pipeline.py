@@ -1255,22 +1255,36 @@ class PFlowPipeline:
                     ).item()
                     # ── 方向C: AG gate 上限 ──
                     gate_high = getattr(cfg, 'fi_ag_gate_high', None)
+                    gate_raw = gate  # 保存原始gate用于日志
                     if gate_high is not None and gate > gate_high:
                         gate = gate_high
                     lam_eff = lam * gate
 
-                # ── 方向B: Norm 硬上限衰减 ──
+                # ── 方向B: Norm 硬上限衰减 ─_
+                decay = 1.0
+                norm_triggered = False
                 if max_norm is not None and running_norm > max_norm:
                     decay = max(norm_decay_min, 1.0 - (running_norm - max_norm) / max_norm)
                     lam_eff *= decay
+                    norm_triggered = True
 
                 # v5: 门控统计 (每5步输出一次, info级别)
                     if step_idx_ref[0] % 5 == 0 and layer_idx == target_layers[0]:
-                        logger.info(
-                            f"    [FI Adaptive step={step_idx_ref[0]}] "
-                            f"layer={layer_idx}, cos={cos_sim:.4f}, "
-                            f"gate={gate:.4f}, λ={lam:.5f}→{lam_eff:.5f}"
-                        )
+                        parts = [
+                            f"[FI step={step_idx_ref[0]}]",
+                            f"L={layer_idx}",
+                            f"cos={cos_sim:.4f}",
+                        ]
+                        # 方向C日志：gate截断
+                        if gate_high is not None and gate_raw != gate:
+                            parts.append(f"gate={gate_raw:.3f}→{gate:.3f}(cap)")
+                        else:
+                            parts.append(f"gate={gate:.3f}")
+                        # 方向B日志：norm衰减
+                        if norm_triggered:
+                            parts.append(f"norm={running_norm:.0f}/{max_norm:.0f} decay={decay:.3f}")
+                        parts.append(f"λ={lam:.5f}→{lam_eff:.5f}")
+                        logger.info("    " + " ".join(parts))
 
                 # 残差注入: h_injected = (1-λ_eff)*h_current + λ_eff*h_ref
                 h_injected = (1.0 - lam_eff) * h_current + lam_eff * h_ref_dev
