@@ -102,6 +102,7 @@ class PFlowConfig:
     fi_quality_threshold: float = 0.05    # 质量门控阈值 (mean_cos < threshold → 弱引导)
     fi_quality_k: float = 20.0            # 质量门控 sigmoid 斜率 (越大越陡峭)
     fi_quality_min_scale: float = 0.1     # 质量门控最低注入比例 (保留的最小引导量)
+    fi_quality_skip_threshold: Optional[float] = None  # 硬跳过阈值: mean_cos > 此值时完全跳过 FI (None=不启用)
     fi_cache_mode: str = "attention"      # 缓存什么特征:
     #   attention: cross-attention 输出 (语义对齐, 推荐)
     #   hidden: 完整 hidden_states (信息丰富但维度大)
@@ -879,6 +880,17 @@ class PFlowPipeline:
             frame_cos_sims.append(cos)
 
         mean_cos = sum(frame_cos_sims) / len(frame_cos_sims)
+
+        # ── 硬跳过门控: 运动单调的样本不注入 ──
+        # 实证发现: mean_cos > skip_threshold 的 case 注入后大概率受害
+        # 因为高 mean_cos 表示 η_temporal 帧间高度相似, 携带的引导信号贫乏且冗余
+        skip_threshold = getattr(self.config, 'fi_quality_skip_threshold', None)
+        if skip_threshold is not None and mean_cos > skip_threshold:
+            logger.info(
+                f"  [Quality Scale] mean_cos={mean_cos:.4f} > skip_threshold={skip_threshold}, "
+                f"FI SKIPPED (motion-too-coherent)"
+            )
+            return 0.0  # 完全跳过 FI
 
         # ── 软门控: sigmoid 映射 ──
         min_scale = self.config.fi_quality_min_scale

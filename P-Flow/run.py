@@ -100,6 +100,8 @@ def parse_args():
                    help="FI 质量门控 sigmoid 斜率 (越大越陡峭; 默认 20.0)")
     p.add_argument("--fi_quality_min_scale", type=float, default=0.1,
                    help="FI 质量门控最低注入比例 (默认 0.1, 即最少保留 10%% 注入)")
+    p.add_argument("--fi_quality_skip_threshold", type=float, default=None,
+                   help="FI 硬跳过阈值: mean_cos > 此值时完全跳过 FI (默认 None 不启用; 推荐 0.08)")
     p.add_argument("--fi_cache_mode", type=str, default="attention",
                    choices=["attention", "hidden", "mlp"],
                    help="FI 缓存特征类型: attention=cross-attn输出(推荐), hidden=block输出, mlp=ffn输出")
@@ -182,6 +184,7 @@ def build_config(args) -> PFlowConfig:
         fi_quality_threshold=args.fi_quality_threshold,
         fi_quality_k=args.fi_quality_k,
         fi_quality_min_scale=args.fi_quality_min_scale,
+        fi_quality_skip_threshold=args.fi_quality_skip_threshold,
         fi_cache_mode=args.fi_cache_mode,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
