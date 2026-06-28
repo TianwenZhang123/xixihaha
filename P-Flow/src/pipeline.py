@@ -629,7 +629,7 @@ class PFlowPipeline:
             )
 
             # ── 方向3b: 运动方向一致性过滤 ──
-            if getattr(cfg, 'svd_motion_filter', False) and svd_stats is not None:
+            if getattr(self.config, 'svd_motion_filter', False) and svd_stats is not None:
                 Vh_m = svd_stats.get("Vh_temporal")
                 if Vh_m is not None:
                     eta_temporal = self._apply_motion_filter(eta_temporal, Vh_m)
