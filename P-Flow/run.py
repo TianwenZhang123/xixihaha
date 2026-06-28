@@ -102,6 +102,14 @@ def parse_args():
                    help="FI 质量门控最低注入比例 (默认 0.1, 即最少保留 10%% 注入)")
     p.add_argument("--fi_quality_skip_threshold", type=float, default=None,
                    help="FI 硬跳过阈值: mean_cos > 此值时完全跳过 FI (默认 None 不启用; 推荐 0.08)")
+    p.add_argument("--fi_quality_skip_svd", action="store_true",
+                   help="方向A: 跳过FI时同时关闭SVD blend (默认False)")
+    p.add_argument("--fi_max_injection_norm", type=float, default=None,
+                   help="方向B: Total injection norm 硬上限 (默认 None 不启用; 推荐 10000)")
+    p.add_argument("--fi_norm_decay_min", type=float, default=0.3,
+                   help="方向B: norm超限后最小衰减系数 (默认 0.3)")
+    p.add_argument("--fi_ag_gate_high", type=float, default=None,
+                   help="方向C: AG gate 上限 (默认 None 无上限; 推荐 0.40)")
     p.add_argument("--fi_cache_mode", type=str, default="attention",
                    choices=["attention", "hidden", "mlp"],
                    help="FI 缓存特征类型: attention=cross-attn输出(推荐), hidden=block输出, mlp=ffn输出")
@@ -188,6 +196,11 @@ def build_config(args) -> PFlowConfig:
         fi_cache_mode=args.fi_cache_mode,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
+        # 方向A/B/C 新增参数
+        fi_quality_skip_svd=args.fi_quality_skip_svd,
+        fi_max_injection_norm=args.fi_max_injection_norm,
+        fi_norm_decay_min=args.fi_norm_decay_min,
+        fi_ag_gate_high=args.fi_ag_gate_high,
         # SVD 双向门控 (Floor + CAP)
         pna_std_gate=not args.no_pna_std_gate,
         pna_std_low=args.pna_std_low,

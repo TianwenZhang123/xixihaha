@@ -103,6 +103,10 @@ class PFlowConfig:
     fi_quality_k: float = 20.0            # 质量门控 sigmoid 斜率 (越大越陡峭)
     fi_quality_min_scale: float = 0.1     # 质量门控最低注入比例 (保留的最小引导量)
     fi_quality_skip_threshold: Optional[float] = None  # 硬跳过阈值: mean_cos > 此值时完全跳过 FI (None=不启用)
+    fi_quality_skip_svd: bool = False  # 方向A: 跳过FI时同时关闭SVD blend (默认False)
+    fi_max_injection_norm: Optional[float] = None  # 方向B: Total injection norm 硬上限 (None=不启用)
+    fi_norm_decay_min: float = 0.3  # 方向B: norm超限后最小衰减系数
+    fi_ag_gate_high: Optional[float] = None  # 方向C: AG gate 上限 (默认None=无上限)
     fi_cache_mode: str = "attention"      # 缓存什么特征:
     #   attention: cross-attention 输出 (语义对齐, 推荐)
     #   hidden: 完整 hidden_states (信息丰富但维度大)
@@ -667,6 +671,20 @@ class PFlowPipeline:
                 )
                 alpha = cap_alpha
 
+        # ── 方向A: SVD联动跳过 ──
+        # 当 mean_cos > skip_threshold 时, 不仅跳过 FI, 还强制关闭 SVD blend
+        # 因为高 mean_cos 样本的 η_temporal 信号贫乏冗余, 注入反而有害
+        svd_skip = getattr(cfg, 'fi_quality_skip_svd', False)
+        if svd_skip and eta_temporal is not None:
+            mean_cos = self._compute_mean_cos(eta_temporal)
+            skip_threshold = getattr(cfg, 'fi_quality_skip_threshold', None)
+            if mean_cos is not None and skip_threshold is not None and mean_cos > skip_threshold:
+                logger.info(
+                    f"  [SVD-Skip] mean_cos={mean_cos:.4f} > skip_threshold={skip_threshold}, "
+                    f"SVD blend DISABLED (α {alpha:.6f} → 0.0000)"
+                )
+                alpha = 0.0
+
         beta = cfg.beta
         remaining = max(0.0, 1.0 - alpha - beta)
 
@@ -834,6 +852,33 @@ class PFlowPipeline:
         )
         return values
 
+    def _compute_mean_cos(self, eta_temporal: torch.Tensor) -> Optional[float]:
+        """计算 η_temporal 的帧间余弦相似度均值。返回 None 表示无法计算。"""
+        eta_gate = eta_temporal
+        if eta_gate.dim() == 5:
+            if eta_gate.shape[2] > eta_gate.shape[1]:
+                eta_gate = eta_gate.permute(0, 2, 1, 3, 4)
+            num_frames_gate = eta_gate.shape[2]
+        elif eta_gate.dim() == 4:
+            num_frames_gate = eta_gate.shape[1]
+            eta_gate = eta_gate.unsqueeze(0)
+        else:
+            return None
+
+        if num_frames_gate < 2:
+            return None
+
+        frame_cos_sims = []
+        for f in range(num_frames_gate - 1):
+            f1 = eta_gate[0, :, f, :, :].flatten()
+            f2 = eta_gate[0, :, f + 1, :, :].flatten()
+            cos = torch.nn.functional.cosine_similarity(
+                f1.unsqueeze(0), f2.unsqueeze(0)
+            ).item()
+            frame_cos_sims.append(cos)
+
+        return sum(frame_cos_sims) / len(frame_cos_sims)
+
     def _compute_quality_scale(
         self,
         eta_temporal: Optional[torch.Tensor],
@@ -856,30 +901,9 @@ class PFlowPipeline:
             return 1.0
 
         # ── 计算 motion coherence (帧间余弦相似度) ──
-        eta_gate = eta_temporal
-        if eta_gate.dim() == 5:
-            if eta_gate.shape[2] > eta_gate.shape[1]:
-                eta_gate = eta_gate.permute(0, 2, 1, 3, 4)
-            num_frames_gate = eta_gate.shape[2]
-        elif eta_gate.dim() == 4:
-            num_frames_gate = eta_gate.shape[1]
-            eta_gate = eta_gate.unsqueeze(0)
-        else:
+        mean_cos = self._compute_mean_cos(eta_temporal)
+        if mean_cos is None:
             return 1.0
-
-        if num_frames_gate < 2:
-            return 1.0
-
-        frame_cos_sims = []
-        for f in range(num_frames_gate - 1):
-            f1 = eta_gate[0, :, f, :, :].flatten()
-            f2 = eta_gate[0, :, f + 1, :, :].flatten()
-            cos = torch.nn.functional.cosine_similarity(
-                f1.unsqueeze(0), f2.unsqueeze(0)
-            ).item()
-            frame_cos_sims.append(cos)
-
-        mean_cos = sum(frame_cos_sims) / len(frame_cos_sims)
 
         # ── 硬跳过门控: 运动单调的样本不注入 ──
         # 实证发现: mean_cos > skip_threshold 的 case 注入后大概率受害
@@ -1165,6 +1189,11 @@ class PFlowPipeline:
             "per_step": [],
         }
 
+        # ── 方向B: Norm 硬上限衰减 ──
+        max_norm = getattr(cfg, 'fi_max_injection_norm', None)
+        norm_decay_min = getattr(cfg, 'fi_norm_decay_min', 0.3)
+        running_norm = 0.0
+
         # ── 注册注入 hook ──
         transformer = self.pipe.transformer
         blocks = transformer.blocks if hasattr(transformer, 'blocks') else []
@@ -1224,9 +1253,18 @@ class PFlowPipeline:
                     gate = 1.0 - torch.sigmoid(
                         torch.tensor(cfg.fi_adaptive_temp * (cos_sim - 0.5))
                     ).item()
+                    # ── 方向C: AG gate 上限 ──
+                    gate_high = getattr(cfg, 'fi_ag_gate_high', None)
+                    if gate_high is not None and gate > gate_high:
+                        gate = gate_high
                     lam_eff = lam * gate
 
-                    # v5: 门控统计 (每5步输出一次, info级别)
+                # ── 方向B: Norm 硬上限衰减 ──
+                if max_norm is not None and running_norm > max_norm:
+                    decay = max(norm_decay_min, 1.0 - (running_norm - max_norm) / max_norm)
+                    lam_eff *= decay
+
+                # v5: 门控统计 (每5步输出一次, info级别)
                     if step_idx_ref[0] % 5 == 0 and layer_idx == target_layers[0]:
                         logger.info(
                             f"    [FI Adaptive step={step_idx_ref[0]}] "
@@ -1240,6 +1278,8 @@ class PFlowPipeline:
                 # 记录注入统计
                 injection_norm = (h_injected - h_current).norm().item()
                 injection_stats_per_step[0][layer_idx] = injection_norm
+                if max_norm is not None:
+                    running_norm += injection_norm
 
                 if isinstance(output, tuple):
                     return (h_injected,) + output[1:]
