@@ -71,11 +71,11 @@ class PFlowConfig:
     use_composite: bool = False    # Vertical Composite for VLM
     # ── Noise Prior 参数 ──
     alpha: float = 0.004           # SVD 混合权重 (v5 fixed, 推荐 0.004)
-                                  # √α·η_temporal + √(1-α-β)·η_random
-    beta: float = 0.0              # 外观分量混合权重 (√β·η_spatial), 0=不使用外观分量
-                                  # 推荐范围: 0.0~0.005, 需 α+β < 1.0
+                                  # η = √α·η_temporal + √(1-α)·η_random
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
+    svd_motion_filter: bool = False   # 方向3b: 运动方向一致性过滤
+    svd_alternate: bool = False       # 方向5: 交替注入 (帧级 interleave)
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
 
@@ -137,11 +137,7 @@ class PFlowConfig:
         if self.use_svd:
             flags.append("svd")
         if self.use_blend:
-            blend_parts = []
-            blend_parts.append(f"α={self.alpha}")
-            if self.beta > 0:
-                blend_parts.append(f"β={self.beta}")
-            flags.append(f"blend({', '.join(blend_parts)})")
+            flags.append(f"blend(α={self.alpha})")
         if self.feature_inject:
             fi_desc = f"feature_inject(λ={self.fi_lambda}, layers={self.fi_layers}, sched={self.fi_schedule}, mode={self.fi_cache_mode}"
             if self.fi_adaptive_gate:
@@ -491,6 +487,43 @@ class PFlowPipeline:
     # ─────────────────────────────────────────────────────────────
     # 内部方法：各改动点的实现
     # ─────────────────────────────────────────────────────────────
+    # 方向3b: 运动方向一致性过滤
+    # ─────────────────────────────────────────────────────────────
+
+    def _apply_motion_filter(
+        self, eta_temporal: torch.Tensor, Vh_m: torch.Tensor
+    ) -> torch.Tensor:
+        squeeze_batch = False
+        if eta_temporal.dim() == 5:
+            eta_temporal = eta_temporal[0]
+            squeeze_batch = True
+
+        C, F, H, W = eta_temporal.shape
+        primary_pattern = Vh_m[0].abs()  # (F,) 主运动模式的帧重要性
+
+        # 自适应阈值: 低于均值 50% 的帧视为噪声帧
+        threshold = primary_pattern.mean() * 0.5
+        frame_weight = torch.where(
+            primary_pattern > threshold,
+            torch.ones(F, device=eta_temporal.device, dtype=eta_temporal.dtype),
+            primary_pattern / (threshold + 1e-8),
+        ).clamp(0.0, 1.0)
+
+        # 应用帧级权重
+        eta_filtered = eta_temporal * frame_weight.view(1, F, 1, 1)
+
+        suppressed = (frame_weight < 0.99).sum().item()
+        logger.info(
+            f"  [MotionFilter] primary_pattern std={primary_pattern.std():.4f}, "
+            f"threshold={threshold:.4f}, suppressed={suppressed}/{F} frames, "
+            f"η_std: {eta_temporal.std():.4f}→{eta_filtered.std():.4f}"
+        )
+
+        if squeeze_batch:
+            eta_filtered = eta_filtered.unsqueeze(0)
+        return eta_filtered
+
+    # ─────────────────────────────────────────────────────────────
 
     def _compute_noise_prior(
         self, ref_video: torch.Tensor, prompt: str,
@@ -587,13 +620,19 @@ class PFlowPipeline:
                 f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}"
             )
 
+
             # 使用 return_stats 获取 S_temporal
             eta_temporal, svd_stats = svd_filter.filter(eta_inv, return_stats=True)
 
             logger.info(
-                f"  [SVD] η_spatial std={svd_stats.get('spatial_std', 'N/A')}, "
-                f"η_temporal std={eta_temporal.std():.4f}"
+                f"  [SVD] η_temporal std={eta_temporal.std():.4f}"
             )
+
+            # ── 方向3b: 运动方向一致性过滤 ──
+            if getattr(cfg, 'svd_motion_filter', False) and svd_stats is not None:
+                Vh_m = svd_stats.get("Vh_temporal")
+                if Vh_m is not None:
+                    eta_temporal = self._apply_motion_filter(eta_temporal, Vh_m)
         else:
             eta_temporal = eta_inv
 
@@ -612,15 +651,10 @@ class PFlowPipeline:
         """
         L2: Noise Prior Blending
 
-        基础混合公式 (β=0):
-            η = √α · η_temporal + √(1-α) · η_random
-
-        三路混合公式 (β>0, 启用外观分量):
-            η = √α · η_temporal + √β · η_spatial + √(1-α-β) · η_random
+        混合公式: η = √α · η_temporal + √(1-α) · η_random
 
         其中:
             η_temporal: SVD Stage 2 提取的运动先验 (去外观保运动)
-            η_spatial:  SVD Stage 1 分离的外观/内容分量 (运动迁移时丢弃, 完全复原时有用)
             η_random:   纯随机噪声
 
         v5 fixed 策略: 固定 α = cfg.alpha (默认 0.004)
@@ -685,48 +719,44 @@ class PFlowPipeline:
                 )
                 alpha = 0.0
 
-        beta = cfg.beta
-        remaining = max(0.0, 1.0 - alpha - beta)
+        remaining = max(0.0, 1.0 - alpha)
 
         sqrt_alpha = torch.sqrt(torch.tensor(alpha, device=self.device))
-        sqrt_beta = torch.sqrt(torch.tensor(beta, device=self.device))
         sqrt_remaining = torch.sqrt(torch.tensor(remaining, device=self.device))
 
-        # ── Three-way blend ──
-        eta = sqrt_alpha * eta_temporal + sqrt_remaining * eta_random
+        # ── 方向5: 交替注入 (帧级 interleave) ──
+        use_alternate = getattr(cfg, 'svd_alternate', False)
 
-        # 如果 β > 0, 加入外观分量 η_spatial
-        if beta > 0:
-            eta_spatial = svd_stats.get("eta_spatial") if svd_stats else None
-            if eta_spatial is not None:
-                # ── 关键: η_spatial 量级匹配 ──
-                # η_spatial 的 std (~0.9-1.2) 远大于 η_temporal (~0.28-0.41)
-                # 如果直接注入，β=0.001 的实际贡献会远大于 α=0.004
-                # 解决: renorm η_spatial 使其 std 与 η_temporal 一致，
-                # 这样 β 的语义才与 α 对等（"相同系数=相同贡献"）
-                spatial_std = eta_spatial.std()
-                temporal_std = eta_temporal.std()
-                if spatial_std > 1e-6:
-                    eta_spatial_matched = eta_spatial * (temporal_std / spatial_std)
-                else:
-                    eta_spatial_matched = eta_spatial
-                logger.info(
-                    f"  [Spatial Blend] β={beta:.4f} (√β={sqrt_beta.item():.4f}), "
-                    f"η_spatial std={spatial_std:.4f} → renormed to {eta_spatial_matched.std():.4f} "
-                    f"(matched η_temporal std={temporal_std:.4f})"
+        if use_alternate and eta_temporal.dim() >= 4:
+            # 帧级交替: 偶数帧用 η_temporal, 奇数帧用 η_random
+            # 在扩散过程中自然形成"注入→释放→注入→释放"的模式
+            F = eta_temporal.shape[-3] if eta_temporal.dim() == 4 else eta_temporal.shape[-4]
+            even_frames = torch.arange(0, F, 2, device=eta_temporal.device)
+            odd_frames = torch.arange(1, F, 2, device=eta_temporal.device)
+
+            eta = eta_random.clone()
+            if eta_temporal.dim() == 4:  # (C, F, H, W)
+                eta[:, even_frames] = (
+                    sqrt_alpha * eta_temporal[:, even_frames]
+                    + sqrt_remaining * eta_random[:, even_frames]
                 )
-                eta = eta + sqrt_beta * eta_spatial_matched
-            else:
-                logger.warning(
-                    f"  [Spatial Blend] β={beta:.4f} 但 eta_spatial 不可用 "
-                    f"(需要 --svd 开启), 忽略外观分量"
+            elif eta_temporal.dim() == 5:  # (B, C, F, H, W)
+                eta[:, :, even_frames] = (
+                    sqrt_alpha * eta_temporal[:, :, even_frames]
+                    + sqrt_remaining * eta_random[:, :, even_frames]
                 )
+            logger.info(
+                f"  [Blend-Alternate] α={alpha:.4f}, "
+                f"even_frames({len(even_frames)}) = blend, "
+                f"odd_frames({len(odd_frames)}) = pure_random"
+            )
+        else:
+            # ── Two-way blend: η_temporal + η_random ──
+            eta = sqrt_alpha * eta_temporal + sqrt_remaining * eta_random
 
         # ── 诊断: Blend 效果 ──
-        # 1. 混合后分布
         logger.info(
             f"  [Blend] α={alpha:.4f} (√α={sqrt_alpha.item():.4f}), "
-            f"β={beta:.4f} (√β={sqrt_beta.item():.4f}), "
             f"η_temporal std={eta_temporal.std():.4f}, "
             f"η_mixed std={eta.std():.4f}, mean={eta.mean():.4f}"
         )

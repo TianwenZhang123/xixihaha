@@ -126,25 +126,27 @@ class SVDFilter:
             noise_inv = noise_inv.float()
 
         # ── Stage 1: Spatial Decontenting ──
-        noise_after_spatial, k_s, eta_spatial = self._stage1_spatial(noise_inv)
+        noise_after_spatial, k_s = self._stage1_spatial(noise_inv)
 
         # ── Stage 2: Temporal Retention ──
-        noise_temporal, S_temporal, k_m = self._stage2_temporal(noise_after_spatial)
+        noise_temporal, S_temporal, k_m, Vh_m = self._stage2_temporal(
+            noise_after_spatial, return_vh=True
+        )
 
         result = noise_temporal  # v1 模式: 直接返回 Stage 2 输出
 
         # 恢复原始 dtype
         if result.dtype != original_dtype:
             result = result.to(original_dtype)
-        if eta_spatial.dtype != original_dtype:
-            eta_spatial = eta_spatial.to(original_dtype)
+        if Vh_m.dtype != original_dtype:
+            Vh_m = Vh_m.to(original_dtype)
 
         if return_stats:
             stats = {
                 "S_temporal": S_temporal,
                 "k_m": k_m,
                 "k_s": k_s,
-                "eta_spatial": eta_spatial,
+                "Vh_temporal": Vh_m,  # (k_m, F) 用于运动方向过滤
             }
             return result, stats
         return result
@@ -153,16 +155,15 @@ class SVDFilter:
     # Stage 1: 空间去内容
     # ─────────────────────────────────────────────────────────────
 
-    def _stage1_spatial(self, noise_inv: torch.Tensor) -> Tuple[torch.Tensor, int, torch.Tensor]:
+    def _stage1_spatial(self, noise_inv: torch.Tensor) -> Tuple[torch.Tensor, int]:
         """
-        Stage 1 - Spatial Filtering (Eq. 4-5):
+        Stage 1 - Spatial Decontenting (Eq. 4-5):
             Reshape to (C*F, H*W), SVD, 去除 top-k_s 空间主成分
 
         Returns:
-            (filtered_noise, k_s, eta_spatial):
+            (filtered_noise, k_s):
                 filtered_noise: 去外观后的噪声 (C, F, H, W)
                 k_s: 移除的成分数
-                eta_spatial: 被移除的外观/内容分量 (C, F, H, W), 可用于 spatial blend
         """
         C, F, H, W = noise_inv.shape
         noise_2d = noise_inv.reshape(C * F, H * W)
@@ -181,24 +182,26 @@ class SVDFilter:
             top_k_recon = U_s[:, :k_s] @ torch.diag(S_s[:k_s]) @ Vh_s[:k_s, :]
 
         noise_filtered = noise_2d - top_k_recon
-        eta_spatial = top_k_recon.reshape(C, F, H, W)
         logger.debug(f"  [Stage1] Spatial: removed top-{k_s} components")
 
-        return noise_filtered.reshape(C, F, H, W), k_s, eta_spatial
+        return noise_filtered.reshape(C, F, H, W), k_s
 
     # ─────────────────────────────────────────────────────────────
     # Stage 2: 时间保运动
     # ─────────────────────────────────────────────────────────────
 
     def _stage2_temporal(
-        self, noise_spatial: torch.Tensor
+        self, noise_spatial: torch.Tensor, return_vh: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, int]:
         """
         Stage 2 - Temporal Retention (Eq. 6):
             Reshape to (C*H*W, F), SVD, 保留 top-k_m 时间主成分
 
+        Args:
+            return_vh: 若 True, 额外返回 Vh (用于运动方向过滤)
+
         Returns:
-            (filtered_noise, singular_values, k_m)
+            (filtered_noise, singular_values, k_m, [Vh_m])
         """
         C, F, H, W = noise_spatial.shape
         noise_2d = noise_spatial.reshape(C * H * W, F)
@@ -215,6 +218,8 @@ class SVDFilter:
 
         logger.debug(f"  [Stage2] Temporal: kept top-{k_m}/{len(S_m)} components")
 
+        if return_vh:
+            return noise_temporal, S_m, k_m, Vh_m
         return noise_temporal, S_m, k_m
 
     # ─────────────────────────────────────────────────────────────
@@ -257,106 +262,4 @@ class SVDFilter:
         return max(1, k_m)
 
 
-# ─────────────────────────────────────────────────────────────
-# Temporal Signal Reliability (TSR) — 自适应 α 的核心指标
-# ─────────────────────────────────────────────────────────────
 
-def compute_temporal_signal_reliability(
-    eta_temporal: torch.Tensor,
-    S_temporal: Optional[torch.Tensor] = None,
-) -> Dict[str, float]:
-    """
-    计算 Temporal Signal Reliability (TSR), 用于自适应 blend 系数 α.
-
-    TSR 由两个分量组成:
-
-        1. Temporal Concentration Ratio (TCR):
-           η_temporal 在时间奇异值谱上的能量集中度.
-           定义: TCR = S_1^2 / sum(S_i^2)  (第一大时间奇异值的能量占比)
-           - 高 TCR → 运动信号集中、结构化 → 可靠
-           - 低 TCR → 运动信号分散、近似噪声 → 不可靠
-
-        2. Temporal Autocorrelation (TAC):
-           η_temporal 相邻帧间的平均余弦相似度.
-           - 高 TAC → 帧间连贯 (真实运动) → 可靠
-           - 低 TAC → 帧间独立 (近似噪声) → 不可靠
-
-    TSR = sigmoid_norm(TCR) * TAC
-
-    学术 motivation:
-        SVD 两阶段滤波提取 η_temporal 时, 假设其编码了有效的运动先验.
-        但对于低运动场景 (如静态室内), SVD 提取的 temporal 分量主要是残差噪声,
-        而非结构化运动信号. TSR 量化了这一信号的可靠程度, 使得 blend 系数 α
-        能根据信号质量自适应调节: 可靠信号→大α, 不可靠信号→小α甚至0.
-
-    Args:
-        eta_temporal: SVD 滤波后的时序噪声, shape (C, F, H, W) 或 (B, C, F, H, W)
-        S_temporal: 可选, Stage 2 的时间奇异值 (避免重复 SVD 计算)
-
-    Returns:
-        dict with keys:
-            tcr: Temporal Concentration Ratio ∈ (0, 1]
-            tac: Temporal Autocorrelation ∈ [-1, 1]
-            tsr: Temporal Signal Reliability ∈ [0, 1]
-    """
-    if eta_temporal.dim() == 5:
-        eta_temporal = eta_temporal[0]
-
-    original_dtype = eta_temporal.dtype
-    if eta_temporal.dtype in (torch.bfloat16, torch.float16):
-        eta_temporal = eta_temporal.float()
-
-    C, F, H, W = eta_temporal.shape
-
-    # ── 1. TCR: Temporal Concentration Ratio ──
-    if S_temporal is None:
-        # 需要重新做 SVD (通常在 filter() 中已计算, 可以通过参数传入)
-        noise_2d = eta_temporal.reshape(C * H * W, F)
-        _, S_m, _ = torch.linalg.svd(noise_2d, full_matrices=False)
-    else:
-        S_m = S_temporal
-
-    energy = S_m ** 2
-    total_energy = energy.sum()
-    if total_energy > 0:
-        tcr = (energy[0] / total_energy).item()
-    else:
-        tcr = 0.0
-
-    # ── 2. TAC: Temporal Autocorrelation ──
-    # 计算相邻帧 (dim=1) 之间的平均余弦相似度
-    if F < 2:
-        tac = 1.0  # 单帧视频, 退化为1
-    else:
-        # 展平空间维度: (C, F, H*W) → 逐帧计算
-        frames = eta_temporal.reshape(C, F, H * W)  # (C, F, H*W)
-        # 相邻帧: frame_i 和 frame_{i+1}
-        cos_sims = []
-        for t in range(F - 1):
-            f_curr = frames[:, t, :].flatten()   # (C*H*W,)
-            f_next = frames[:, t + 1, :].flatten()  # (C*H*W,)
-            norm_curr = f_curr.norm()
-            norm_next = f_next.norm()
-            if norm_curr > 1e-8 and norm_next > 1e-8:
-                cos_sim = torch.nn.functional.cosine_similarity(
-                    f_curr.unsqueeze(0), f_next.unsqueeze(0)
-                ).item()
-                cos_sims.append(cos_sim)
-        tac = sum(cos_sims) / len(cos_sims) if cos_sims else 0.0
-
-    # ── 3. TSR: 综合可靠性 ──
-    # TCR 归一化: 用 sigmoid 将 (0,1] 映射到更平滑的区间
-    # 对于 TCR, 典型值范围约 0.05~0.3 (5个消融样本的观测)
-    # 我们用 sigmoid 中心设在 0.1 (区分弱/强信号)
-    tcr_normalized = torch.sigmoid(torch.tensor(10.0 * (tcr - 0.1))).item()
-
-    # TAC 归一化: 直接用 max(0, TAC), 因为负 TAC 说明帧间反向, 信号不可靠
-    tac_normalized = max(0.0, tac)
-
-    tsr = tcr_normalized * tac_normalized
-
-    return {
-        "tcr": tcr,
-        "tac": tac,
-        "tsr": tsr,
-    }
