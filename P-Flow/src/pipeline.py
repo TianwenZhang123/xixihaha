@@ -705,28 +705,18 @@ class PFlowPipeline:
                 )
                 alpha = cap_alpha
 
-        # ── 方向A: SVD联动跳过 (基于 k_m 时序成分数) ──
-        # 当 SVD 保留的时序成分太少 (k_m/F < 0.4), 说明运动信号稀疏贫乏,
-        # η_temporal 注入反而有害。用 k_m 而非 mean_cos 判断, 因为:
-        #   74: k_m=7/21=0.33 → 有害 → skip (mean_cos=0.09)
-        #   105: k_m=13/21=0.62 → 有益 → keep  (mean_cos=0.10)
-        # k_m 能区分信号质量, mean_cos 不能。
+        # ── 方向A: SVD联动跳过 ──
+        # 当 mean_cos > skip_threshold 时, 不仅跳过 FI, 还强制关闭 SVD blend
         svd_skip = getattr(cfg, 'fi_quality_skip_svd', False)
-        if svd_skip and svd_stats is not None:
-            k_m = svd_stats.get("k_m", 0)
-            F_temporal = eta_temporal.shape[-3] if eta_temporal.dim() >= 4 else eta_temporal.shape[2]
-            km_ratio = k_m / F_temporal if F_temporal > 0 else 1.0
-            if k_m > 0 and km_ratio < 0.4:
+        if svd_skip and eta_temporal is not None:
+            mean_cos = self._compute_mean_cos(eta_temporal)
+            skip_threshold = getattr(cfg, 'fi_quality_skip_threshold', None)
+            if mean_cos is not None and skip_threshold is not None and mean_cos > skip_threshold:
                 logger.info(
-                    f"  [SVD-Skip] k_m={k_m}/{F_temporal}={km_ratio:.2f} < 0.4, "
+                    f"  [SVD-Skip] mean_cos={mean_cos:.4f} > skip_threshold={skip_threshold}, "
                     f"SVD blend DISABLED (α {alpha:.6f} → 0.0000)"
                 )
                 alpha = 0.0
-            else:
-                logger.info(
-                    f"  [SVD-Decision] k_m={k_m}/{F_temporal}={km_ratio:.2f} ≥ 0.4, "
-                    f"SVD blend KEPT (α={alpha:.4f})"
-                )
 
         remaining = max(0.0, 1.0 - alpha)
 
@@ -1228,16 +1218,9 @@ class PFlowPipeline:
             "per_step": [],
         }
 
-        # ── 方向B+C: 自适应门控参数 (基于 quality_scale) ──
-        # quality_scale 越低 → 视频越混乱 → 需要更紧的门控
-        # quality_scale 越高 → 视频越连贯 → 可以放松门控
-        # 到达此处时 quality_scale 已计算 (>1e-6，否则已提前返回)
-        max_norm_static = getattr(cfg, 'fi_max_injection_norm', None)
+        # ── 方向B: Norm 硬上限衰减 ──
+        max_norm = getattr(cfg, 'fi_max_injection_norm', None)
         norm_decay_min = getattr(cfg, 'fi_norm_decay_min', 0.3)
-        gate_high_static = getattr(cfg, 'fi_ag_gate_high', None)
-        # 自适应: gate_high ∈ [0.28, 0.42], max_norm ∈ [8000, 13000]
-        gate_high = 0.28 + 0.14 * quality_scale if gate_high_static is not None else None
-        max_norm = 8000 + 5000 * quality_scale if max_norm_static is not None else None
         running_norm = 0.0
 
         # ── 注册注入 hook ──
@@ -1301,6 +1284,7 @@ class PFlowPipeline:
                         torch.tensor(cfg.fi_adaptive_temp * (cos_sim - 0.5))
                     ).item()
                     # ── 方向C: AG gate 上限 ──
+                    gate_high = getattr(cfg, 'fi_ag_gate_high', None)
                     gate_raw = gate  # 保存原始gate用于日志
                     if gate_high is not None and gate > gate_high:
                         gate = gate_high
