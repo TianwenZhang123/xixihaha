@@ -749,6 +749,21 @@ class PFlowPipeline:
                 f"even_frames({len(even_frames)}) = blend, "
                 f"odd_frames({len(odd_frames)}) = pure_random"
             )
+            # 诊断: 评估交替注入适配性 (用于后续自适应选择)
+            eta_std = eta_temporal.std().item()
+            alt_mean_cos = self._compute_mean_cos(eta_temporal)
+            # 每帧能量方差: 高→运动不均衡→交替可能打破连贯性
+            if eta_temporal.dim() >= 4:
+                C, F = eta_temporal.shape[0], eta_temporal.shape[1]
+                frame_energy = eta_temporal.reshape(C, F, -1).norm(dim=2)  # (C, F)
+                frame_energy_std = frame_energy.mean(dim=0).std().item()  # 帧间能量波动
+            else:
+                frame_energy_std = 0.0
+            logger.info(
+                f"  [Alternate-Diag] η_std={eta_std:.4f}, "
+                f"mean_cos={alt_mean_cos:.4f}, "
+                f"frame_energy_std={frame_energy_std:.4f}"
+            )
         else:
             # ── Two-way blend: η_temporal + η_random ──
             eta = sqrt_alpha * eta_temporal + sqrt_remaining * eta_random
