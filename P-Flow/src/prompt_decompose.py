@@ -158,17 +158,37 @@ class LLMClient:
 
     def decompose(self, caption: str) -> Dict[str, str]:
         """将 caption 分解为 5 个组件."""
-        import json
-        resp = self._call(DECOMPOSE_SYSTEM, DECOMPOSE_USER.format(caption=caption))
+        import json, re
+        resp = self._call(
+            DECOMPOSE_SYSTEM,
+            DECOMPOSE_USER.format(caption=caption),
+            response_format={"type": "json_object"},
+        )
+        if not resp or not resp.strip():
+            raise ValueError(f"LLM returned empty response")
+
+        # 尝试直接解析 JSON
         try:
             return json.loads(resp)
         except json.JSONDecodeError:
-            # 尝试提取 JSON
-            import re
-            match = re.search(r'\{.*\}', resp, re.DOTALL)
-            if match:
+            pass
+
+        # 提取 {...} 块 (含嵌套)
+        match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', resp, re.DOTALL)
+        if match:
+            try:
                 return json.loads(match.group())
-            raise ValueError(f"LLM returned non-JSON: {resp[:200]}")
+            except json.JSONDecodeError:
+                pass
+
+        # 如果 resp 被 markdown 包裹
+        cleaned = re.sub(r'```(?:json)?\s*([\s\S]*?)\s*```', r'\1', resp)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+        raise ValueError(f"LLM returned non-JSON: {resp[:200]}")
 
     def generate_variants(self, component_name: str, component_desc: str,
                           full_caption: str, current_text: str,
