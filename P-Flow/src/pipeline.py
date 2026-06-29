@@ -75,14 +75,12 @@ class PFlowConfig:
                                   # η = √α·η_temporal + √(1-α)·η_random
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
-    svd_motion_filter: bool = False   # 方向3b: 运动方向一致性过滤
-    svd_progressive: bool = False     # 方向2: 渐进多尺度SVD
-    fi_sparse_ratio: float = 0.0       # 方向3: 通道选择性FI, 0=关闭(全通道), 0.5=只注入50%最重要通道
+    svd_progressive: bool = False     # 方向2: 渐进多尺度SVD (自适应: 仅k_m非均匀时启用)
+    fi_sparse_ratio: float = 0.0       # 方向3: 通道选择性FI, 0=关闭
     prompt_decompose: bool = False     # L1: 结构化分解+CLIP择优
     llm_api_key: str = ""              # LLM API key
     llm_api_base: str = "https://token-plan-cn.xiaomimimo.com/v1"
     llm_model: str = "mimo-v2.5-pro"
-    # svd_alternate: bool = False     # 方向5: 交替注入 — 已注释
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
 
@@ -512,44 +510,6 @@ class PFlowPipeline:
         return metadata
 
     # ─────────────────────────────────────────────────────────────
-    # 内部方法：各改动点的实现
-    # ─────────────────────────────────────────────────────────────
-    # 方向3b: 运动方向一致性过滤
-    # ─────────────────────────────────────────────────────────────
-
-    def _apply_motion_filter(
-        self, eta_temporal: torch.Tensor, Vh_m: torch.Tensor
-    ) -> torch.Tensor:
-        squeeze_batch = False
-        if eta_temporal.dim() == 5:
-            eta_temporal = eta_temporal[0]
-            squeeze_batch = True
-
-        C, F, H, W = eta_temporal.shape
-        primary_pattern = Vh_m[0].abs()  # (F,) 主运动模式的帧重要性
-
-        # 自适应阈值: 低于均值 50% 的帧视为噪声帧
-        threshold = primary_pattern.mean() * 0.5
-        frame_weight = torch.where(
-            primary_pattern > threshold,
-            torch.ones(F, device=eta_temporal.device, dtype=eta_temporal.dtype),
-            primary_pattern / (threshold + 1e-8),
-        ).clamp(0.0, 1.0)
-
-        # 应用帧级权重
-        eta_filtered = eta_temporal * frame_weight.view(1, F, 1, 1)
-
-        suppressed = (frame_weight < 0.99).sum().item()
-        logger.info(
-            f"  [MotionFilter] primary_pattern std={primary_pattern.std():.4f}, "
-            f"threshold={threshold:.4f}, suppressed={suppressed}/{F} frames, "
-            f"η_std: {eta_temporal.std():.4f}→{eta_filtered.std():.4f}"
-        )
-
-        if squeeze_batch:
-            eta_filtered = eta_filtered.unsqueeze(0)
-        return eta_filtered
-
     # ─────────────────────────────────────────────────────────────
 
     def _compute_noise_prior(
@@ -659,11 +619,6 @@ class PFlowPipeline:
                     eta_temporal = eta_temporal_prog
 
 
-            # ── 方向3b: 运动方向一致性过滤 ──
-            if getattr(self.config, 'svd_motion_filter', False) and svd_stats is not None:
-                Vh_m = svd_stats.get("Vh_temporal")
-                if Vh_m is not None:
-                    eta_temporal = self._apply_motion_filter(eta_temporal, Vh_m)
         else:
             eta_temporal = eta_inv
 

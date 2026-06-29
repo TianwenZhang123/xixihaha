@@ -71,10 +71,9 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42, help="随机种子")
     p.add_argument("--inversion_steps", type=int, default=50, help="反演ODE步数 (30=快速, 50=标准)")
     p.add_argument("--no_fast_svd", action="store_true", help="禁用 randomized SVD (使用精确SVD)")
-    p.add_argument("--svd_motion_filter", action="store_true", help="方向3b: 运动方向一致性过滤")
-    p.add_argument("--svd_progressive", action="store_true", help="方向2: 渐进多尺度SVD (滑动窗口)")
+    p.add_argument("--svd_progressive", action="store_true", help="渐进多尺度SVD (自适应: 仅k_m非均匀时启用)")
     p.add_argument("--fi_sparse_ratio", type=float, default=0.0,
-                   help="方向3: 通道选择性FI, 0=关闭, 0.5=只注入50%%最重要通道 (推荐0.3~0.7)")
+                   help="通道选择性FI, 0=关闭")
     p.add_argument("--prompt_decompose", action="store_true",
                    help="L1: 结构化Prompt分解+CLIP择优 (需API key)")
     p.add_argument("--llm_api_key", type=str, default="",
@@ -187,7 +186,6 @@ def build_config(args) -> PFlowConfig:
         rho_m=args.rho_m,
         inversion_steps=args.inversion_steps,
         use_fast_svd=not args.no_fast_svd,
-        svd_motion_filter=args.svd_motion_filter,
         svd_progressive=args.svd_progressive,
         fi_sparse_ratio=args.fi_sparse_ratio,
         prompt_decompose=args.prompt_decompose,

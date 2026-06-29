@@ -129,24 +129,21 @@ class SVDFilter:
         noise_after_spatial, k_s = self._stage1_spatial(noise_inv)
 
         # ── Stage 2: Temporal Retention ──
-        noise_temporal, S_temporal, k_m, Vh_m = self._stage2_temporal(
-            noise_after_spatial, return_vh=True
+        noise_temporal, S_temporal, k_m = self._stage2_temporal(
+            noise_after_spatial
         )
 
-        result = noise_temporal  # v1 模式: 直接返回 Stage 2 输出
+        result = noise_temporal
 
         # 恢复原始 dtype
         if result.dtype != original_dtype:
             result = result.to(original_dtype)
-        if Vh_m.dtype != original_dtype:
-            Vh_m = Vh_m.to(original_dtype)
 
         if return_stats:
             stats = {
                 "S_temporal": S_temporal,
                 "k_m": k_m,
                 "k_s": k_s,
-                "Vh_temporal": Vh_m,  # (k_m, F) 用于运动方向过滤
             }
             return result, stats
         return result
@@ -191,22 +188,18 @@ class SVDFilter:
     # ─────────────────────────────────────────────────────────────
 
     def _stage2_temporal(
-        self, noise_spatial: torch.Tensor, return_vh: bool = False,
+        self, noise_spatial: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, int]:
         """
         Stage 2 - Temporal Retention (Eq. 6):
             Reshape to (C*H*W, F), SVD, 保留 top-k_m 时间主成分
 
-        Args:
-            return_vh: 若 True, 额外返回 Vh (用于运动方向过滤)
-
         Returns:
-            (filtered_noise, singular_values, k_m, [Vh_m])
+            (filtered_noise, singular_values, k_m)
         """
         C, F, H, W = noise_spatial.shape
         noise_2d = noise_spatial.reshape(C * H * W, F)
 
-        # F 通常很小 (≈21 for 81 frames)，用 full SVD
         U_m, S_m, Vh_m = torch.linalg.svd(noise_2d, full_matrices=False)
 
         k_m = self._find_k_temporal(S_m)
@@ -218,8 +211,6 @@ class SVDFilter:
 
         logger.debug(f"  [Stage2] Temporal: kept top-{k_m}/{len(S_m)} components")
 
-        if return_vh:
-            return noise_temporal, S_m, k_m, Vh_m
         return noise_temporal, S_m, k_m
 
     # ─────────────────────────────────────────────────────────────
@@ -293,6 +284,15 @@ class SVDFilter:
             logger.warning("  [Progressive SVD] 所有窗口k_m≤2, 回退全帧SVD")
             return None  # 信号None, 调用方保留全帧SVD结果
 
+        # ── 自适应开关: 窗口间k_m无差异 → 运动均匀 → 渐进SVD无益，回退全帧 ──
+        kms = [km for _, _, _, km in windows]
+        if len(set(kms)) == 1:
+            logger.info(
+                f"  [Progressive SVD] k_m uniform={kms}, "
+                f"motion homogeneous, fallback to full-frame SVD"
+            )
+            return None
+
         eta_fused = torch.zeros_like(noise_inv)
         weight_sum = torch.zeros(F, device=noise_inv.device)
         for start, win_eta, w, k_m in windows:
@@ -302,7 +302,6 @@ class SVDFilter:
         weight_sum = weight_sum.clamp(min=1e-8)
         eta_fused = eta_fused / weight_sum.view(1, F, 1, 1)
 
-        kms = [km for _, _, _, km in windows]
         skip_str = f", skipped={skipped}" if skipped else ""
         logger.info(
             f"  [Progressive SVD] {len(windows)} windows "
