@@ -268,6 +268,10 @@ class SVDFilter:
     def filter_progressive(
         self, noise_inv: torch.Tensor, window_size: int = 8, stride: int = 4,
     ) -> torch.Tensor:
+        squeeze_batch = False
+        if noise_inv.dim() == 5:
+            noise_inv = noise_inv[0]
+            squeeze_batch = True
         _, F, _, _ = noise_inv.shape
         windows = []
         for start in range(0, F - window_size + 1, stride):
@@ -292,6 +296,8 @@ class SVDFilter:
             f"  [Progressive SVD] {len(windows)} windows "
             f"(size={window_size}, stride={stride}), k_m={kms}"
         )
+        if squeeze_batch:
+            eta_fused = eta_fused.unsqueeze(0)
         return eta_fused
 
 

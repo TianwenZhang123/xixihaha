@@ -75,6 +75,14 @@ def parse_args():
     p.add_argument("--svd_progressive", action="store_true", help="方向2: 渐进多尺度SVD (滑动窗口)")
     p.add_argument("--fi_sparse_ratio", type=float, default=0.0,
                    help="方向3: 通道选择性FI, 0=关闭, 0.5=只注入50%%最重要通道 (推荐0.3~0.7)")
+    p.add_argument("--prompt_decompose", action="store_true",
+                   help="L1: 结构化Prompt分解+CLIP择优 (需API key)")
+    p.add_argument("--llm_api_key", type=str, default="",
+                   help="LLM API Key (或设环境变量 LLM_API_KEY)")
+    p.add_argument("--llm_api_base", type=str, default="https://token-plan-cn.xiaomimimo.com/v1",
+                   help="LLM API 地址")
+    p.add_argument("--llm_model", type=str, default="mimo-v2.5-pro",
+                   help="LLM 模型名")
     # p.add_argument("--svd_alternate", action="store_true", help="方向5: 交替注入 — 已注释")
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--width", type=int, default=832)
@@ -182,6 +190,10 @@ def build_config(args) -> PFlowConfig:
         svd_motion_filter=args.svd_motion_filter,
         svd_progressive=args.svd_progressive,
         fi_sparse_ratio=args.fi_sparse_ratio,
+        prompt_decompose=args.prompt_decompose,
+        llm_api_key=args.llm_api_key,
+        llm_api_base=args.llm_api_base,
+        llm_model=args.llm_model,
         # svd_alternate=args.svd_alternate,  # 已注释
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,

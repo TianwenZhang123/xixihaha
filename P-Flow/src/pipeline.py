@@ -43,6 +43,7 @@ from .video_utils import (
     create_vertical_composite,
 )
 from .vlm_client import create_vlm_client
+from .prompt_decompose import create_prompt_decomposer
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,10 @@ class PFlowConfig:
     svd_motion_filter: bool = False   # 方向3b: 运动方向一致性过滤
     svd_progressive: bool = False     # 方向2: 渐进多尺度SVD
     fi_sparse_ratio: float = 0.0       # 方向3: 通道选择性FI, 0=关闭(全通道), 0.5=只注入50%最重要通道
+    prompt_decompose: bool = False     # L1: 结构化分解+CLIP择优
+    llm_api_key: str = ""              # LLM API key
+    llm_api_base: str = "https://token-plan-cn.xiaomimimo.com/v1"
+    llm_model: str = "mimo-v2.5-pro"
     # svd_alternate: bool = False     # 方向5: 交替注入 — 已注释
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
@@ -262,6 +267,25 @@ class PFlowPipeline:
             # 保存生成的 caption
             caption_file = out / "vlm_caption.txt"
             caption_file.write_text(caption, encoding="utf-8")
+
+        # ── L1: Prompt 结构化分解 + CLIP 择优 ──
+        if getattr(cfg, 'prompt_decompose', False):
+            api_key = getattr(cfg, 'llm_api_key', '') or os.environ.get('LLM_API_KEY', '')
+            if not api_key:
+                logger.warning("  [PromptDecompose] 无 API key, 跳过 (set --llm_api_key or LLM_API_KEY)")
+            else:
+                try:
+                    decomposer = create_prompt_decomposer(
+                        api_key=api_key,
+                        api_base=getattr(cfg, 'llm_api_base', 'https://token-plan-cn.xiaomimimo.com/v1'),
+                        model=getattr(cfg, 'llm_model', 'mimo-v2.5-pro'),
+                        device=self.device,
+                    )
+                    caption = decomposer.optimize(caption, video_path)
+                    # 保存优化后的 prompt
+                    (out / "optimized_prompt.txt").write_text(caption, encoding="utf-8")
+                except Exception as e:
+                    logger.warning(f"  [PromptDecompose] 失败: {e}, 使用原始 caption")
 
         # ── Step 3: 计算噪声先验 (如果启用) ──
         eta_temporal = None
