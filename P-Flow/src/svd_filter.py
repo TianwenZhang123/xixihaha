@@ -277,13 +277,21 @@ class SVDFilter:
             noise_inv = noise_inv.float()
         _, F, _, _ = noise_inv.shape
         windows = []
+        skipped = 0
         for start in range(0, F - window_size + 1, stride):
             end = start + window_size
             win_noise = noise_inv[:, start:end, :, :]
             win_spatial, _ = self._stage1_spatial(win_noise)
             win_temporal, S_m, k_m = self._stage2_temporal(win_spatial)
-            weight = k_m / window_size  # 成分越丰富权重越高
+            if k_m <= 2:
+                skipped += 1
+                continue  # 信号极稀疏, 跳过(避免注入噪声)
+            weight = k_m / window_size
             windows.append((start, win_temporal, weight, k_m))
+
+        if not windows:
+            logger.warning("  [Progressive SVD] 所有窗口k_m≤2, 回退全帧SVD")
+            return None  # 信号None, 调用方保留全帧SVD结果
 
         eta_fused = torch.zeros_like(noise_inv)
         weight_sum = torch.zeros(F, device=noise_inv.device)
@@ -295,9 +303,10 @@ class SVDFilter:
         eta_fused = eta_fused / weight_sum.view(1, F, 1, 1)
 
         kms = [km for _, _, _, km in windows]
+        skip_str = f", skipped={skipped}" if skipped else ""
         logger.info(
             f"  [Progressive SVD] {len(windows)} windows "
-            f"(size={window_size}, stride={stride}), k_m={kms}"
+            f"(size={window_size}, stride={stride}), k_m={kms}{skip_str}"
         )
         if original_dtype in (torch.bfloat16, torch.float16):
             eta_fused = eta_fused.to(original_dtype)

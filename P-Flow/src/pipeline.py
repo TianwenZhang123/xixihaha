@@ -653,7 +653,9 @@ class PFlowPipeline:
             # ── 方向2: 渐进多尺度SVD ──
             if getattr(self.config, 'svd_progressive', False):
                 eta_temporal_prog = svd_filter.filter_progressive(eta_inv)
-                eta_temporal = eta_temporal_prog
+                if eta_temporal_prog is not None:
+                    eta_temporal = eta_temporal_prog
+
 
             # ── 方向3b: 运动方向一致性过滤 ──
             if getattr(self.config, 'svd_motion_filter', False) and svd_stats is not None:
