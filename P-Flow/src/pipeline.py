@@ -637,6 +637,7 @@ class PFlowPipeline:
                 use_fast_svd=self.config.use_fast_svd,
             )
             svd_filter = SVDFilter(config=svd_config)
+            self._eta_temporal_full = None  # 渐进SVD: 保留全帧SVD用于门控
 
             logger.info(
                 f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}"
@@ -654,6 +655,7 @@ class PFlowPipeline:
             if getattr(self.config, 'svd_progressive', False):
                 eta_temporal_prog = svd_filter.filter_progressive(eta_inv)
                 if eta_temporal_prog is not None:
+                    self._eta_temporal_full = eta_temporal  # 保留全帧SVD用于门控
                     eta_temporal = eta_temporal_prog
 
 
@@ -736,9 +738,11 @@ class PFlowPipeline:
 
         # ── 方向A: SVD联动跳过 ──
         # 当 mean_cos > skip_threshold 时, 不仅跳过 FI, 还强制关闭 SVD blend
+        # 渐进SVD模式: 用全帧SVD的mean_cos做判断, 避免渐进版稀疏导致的假阳性
         svd_skip = getattr(cfg, 'fi_quality_skip_svd', False)
         if svd_skip and eta_temporal is not None:
-            mean_cos = self._compute_mean_cos(eta_temporal)
+            eta_for_check = self._eta_temporal_full if self._eta_temporal_full is not None else eta_temporal
+            mean_cos = self._compute_mean_cos(eta_for_check)
             skip_threshold = getattr(cfg, 'fi_quality_skip_threshold', None)
             if mean_cos is not None and skip_threshold is not None and mean_cos > skip_threshold:
                 logger.info(
@@ -1198,7 +1202,8 @@ class PFlowPipeline:
         # ── 质量门控 ──
         quality_scale = 1.0
         if cfg.fi_quality_gate:
-            quality_scale = self._compute_quality_scale(eta_temporal)
+            eta_for_qs = self._eta_temporal_full if self._eta_temporal_full is not None else eta_temporal
+        quality_scale = self._compute_quality_scale(eta_for_qs)
             if quality_scale < 1e-6:
                 logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
                 return self._generate(prompt, latents, generator)
