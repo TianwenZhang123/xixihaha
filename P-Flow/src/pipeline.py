@@ -74,10 +74,10 @@ class PFlowConfig:
                                   # η = √α·η_temporal + √(1-α)·η_random
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
-        svd_motion_filter: bool = False   # 方向3b: 运动方向一致性过滤
-        svd_progressive: bool = False     # 方向2: 渐进多尺度SVD
-        fi_sparse_ratio: float = 0.0       # 方向3: 通道选择性FI, 0=关闭(全通道), 0.5=只注入50%最重要通道
-        # svd_alternate: bool = False     # 方向5: 交替注入 — 已注释
+    svd_motion_filter: bool = False   # 方向3b: 运动方向一致性过滤
+    svd_progressive: bool = False     # 方向2: 渐进多尺度SVD
+    fi_sparse_ratio: float = 0.0       # 方向3: 通道选择性FI, 0=关闭(全通道), 0.5=只注入50%最重要通道
+    # svd_alternate: bool = False     # 方向5: 交替注入 — 已注释
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
 
