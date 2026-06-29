@@ -261,5 +261,38 @@ class SVDFilter:
             k_m = len(S)
         return max(1, k_m)
 
+    # ─────────────────────────────────────────────────────────────
+    # Progressive Multi-scale SVD (方向2, --svd_progressive)
+    # ─────────────────────────────────────────────────────────────
+
+    def filter_progressive(
+        self, noise_inv: torch.Tensor, window_size: int = 8, stride: int = 4,
+    ) -> torch.Tensor:
+        _, F, _, _ = noise_inv.shape
+        windows = []
+        for start in range(0, F - window_size + 1, stride):
+            end = start + window_size
+            win_noise = noise_inv[:, start:end, :, :]
+            win_spatial, _ = self._stage1_spatial(win_noise)
+            win_temporal, S_m, k_m = self._stage2_temporal(win_spatial)
+            weight = k_m / window_size  # 成分越丰富权重越高
+            windows.append((start, win_temporal, weight, k_m))
+
+        eta_fused = torch.zeros_like(noise_inv)
+        weight_sum = torch.zeros(F, device=noise_inv.device)
+        for start, win_eta, w, k_m in windows:
+            end = start + window_size
+            eta_fused[:, start:end, :, :] += w * win_eta
+            weight_sum[start:end] += w
+        weight_sum = weight_sum.clamp(min=1e-8)
+        eta_fused = eta_fused / weight_sum.view(1, F, 1, 1)
+
+        kms = [km for _, _, _, km in windows]
+        logger.info(
+            f"  [Progressive SVD] {len(windows)} windows "
+            f"(size={window_size}, stride={stride}), k_m={kms}"
+        )
+        return eta_fused
+
 
 

@@ -55,7 +55,7 @@ def parse_args():
     p.add_argument("--svd", action="store_true", help="启用 SVD 滤波")
     p.add_argument("--blend", action="store_true", help="启用噪声混合")
     p.add_argument("--iter", type=int, default=0, help="迭代轮数 (0=不迭代)")
-    p.add_argument("--midpoint", action="store_true", help="使用中点法ODE求解器")
+    # p.add_argument("--midpoint", action="store_true", help="使用中点法ODE求解器 — 效率低, 已弃用")
     p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
 
     # ── 快捷组合 ──
@@ -72,6 +72,9 @@ def parse_args():
     p.add_argument("--inversion_steps", type=int, default=50, help="反演ODE步数 (30=快速, 50=标准)")
     p.add_argument("--no_fast_svd", action="store_true", help="禁用 randomized SVD (使用精确SVD)")
     p.add_argument("--svd_motion_filter", action="store_true", help="方向3b: 运动方向一致性过滤")
+    p.add_argument("--svd_progressive", action="store_true", help="方向2: 渐进多尺度SVD (滑动窗口)")
+    p.add_argument("--fi_sparse_ratio", type=float, default=0.0,
+                   help="方向3: 通道选择性FI, 0=关闭, 0.5=只注入50%%最重要通道 (推荐0.3~0.7)")
     # p.add_argument("--svd_alternate", action="store_true", help="方向5: 交替注入 — 已注释")
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--width", type=int, default=832)
@@ -169,7 +172,7 @@ def build_config(args) -> PFlowConfig:
         use_svd=args.svd,
         use_blend=args.blend,
         use_iter=args.iter > 0,
-        use_midpoint=args.midpoint,
+        # use_midpoint=args.midpoint,  # 中点法已弃用
         use_composite=args.composite,
         alpha=args.alpha,
         rho_s=args.rho_s,
@@ -177,6 +180,8 @@ def build_config(args) -> PFlowConfig:
         inversion_steps=args.inversion_steps,
         use_fast_svd=not args.no_fast_svd,
         svd_motion_filter=args.svd_motion_filter,
+        svd_progressive=args.svd_progressive,
+        fi_sparse_ratio=args.fi_sparse_ratio,
         # svd_alternate=args.svd_alternate,  # 已注释
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,

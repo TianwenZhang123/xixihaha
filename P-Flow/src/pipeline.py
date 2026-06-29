@@ -74,8 +74,10 @@ class PFlowConfig:
                                   # η = √α·η_temporal + √(1-α)·η_random
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
-    svd_motion_filter: bool = False   # 方向3b: 运动方向一致性过滤
-        # svd_alternate: bool = False     # 方向5: 交替注入 — 9case均值-1.2%, 暂注释
+        svd_motion_filter: bool = False   # 方向3b: 运动方向一致性过滤
+        svd_progressive: bool = False     # 方向2: 渐进多尺度SVD
+        fi_sparse_ratio: float = 0.0       # 方向3: 通道选择性FI, 0=关闭(全通道), 0.5=只注入50%最重要通道
+        # svd_alternate: bool = False     # 方向5: 交替注入 — 已注释
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
 
@@ -301,7 +303,7 @@ class PFlowPipeline:
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion, svd_stats = \
                 self._compute_noise_prior(
                     ref_video, caption,
-                    cache_trajectory=need_trajectory and not cfg.use_midpoint,
+                    cache_trajectory=need_trajectory,
                     cache_every_n=cache_every_n,
                     fi_config=fi_config_for_inv,
                 )
@@ -328,7 +330,7 @@ class PFlowPipeline:
                     f"({len(ref_trajectory)} points), 无需二次反演"
                 )
             elif ref_latents_enc is not None and prompt_embeds is not None:
-                # 合并模式未启用（如 midpoint 模式），需要单独做反演
+                # 需要单独做反演缓存轨迹
                 ref_lat = ref_latents_enc
                 p_emb = prompt_embeds
                 traj_inverter = FlowMatchingInverter(
@@ -370,7 +372,8 @@ class PFlowPipeline:
                     f"  [FI] inline 缓存不可用，使用反演轨迹事后缓存特征..."
                 )
                 fi_ref_features = self._cache_fi_ref_features(
-                    ref_trajectory, prompt_embeds or self._encode_prompt(caption)
+                    ref_trajectory,
+                    prompt_embeds if prompt_embeds is not None else self._encode_prompt(caption)
                 )
             else:
                 logger.warning(
@@ -561,12 +564,7 @@ class PFlowPipeline:
 
         trajectory = None
         fi_ref_features = None
-        if self.config.use_midpoint:
-            logger.info("  [Inversion] midpoint (2nd-order)...")
-            eta_inv = inverter.invert_midpoint(
-                ref_latents, prompt_embeds, prompt_embeds
-            )
-        elif cache_trajectory:
+        if cache_trajectory:
             # 合并模式：反演 + 轨迹缓存 + (可选)FI特征缓存 一步完成
             logger.info("  [Inversion] euler (1st-order) + trajectory caching...")
             eta_inv, trajectory, fi_ref_features = inverter.invert_with_trajectory(
@@ -627,6 +625,11 @@ class PFlowPipeline:
             logger.info(
                 f"  [SVD] η_temporal std={eta_temporal.std():.4f}"
             )
+
+            # ── 方向2: 渐进多尺度SVD ──
+            if getattr(self.config, 'svd_progressive', False):
+                eta_temporal_prog = svd_filter.filter_progressive(eta_inv)
+                eta_temporal = eta_temporal_prog
 
             # ── 方向3b: 运动方向一致性过滤 ──
             if getattr(self.config, 'svd_motion_filter', False) and svd_stats is not None:
@@ -705,22 +708,18 @@ class PFlowPipeline:
                 )
                 alpha = cap_alpha
 
-        # ── 方向A: SVD联动跳过 (软衰减版) ──
-        # mean_cos > 0.08 → α降为 0.001 (硬关→软衰减)
-        # 仅影响 74/80/105 等少数 case, 其余 28 case 不变
-        # 105 旧版 α=0.004 时 XCLIP=0.767, 硬关后仅 0.556; α=0.001 可恢复部分
-        # 74  α=0.004 时 XCLIP=0.351, α=0.001 远低于有害阈值
+        # ── 方向A: SVD联动跳过 ──
+        # 当 mean_cos > skip_threshold 时, 不仅跳过 FI, 还强制关闭 SVD blend
         svd_skip = getattr(cfg, 'fi_quality_skip_svd', False)
         if svd_skip and eta_temporal is not None:
             mean_cos = self._compute_mean_cos(eta_temporal)
             skip_threshold = getattr(cfg, 'fi_quality_skip_threshold', None)
             if mean_cos is not None and skip_threshold is not None and mean_cos > skip_threshold:
-                alpha_soft = 0.001  # 1/4 名义值，极保守
                 logger.info(
-                    f"  [SVD-Skip-Soft] mean_cos={mean_cos:.4f} > {skip_threshold}, "
-                    f"α {alpha:.4f} → {alpha_soft:.4f} (soft, was hard-zero)"
+                    f"  [SVD-Skip] mean_cos={mean_cos:.4f} > skip_threshold={skip_threshold}, "
+                    f"SVD blend DISABLED (α {alpha:.6f} → 0.0000)"
                 )
-                alpha = alpha_soft
+                alpha = 0.0
 
         remaining = max(0.0, 1.0 - alpha)
 
@@ -1299,6 +1298,18 @@ class PFlowPipeline:
 
                 # 残差注入: h_injected = (1-λ_eff)*h_current + λ_eff*h_ref
                 h_injected = (1.0 - lam_eff) * h_current + lam_eff * h_ref_dev
+
+                # ── 方向3: 通道选择性FI ──
+                sparse_ratio = getattr(cfg, 'fi_sparse_ratio', 0.0)
+                if sparse_ratio > 0:
+                    diff = h_ref_dev - h_current  # (B, N, D)
+                    # 通道重要性 = |diff| 在 token 维度上的均值
+                    ch_importance = diff.abs().mean(dim=1)  # (B, D)
+                    top_k = max(1, int(ch_importance.shape[-1] * sparse_ratio))
+                    _, top_idx = ch_importance.topk(top_k, dim=-1)  # (B, K)
+                    mask = torch.zeros_like(h_current)
+                    mask.scatter_(-1, top_idx.unsqueeze(1).expand(-1, h_current.shape[1], -1), 1.0)
+                    h_injected = h_current + lam_eff * mask * diff
 
                 # 记录注入统计
                 injection_norm = (h_injected - h_current).norm().item()
