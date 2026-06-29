@@ -1203,7 +1203,7 @@ class PFlowPipeline:
         quality_scale = 1.0
         if cfg.fi_quality_gate:
             eta_for_qs = self._eta_temporal_full if self._eta_temporal_full is not None else eta_temporal
-        quality_scale = self._compute_quality_scale(eta_for_qs)
+            quality_scale = self._compute_quality_scale(eta_for_qs)
             if quality_scale < 1e-6:
                 logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
                 return self._generate(prompt, latents, generator)
