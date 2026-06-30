@@ -43,7 +43,6 @@ from .video_utils import (
     create_vertical_composite,
 )
 from .vlm_client import create_vlm_client
-from .prompt_decompose import create_prompt_decomposer
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +272,7 @@ class PFlowPipeline:
                 logger.warning("  [PromptDecompose] 无 API key, 跳过 (set --llm_api_key or LLM_API_KEY)")
             else:
                 try:
+                    from .prompt_decompose import create_prompt_decomposer
                     decomposer = create_prompt_decomposer(
                         api_key=api_key,
                         api_base=getattr(cfg, 'llm_api_base', 'https://token-plan-cn.xiaomimimo.com/v1'),
