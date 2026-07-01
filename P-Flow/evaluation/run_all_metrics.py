@@ -213,7 +213,14 @@ def compute_flow_epe(ref_frames, gen_frames) -> float:
 # ─── 主流程 ───
 
 def _discover_pairs(orig_dir: Path, gen_dir: Path) -> list[tuple[str, Path, Path]]:
-    gen_map = {p.stem: p for p in sorted(gen_dir.glob("*.mp4"))}
+    # 支持两种结构: 扁平 7.mp4 或 嵌套 sample_7/7.mp4
+    gen_map = {}
+    for p in sorted(gen_dir.rglob("*.mp4")):
+        # 优先用文件名 stem，排除 iter_01 等中间文件
+        if p.parent.name.startswith("sample_"):
+            gen_map[p.parent.name.replace("sample_", "")] = p
+        elif p.stem not in gen_map:
+            gen_map[p.stem] = p
     return [(op.stem, op, gen_map[op.stem])
             for op in sorted(orig_dir.glob("*.mp4"))
             if op.stem in gen_map]
