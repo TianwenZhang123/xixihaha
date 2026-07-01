@@ -44,9 +44,10 @@ from evaluation.clip_utils import (
 )
 
 # ────────────────────────────────────────────
-DEFAULT_CLIP_MODEL  = "models/clip-vit-base-patch32"
-DEFAULT_XCLIP_MODEL = "models/xclip-base-patch32"
-DEFAULT_SAMPLE_FRAMES = 16
+DEFAULT_CLIP_MODEL  = "/root/autodl-tmp/models/clip-vit-base-patch32"
+DEFAULT_XCLIP_MODEL = "/root/autodl-tmp/models/xclip-base-patch32"
+DEFAULT_SAMPLE_FRAMES = 16  # LPIPS/SSIM/Flow 用 16 帧
+CLIP_FRAMES = 8               # CLIP/XCLIP 用 8 帧
 
 
 def decode_video_frames(video_path: Path) -> list[np.ndarray]:
@@ -86,8 +87,8 @@ def get_aligned_frames(
 def compute_clip_xclip(item, clip_processor, clip_model,
                        xclip_processor, xclip_model, device):
     caption = read_text(item["caption_path"])
-    of = sample_video_frames(item["orig_path"], 8)
-    gf = sample_video_frames(item["gen_path"], 8)
+    of = sample_video_frames(item["orig_path"], CLIP_FRAMES)
+    gf = sample_video_frames(item["gen_path"], CLIP_FRAMES)
 
     ct = get_clip_text_feature(caption, clip_processor, clip_model, device)
     co = get_clip_video_feature(of, clip_processor, clip_model, device)
