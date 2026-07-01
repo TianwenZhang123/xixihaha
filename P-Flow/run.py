@@ -55,7 +55,6 @@ def parse_args():
     p.add_argument("--svd", action="store_true", help="启用 SVD 滤波")
     p.add_argument("--blend", action="store_true", help="启用噪声混合")
     p.add_argument("--iter", type=int, default=0, help="迭代轮数 (0=不迭代)")
-    # p.add_argument("--midpoint", action="store_true", help="使用中点法ODE求解器 — 效率低, 已弃用")
     p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
 
     # ── 快捷组合 ──

@@ -1,310 +1,297 @@
 #!/usr/bin/env python3
 """
-Run All New Evaluation Metrics.
+统一评测脚本：6 项指标一次性计算。
 
-Sequentially runs all 5 new evaluation metrics (FVD, DINO, Flow, LPIPS, Temporal)
-and aggregates results into a unified summary.
+指标：
+  1. CLIP  (orig-gen)
+  2. XCLIP (orig-gen)
+  3. FVD   (Fréchet Video Distance — 分布级)
+  4. LPIPS (逐帧感知距离 — 越低越好)
+  5. SSIM  (逐帧结构相似度 — 越高越好)
+  6. OF-EPE (Optical Flow Endpoint Error — 运动一致性)
 
-Usage:
-    python evaluation/run_all_metrics.py \
-        --orig-dir data/videos \
-        --gen-dir outputs/pflow_200cases \
-        --output-dir outputs/pflow_200cases/eval_all
-
-    # Skip slow metrics (RAFT-based)
-    python evaluation/run_all_metrics.py \
-        --orig-dir data/videos \
-        --gen-dir outputs/pflow_200cases \
-        --output-dir outputs/pflow_200cases/eval_all \
-        --skip-flow --skip-temporal-raft
-
-    # Quick test on 5 samples
-    python evaluation/run_all_metrics.py \
-        --orig-dir data/videos \
-        --gen-dir outputs/pflow_200cases \
-        --output-dir outputs/pflow_200cases/eval_all \
-        --limit 5
+用法:
+  python -m evaluation.run_all_metrics \
+      --orig-dir data/videos \
+      --gen-dir outputs/1.3B_ABC_full \
+      --caption-dir /root/xixihaha/test-v200/test-v200/captions \
+      --output-dir outputs/1.3B_ABC_full/eval_all
 """
 
+from __future__ import annotations
+
 import argparse
+import csv
 import json
-import subprocess
-import sys
 from pathlib import Path
 
-# Eval scripts to run (relative to project root)
-METRICS = [
-    {
-        "name": "FVD",
-        "script": "evaluation/run_fvd_eval.py",
-        "needs_orig": True,
-        "output_subdir": "eval_fvd",
-        "json_file": "fvd_results.json",
-        "weight_arg": "--i3d-model",
-        "weight_key": "r3d18_weights",
-    },
-    {
-        "name": "DINO-Score",
-        "script": "evaluation/run_dino_eval.py",
-        "needs_orig": True,
-        "output_subdir": "eval_dino",
-        "json_file": "dino_results.json",
-        "weight_arg": "--dinov2-model",
-        "weight_key": "dinov2_model",
-    },
-    {
-        "name": "Flow EPE",
-        "script": "evaluation/run_flow_eval.py",
-        "needs_orig": True,
-        "output_subdir": "eval_flow",
-        "json_file": "flow_results.json",
-        "skip_flag": "skip_flow",
-        "weight_arg": "--raft-weights",
-        "weight_key": "raft_weights",
-    },
-    {
-        "name": "LPIPS",
-        "script": "evaluation/run_lpips_eval.py",
-        "needs_orig": True,
-        "output_subdir": "eval_lpips",
-        "json_file": "lpips_results.json",
-        "weight_arg": "--lpips-weights",
-        "weight_key": "lpips_weights",
-    },
-    {
-        "name": "Temporal",
-        "script": "evaluation/run_temporal_eval.py",
-        "needs_orig": False,
-        "output_subdir": "eval_temporal",
-        "json_file": "temporal_results.json",
-        "skip_flag": "skip_temporal",
-        "weight_arg": "--raft-weights",
-        "weight_key": "raft_weights",
-    },
-]
+import cv2
+import numpy as np
+import torch
+import torch.nn.functional as F
+from tqdm import tqdm
+from skimage.metrics import structural_similarity
+
+from evaluation.clip_utils import (
+    build_models,
+    cosine_similarity,
+    get_clip_text_feature,
+    get_clip_video_feature,
+    get_xclip_text_feature,
+    get_xclip_video_feature,
+    read_text,
+    sample_video_frames,
+)
+
+# ────────────────────────────────────────────
+DEFAULT_CLIP_MODEL  = "models/clip-vit-base-patch32"
+DEFAULT_XCLIP_MODEL = "models/xclip-base-patch32"
+DEFAULT_SAMPLE_FRAMES = 16
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run all new evaluation metrics and aggregate results"
-    )
-    parser.add_argument("--orig-dir", type=Path, default=Path("data/videos"),
-                        help="Directory containing original reference videos")
-    parser.add_argument("--gen-dir", type=Path, default=Path("outputs/baseline_batch"),
-                        help="Directory containing generated videos")
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/eval_results/all"),
-                        help="Root output directory (each metric gets a subdirectory)")
-    parser.add_argument("--device", type=str, default="",
-                        help="Device override (empty = auto)")
-    parser.add_argument("--limit", type=int, default=0,
-                        help="Only evaluate first N samples (0 = all)")
-    parser.add_argument("--sample-frames", type=int, default=0,
-                        help="Override number of frames to sample (0 = use each script's default)")
-    parser.add_argument("--skip-flow", action="store_true",
-                        help="Skip Flow EPE evaluation (RAFT is slow)")
-    parser.add_argument("--skip-temporal", action="store_true",
-                        help="Skip Temporal evaluation")
-    parser.add_argument("--skip-fvd", action="store_true",
-                        help="Skip FVD evaluation (I3D download may be slow)")
-    # Model weight paths (local, same pattern as CLIP/XCLIP)
-    parser.add_argument("--dinov2-model", type=str, default="models/dinov2-vitb14",
-                        help="DINOv2 model local path")
-    parser.add_argument("--r3d18-weights", type=str, default="models/r3d18-kinetics400/r3d18_kinetics400.pth",
-                        help="R3D18 weights path for FVD")
-    parser.add_argument("--raft-weights", type=str, default="models/raft-large/raft_large.pth",
-                        help="RAFT weights path for Flow EPE / Dynamic Degree")
-    parser.add_argument("--lpips-weights", type=str, default="models/lpips-vgg/vgg_lpips.pth",
-                        help="LPIPS VGG weights path")
-    return parser.parse_args()
+def decode_video_frames(video_path: Path) -> list[np.ndarray]:
+    import av
+    with av.open(str(video_path)) as c:
+        return [f.to_rgb().to_ndarray() for f in c.decode(video=0)]
 
 
-def run_metric(metric: dict, args: argparse.Namespace, project_root: Path) -> dict | None:
-    """Run a single evaluation metric and return its JSON results."""
-    cmd = [sys.executable, str(project_root / metric["script"])]
+def _resize(frame: np.ndarray, size: int) -> np.ndarray:
+    t = torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
+    t = F.interpolate(t.unsqueeze(0), size=(size, size), mode="bilinear",
+                       align_corners=False).squeeze(0)
+    return (t.clamp(0, 1) * 255).byte().permute(1, 2, 0).cpu().numpy()
 
-    cmd.extend(["--orig-dir", str(args.orig_dir)])
-    cmd.extend(["--gen-dir", str(args.gen_dir)])
-    output_dir = args.output_dir / metric["output_subdir"]
-    cmd.extend(["--output-dir", str(output_dir)])
 
-    if args.device:
-        cmd.extend(["--device", args.device])
-    if args.limit > 0:
-        cmd.extend(["--limit", str(args.limit)])
-    if args.sample_frames > 0:
-        cmd.extend(["--sample-frames", str(args.sample_frames)])
+def sample_idx(total: int, num: int) -> np.ndarray:
+    return np.linspace(0, total - 1, num=num, dtype=int)
 
-    # Pass model weight paths through to sub-scripts
-    weight_arg = metric.get("weight_arg")
-    weight_key = metric.get("weight_key")
-    if weight_arg and weight_key and hasattr(args, weight_key):
-        weight_path = getattr(args, weight_key)
-        if weight_path:
-            cmd.extend([weight_arg, str(weight_path)])
 
-    print(f"\n{'=' * 60}", flush=True)
-    print(f"  Running: {metric['name']}", flush=True)
-    print(f"  Script:  {metric['script']}", flush=True)
-    print(f"  Output:  {output_dir}", flush=True)
-    print(f"{'=' * 60}\n", flush=True)
+def get_aligned_frames(
+    ref_path: Path, gen_path: Path, num_frames: int, frame_size: int,
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    ra = decode_video_frames(ref_path)
+    ga = decode_video_frames(gen_path)
+    ri = sample_idx(len(ra), num_frames)
+    gi = sample_idx(len(ga), num_frames)
+    ref = [ra[i] for i in ri]
+    gen = [ga[i] for i in gi]
+    if frame_size > 0:
+        ref = [_resize(f, frame_size) for f in ref]
+        gen = [_resize(f, frame_size) for f in gen]
+    return ref, gen
 
+
+# ─── CLIP / XCLIP ───
+
+def compute_clip_xclip(item, clip_processor, clip_model,
+                       xclip_processor, xclip_model, device):
+    caption = read_text(item["caption_path"])
+    of = sample_video_frames(item["orig_path"], 8)
+    gf = sample_video_frames(item["gen_path"], 8)
+
+    ct = get_clip_text_feature(caption, clip_processor, clip_model, device)
+    co = get_clip_video_feature(of, clip_processor, clip_model, device)
+    cg = get_clip_video_feature(gf, clip_processor, clip_model, device)
+
+    xt = get_xclip_text_feature(caption, xclip_processor, xclip_model, device)
+    xo = get_xclip_video_feature(of, xclip_processor, xclip_model, device)
+    xg = get_xclip_video_feature(gf, xclip_processor, xclip_model, device)
+
+    return {
+        "clip_o_g":  float(cosine_similarity(co, cg)),
+        "xclip_o_g": float(cosine_similarity(xo, xg)),
+    }
+
+
+# ─── FVD (R3D-18) ───
+
+def _load_r3d18():
+    from torchvision.models.video import R3D_18_Weights, r3d_18
+    w = R3D_18_Weights.DEFAULT
+    m = r3d_18(weights=w)
+    m.fc = torch.nn.Identity()
+    m.eval()
+    return m, w
+
+
+def _r3d18_encode(video_path: Path, model, weights,
+                  num_frames: int, device: str) -> np.ndarray:
+    size = weights.transforms().crop_size[0]
+    frames = decode_video_frames(video_path)
+    idx = sample_idx(len(frames), num_frames)
+    imgs = [frames[i] for i in idx]
+    t = torch.stack([
+        torch.from_numpy(f).permute(2, 0, 1).float() / 255.0
+        for f in imgs], dim=1)
+    t = F.interpolate(t.unsqueeze(0), size=(size, size), mode="bilinear",
+                       align_corners=False).squeeze(0)
+    t = weights.transforms()(t.unsqueeze(0)).squeeze(0)
+    with torch.inference_mode():
+        feat = model(t.unsqueeze(0).to(device)).cpu().numpy()
+    return feat.flatten()
+
+
+def compute_fvd(ref_dir: Path, gen_dir: Path, num_frames: int, device: str) -> float | None:
     try:
-        result = subprocess.run(cmd, cwd=str(project_root))
-        if result.returncode != 0:
-            print(f"WARNING: {metric['name']} exited with code {result.returncode}", flush=True)
-            return None
+        from scipy.linalg import sqrtm
+        model, weights = _load_r3d18()
+        model.to(device)
+        pairs = list(_discover_pairs(ref_dir, gen_dir))
+        ref_feats, gen_feats = [], []
+        for _, rp, gp in tqdm(pairs, desc="FVD"):
+            ref_feats.append(_r3d18_encode(rp, model, weights, num_frames, device))
+            gen_feats.append(_r3d18_encode(gp, model, weights, num_frames, device))
+        rf = np.stack(ref_feats)
+        gf = np.stack(gen_feats)
+        mu_r, mu_g = rf.mean(0), gf.mean(0)
+        cov_r = np.cov(rf, rowvar=False, ddof=1)
+        cov_g = np.cov(gf, rowvar=False, ddof=1)
+        diff = np.sum((mu_r - mu_g) ** 2)
+        covmean, _ = sqrtm(cov_r @ cov_g, disp=False)
+        if np.iscomplexobj(covmean):
+            covmean = covmean.real
+        return float(diff + np.trace(cov_r + cov_g - 2 * covmean))
     except Exception as e:
-        print(f"ERROR: {metric['name']} failed: {e}", flush=True)
+        print(f"  ⚠ FVD failed: {e}")
         return None
 
-    # Load JSON results
-    json_path = output_dir / metric["json_file"]
-    if json_path.exists():
-        with json_path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    return None
+
+# ─── LPIPS ───
+
+_m_lpips = None
+
+def _lpips_model(net: str, device: str):
+    global _m_lpips
+    if _m_lpips is None:
+        import lpips
+        _m_lpips = lpips.LPIPS(net=net).to(device)
+        _m_lpips.eval()
+    return _m_lpips
 
 
-def write_aggregate_summary(output_path: Path, all_results: dict) -> None:
-    """Write a unified markdown summary of all metrics."""
-    lines = [
-        "# P-Flow Evaluation Results (All Metrics)",
-        "",
-        "## Overview",
-        "",
-        "This document aggregates results from all evaluation metrics.",
-        "",
-        "## Metric Summary",
-        "",
-        "| Metric | Value | Direction | Description |",
-        "| ------ | ----- | :-------: | ----------- |",
-    ]
-
-    # FVD
-    if "fvd" in all_results:
-        r = all_results["fvd"]
-        lines.append(
-            f"| FVD | {r.get('fvd', 'N/A')} | ↓ | "
-            f"Distributional distance (N_real={r.get('n_real', '?')}, N_gen={r.get('n_gen', '?')}) |"
-        )
-
-    # DINO
-    if "dino" in all_results:
-        r = all_results["dino"]
-        lines.append(
-            f"| DINO Temporal | {r.get('dino_temporal_mean', 'N/A')} | ↑ | "
-            f"Frame consistency (N={r.get('count', '?')}) |"
-        )
-        lines.append(
-            f"| DINO Orig-Gen | {r.get('dino_orig_gen_mean', 'N/A')} | ↑ | "
-            f"Visual fidelity (N={r.get('count', '?')}) |"
-        )
-
-    # Flow
-    if "flow" in all_results:
-        r = all_results["flow"]
-        lines.append(
-            f"| Flow EPE | {r.get('flow_epe_mean', 'N/A')} | ↓ | "
-            f"Motion trajectory fidelity (N={r.get('count', '?')}) |"
-        )
-        lines.append(
-            f"| Flow Cosine Sim | {r.get('flow_cosine_sim_mean', 'N/A')} | ↑ | "
-            f"Flow direction alignment (N={r.get('count', '?')}) |"
-        )
-        lines.append(
-            f"| Dynamic Degree (gen) | {r.get('dynamic_degree_mean', 'N/A')} | ↑ | "
-            f"Generated video motion magnitude (N={r.get('count', '?')}) |"
-        )
-
-    # LPIPS
-    if "lpips" in all_results:
-        r = all_results["lpips"]
-        lines.append(
-            f"| LPIPS Avg | {r.get('lpips_avg_mean', 'N/A')} | ↓ | "
-            f"Perceptual distance (N={r.get('count', '?')}) |"
-        )
-
-    # Temporal
-    if "temporal" in all_results:
-        r = all_results["temporal"]
-        lines.append(
-            f"| Temporal Flicker | {r.get('temporal_flicker_mean', 'N/A')} | ↓ | "
-            f"Frame-to-frame flickering (N={r.get('count', '?')}) |"
-        )
-
-    lines.extend(["", "## Individual Metric Reports", ""])
-
-    # Link to individual reports
-    subdirs = ["eval_fvd", "eval_dino", "eval_flow", "eval_lpips", "eval_temporal"]
-    for subdir in subdirs:
-        md_path = output_path.parent / subdir / "eval_summary.md"
-        if md_path.exists():
-            lines.append(f"- [{subdir}]({subdir}/eval_summary.md)")
-        else:
-            lines.append(f"- {subdir} — not available")
-
-    lines.extend([
-        "",
-        "## Notes",
-        "",
-        "- All metrics are computed **after** video generation (offline evaluation).",
-        "- Per-sample results are available in each subdirectory's CSV file.",
-        "- Report `mean +/- std` in the paper; use paired t-test for ablation significance.",
-        "",
-    ])
-
-    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def compute_lpips(ref_frames, gen_frames, net: str, device: str) -> float:
+    m = _lpips_model(net, device)
+    scores = []
+    for r, g in zip(ref_frames, gen_frames):
+        rt = torch.from_numpy(r).permute(2, 0, 1).float() / 255.0 * 2 - 1
+        gt = torch.from_numpy(g).permute(2, 0, 1).float() / 255.0 * 2 - 1
+        scores.append(m(rt.unsqueeze(0).to(device), gt.unsqueeze(0).to(device)).item())
+    return float(np.mean(scores))
 
 
-def main() -> None:
-    args = parse_args()
-    project_root = Path(__file__).resolve().parent.parent
-    args.orig_dir = args.orig_dir.resolve()
-    args.gen_dir = args.gen_dir.resolve()
+# ─── SSIM ───
+
+def compute_ssim(ref_frames, gen_frames) -> float:
+    scores = []
+    for r, g in zip(ref_frames, gen_frames):
+        scores.append(float(structural_similarity(
+            r.astype(np.float32) / 255, g.astype(np.float32) / 255,
+            data_range=1.0, channel_axis=2)))
+    return float(np.mean(scores))
+
+
+# ─── Optical Flow EPE ───
+
+def _gray(f): return cv2.cvtColor(f, cv2.COLOR_RGB2GRAY)
+
+def _flow(prev, nxt):
+    return cv2.calcOpticalFlowFarneback(
+        _gray(prev), _gray(nxt), None, 0.5, 3, 15, 3, 5, 1.2, 0)
+
+def compute_flow_epe(ref_frames, gen_frames) -> float:
+    errors = []
+    for i in range(len(ref_frames) - 1):
+        fr = _flow(ref_frames[i], ref_frames[i + 1])
+        fg = _flow(gen_frames[i], gen_frames[i + 1])
+        errors.append(float(np.mean(np.linalg.norm(fr - fg, axis=2))))
+    return float(np.mean(errors))
+
+
+# ─── 主流程 ───
+
+def _discover_pairs(orig_dir: Path, gen_dir: Path) -> list[tuple[str, Path, Path]]:
+    gen_map = {p.stem: p for p in sorted(gen_dir.glob("*.mp4"))}
+    return [(op.stem, op, gen_map[op.stem])
+            for op in sorted(orig_dir.glob("*.mp4"))
+            if op.stem in gen_map]
+
+
+def main():
+    parser = argparse.ArgumentParser(description="统一 6 项视频质量评测")
+    parser.add_argument("--orig-dir", type=Path, default=Path("data/videos"))
+    parser.add_argument("--gen-dir", type=Path, required=True)
+    parser.add_argument("--caption-dir", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--clip-model", default=DEFAULT_CLIP_MODEL)
+    parser.add_argument("--xclip-model", default=DEFAULT_XCLIP_MODEL)
+    parser.add_argument("--sample-frames", type=int, default=DEFAULT_SAMPLE_FRAMES)
+    parser.add_argument("--frame-size", type=int, default=256)
+    parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"])
+    parser.add_argument("--skip-fvd", action="store_true")
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    args = parser.parse_args()
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Project root: {project_root}", flush=True)
-    print(f"Original videos: {args.orig_dir}", flush=True)
-    print(f"Generated videos: {args.gen_dir}", flush=True)
-    print(f"Output directory: {args.output_dir}", flush=True)
+    pairs = _discover_pairs(args.orig_dir, args.gen_dir)
+    if not pairs:
+        print(f"No aligned pairs between {args.orig_dir} and {args.gen_dir}")
+        return
+    print(f"Found {len(pairs)} aligned samples")
 
-    all_results = {}
-    skipped = []
+    print("Loading CLIP / XCLIP...")
+    clip_processor, clip_model, xclip_processor, xclip_model = build_models(
+        args.clip_model, args.xclip_model, args.device)
 
-    for metric in METRICS:
-        # Check skip flags
-        skip_flag = metric.get("skip_flag", "")
-        if skip_flag == "skip_flow" and args.skip_flow:
-            skipped.append(metric["name"])
-            continue
-        if skip_flag == "skip_temporal" and args.skip_temporal:
-            skipped.append(metric["name"])
-            continue
-        if metric["name"] == "FVD" and args.skip_fvd:
-            skipped.append(metric["name"])
+    items = []
+    for sid, rp, gp in tqdm(pairs, desc="Per-sample"):
+        caption_path = args.caption_dir / f"{sid}.txt"
+        if not caption_path.exists():
+            print(f"  ⚠ skip {sid}: no caption")
             continue
 
-        result = run_metric(metric, args, project_root)
-        if result is not None:
-            all_results[metric["name"].lower().replace("-", "_").replace(" ", "_")] = result
+        row = {"sample_id": sid}
+        row.update(compute_clip_xclip(
+            {"orig_path": rp, "gen_path": gp, "caption_path": caption_path},
+            clip_processor, clip_model, xclip_processor, xclip_model, args.device))
 
-    # Save aggregated JSON
-    agg_json = args.output_dir / "all_results.json"
-    agg_json.write_text(
-        json.dumps(all_results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+        ref_frames, gen_frames = get_aligned_frames(
+            rp, gp, args.sample_frames, args.frame_size)
+        row["lpips"] = round(compute_lpips(ref_frames, gen_frames, args.lpips_net, args.device), 6)
+        row["ssim"]  = round(compute_ssim(ref_frames, gen_frames), 6)
+        row["of_epe"] = round(compute_flow_epe(ref_frames, gen_frames), 6)
+        items.append(row)
 
-    # Write aggregate markdown summary
-    agg_md = args.output_dir / "eval_summary.md"
-    write_aggregate_summary(agg_md, all_results)
+    fvd = None
+    if not args.skip_fvd:
+        print("Computing FVD...")
+        fvd = compute_fvd(args.orig_dir, args.gen_dir, args.sample_frames, args.device)
 
-    print(f"\n{'=' * 60}", flush=True)
-    print(f"  All metrics complete!", flush=True)
-    if skipped:
-        print(f"  Skipped: {', '.join(skipped)}", flush=True)
-    print(f"  Aggregated JSON: {agg_json}", flush=True)
-    print(f"  Aggregated summary: {agg_md}", flush=True)
-    print(f"{'=' * 60}", flush=True)
+    keys = ["clip_o_g", "xclip_o_g", "lpips", "ssim", "of_epe"]
+    means = {}
+    for k in keys:
+        vals = [it[k] for it in items if it.get(k) is not None]
+        means[f"mean_{k}"] = round(np.mean(vals), 6) if vals else None
+
+    summary = {"samples": len(items)}
+    if fvd is not None:
+        summary["fvd"] = round(fvd, 2)
+    summary.update(means)
+
+    csv_path = args.output_dir / "all_metrics.csv"
+    with open(csv_path, "w", newline="") as f:
+        fieldnames = ["sample_id", "clip_o_g", "xclip_o_g", "lpips", "ssim", "of_epe"]
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(items)
+
+    (args.output_dir / "summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False))
+
+    print("\n" + "=" * 60)
+    for k, v in summary.items():
+        print(f"  {k}: {v}")
+    print(f"  CSV: {csv_path}")
 
 
 if __name__ == "__main__":

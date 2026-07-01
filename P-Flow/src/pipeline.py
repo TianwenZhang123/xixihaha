@@ -25,6 +25,7 @@ P-Flow Unified Pipeline.
 """
 
 import json
+import os
 import time
 import shutil
 import math
@@ -67,7 +68,6 @@ class PFlowConfig:
     use_svd: bool = False          # SVD Filtering
     use_blend: bool = False        # Noise Blending (α mixing)
     use_iter: bool = False         # Iterative VLM Optimization
-    use_midpoint: bool = False     # Midpoint ODE Solver
     use_composite: bool = False    # Vertical Composite for VLM
     # ── Noise Prior 参数 ──
     alpha: float = 0.004           # SVD 混合权重 (v5 fixed, 推荐 0.004)
@@ -150,8 +150,6 @@ class PFlowConfig:
             flags.append(fi_desc)
         if self.use_iter:
             flags.append(f"iter({self.i_max})")
-        if self.use_midpoint:
-            flags.append("midpoint")
         if self.use_composite:
             flags.append("composite")
         return flags
@@ -330,10 +328,6 @@ class PFlowPipeline:
                     fi_config=fi_config_for_inv,
                 )
 
-            # ── 缓存 prompt_embeds 供 PNA 探测使用 ──
-            if prompt_embeds is not None:
-                cfg._current_prompt_embeds = prompt_embeds
-
         # ── Step 3.5: 轨迹/FI特征缓存 ──
         ref_trajectory = None
         fi_ref_features = None
@@ -482,31 +476,6 @@ class PFlowPipeline:
         logger.info(f"  [SAMPLE SUMMARY] full_caption={caption}")
         logger.info(f"  [SAMPLE SUMMARY] caption_length={len(caption)} chars, word_count={len(caption.split())}")
         logger.info(f"  [SAMPLE SUMMARY] elapsed={elapsed:.1f}s, output={final_path}")
-
-        # ── PNA v4 诊断快照 (固定α策略) ──
-        pna_diag = getattr(cfg, '_pna_diag', None)
-        if pna_diag is not None:
-            logger.info(
-                f"  [SAMPLE-PNA-v4] ★★★ PNA-v4 DIAGNOSTIC FOR sample_{sample_id} ★★★"
-            )
-            logger.info(
-                f"  [SAMPLE-PNA-v4] category={pna_diag['pna_category']}, "
-                f"α_final={pna_diag['alpha_eff']:.6f}, "
-                f"std_gate={'FLOOR' if pna_diag['std_gate_active'] else 'off'}"
-            )
-            logger.info(
-                f"  [SAMPLE-PNA-v4] η_std={pna_diag.get('eta_std', 0):.4f}, "
-                f"frame_cos={pna_diag.get('temporal_frame_cos', 0):.4f}"
-            )
-            # 预测: α vs fixed=0.004 的关系 → 后续对比XC验证
-            alpha_diff = pna_diag['alpha_eff'] - 0.004
-            if alpha_diff > 0.001:
-                pred_tag = "α_UP→expect_WORSE(over-inject)"
-            elif alpha_diff < -0.001:
-                pred_tag = "α_DOWN→expect_BETTER(less-inject)"
-            else:
-                pred_tag = "α≈fixed→expect_SIMILAR"
-            logger.info(f"  [SAMPLE-PNA] prediction: {pred_tag} (vs fixed_α=0.004)")
         return metadata
 
     # ─────────────────────────────────────────────────────────────
@@ -711,10 +680,6 @@ class PFlowPipeline:
         sqrt_alpha = torch.sqrt(torch.tensor(alpha, device=self.device))
         sqrt_remaining = torch.sqrt(torch.tensor(remaining, device=self.device))
 
-        # ── 方向5: 交替注入 (帧级 interleave) ──
-        # 方向5 交替注入已注释 (9case 均值-1.2%, 对困难case有效但非普适)
-        # use_alternate = getattr(cfg, 'svd_alternate', False)
-        # if use_alternate and eta_temporal.dim() >= 4: ... (见 git history)
         # ── Two-way blend: η_temporal + η_random ──
         eta = sqrt_alpha * eta_temporal + sqrt_remaining * eta_random
 

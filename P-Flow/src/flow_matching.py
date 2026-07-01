@@ -271,42 +271,6 @@ class FlowMatchingInverter:
 
         return x_t, trajectory, fi_ref_features
 
-    @torch.no_grad()
-    def invert_midpoint(
-        self,
-        video_latents: torch.Tensor,
-        prompt_embeds: torch.Tensor,
-        negative_prompt_embeds: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """
-        Midpoint method inversion for higher accuracy.
-
-            k1 = v_θ(x_t, t, c)
-            x_mid = x_t + (dt/2) * k1
-            k2 = v_θ(x_mid, t + dt/2, c)
-            x_{t+dt} = x_t + dt * k2
-        """
-        timesteps = torch.linspace(1.0, 0.0, self.num_inversion_steps + 1, device=self.device)
-        dt = -1.0 / self.num_inversion_steps
-
-        x_t = video_latents.clone()
-
-        for i in tqdm(range(self.num_inversion_steps), desc="Inversion (Midpoint)", leave=False):
-            t = timesteps[i]
-            t_tensor = torch.full(
-                (x_t.shape[0],), t.item(), device=self.device, dtype=x_t.dtype
-            )
-            t_mid_tensor = torch.full(
-                (x_t.shape[0],), (t + dt / 2).item(), device=self.device, dtype=x_t.dtype
-            )
-
-            k1 = self._predict_velocity(x_t, t_tensor, prompt_embeds, negative_prompt_embeds)
-            x_mid = x_t + (dt / 2) * k1
-            k2 = self._predict_velocity(x_mid, t_mid_tensor, prompt_embeds, negative_prompt_embeds)
-            x_t = x_t + dt * k2
-
-        return x_t
-
 
     def _predict_velocity(
         self,

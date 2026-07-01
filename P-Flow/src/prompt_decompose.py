@@ -261,30 +261,6 @@ class CLIPScorer:
         from .vlm_client import _extract_frames
         return _extract_frames(video_path, num_frames)
 
-    @staticmethod
-    def _load_video_tensor(video_path: str, num_frames: int = 8) -> torch.Tensor:
-        """用 decord 加载视频帧为 tensor (C,F,H,W)."""
-        try:
-            from decord import VideoReader, cpu
-            vr = VideoReader(video_path, ctx=cpu(0))
-            total = len(vr)
-            indices = np.linspace(0, total - 1, num_frames, dtype=int)
-            frames = vr.get_batch(indices).asnumpy()  # (F, H, W, C)
-            frames = torch.from_numpy(frames).permute(3, 0, 1, 2).float()  # (C, F, H, W)
-            # 归一化到 [0, 1]
-            frames = frames / 255.0
-            return frames
-        except ImportError:
-            pass
-        # fallback: PIL images
-        from .vlm_client import _extract_frames
-        pil_frames = _extract_frames(video_path, num_frames)
-        tensors = []
-        for img in pil_frames:
-            arr = np.array(img.resize((224, 224))).transpose(2, 0, 1)
-            tensors.append(torch.from_numpy(arr).float() / 255.0)
-        return torch.stack(tensors, dim=1)  # (C, F, H, W)
-
     def score_text(self, prompt: str, video_path: str,
                    num_frames: int = 8) -> float:
         """

@@ -26,11 +26,11 @@ imageio-ffmpeg>=0.4.9
 eva-decord>=0.6.0               # Fast video decoding
 av>=12.0.0                      # PyAV for video I/O
 
-# Evaluation metrics
-pytorch-fid>=0.3.0              # FID computation
-scipy>=1.11.0                   # For FVD computation
+# ── Evaluation metrics (6 项) ──
+scipy>=1.11.0                   # FVD 矩阵平方根
 scikit-learn>=1.3.0
-lpips>=0.1.4                    # Perceptual similarity
+scikit-image>=0.22.0            # SSIM
+lpips>=0.1.4                    # LPIPS 感知距离
 
 # Numeric & utilities
 numpy>=1.24.0
