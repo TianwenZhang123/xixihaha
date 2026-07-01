@@ -241,7 +241,7 @@ def main():
 
     print("Loading CLIP / XCLIP...")
     clip_processor, clip_model, xclip_processor, xclip_model = build_models(
-        args.clip_model, args.xclip_model, args.device)
+        args.device, args.clip_model, args.xclip_model)
 
     items = []
     for sid, rp, gp in tqdm(pairs, desc="Per-sample"):
