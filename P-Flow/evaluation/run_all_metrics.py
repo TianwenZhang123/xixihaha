@@ -123,12 +123,14 @@ def _r3d18_encode(video_path: Path, model, weights,
     imgs = [frames[i] for i in idx]
     t = torch.stack([
         torch.from_numpy(f).permute(2, 0, 1).float() / 255.0
-        for f in imgs], dim=1)
-    t = F.interpolate(t.unsqueeze(0), size=(size, size), mode="bilinear",
-                       align_corners=False).squeeze(0)
-    t = weights.transforms()(t.unsqueeze(0)).squeeze(0)
+        for f in imgs], dim=1)  # (C, F, H, W)
+    # 逐帧 resize 到 (size, size)，避免 5D interpolate 问题
+    t = F.interpolate(t.permute(1, 0, 2, 3), size=(size, size),
+                       mode="bilinear", align_corners=False).permute(1, 0, 2, 3)
+    # 形状变为 (C, F, size, size)
+    t = weights.transforms()(t.unsqueeze(0))  # → (1, C, F, size, size)
     with torch.inference_mode():
-        feat = model(t.unsqueeze(0).to(device)).cpu().numpy()
+        feat = model(t.to(device)).cpu().numpy()
     return feat.flatten()
 
 
