@@ -1,6 +1,9 @@
 # P-Flow Video Reproduction Requirements
 # Target: AutoDL A800 (80GB) — Wan2.1-1.3B + Local Qwen2.5-VL-7B
 
+# Config parsing (Python ≥ 3.11 内置 tomllib, 否则用此备用)
+tomli>=1.2.0
+
 # Core dependencies
 torch>=2.2.0
 torchvision>=0.17.0

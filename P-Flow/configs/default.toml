@@ -1,0 +1,81 @@
+# P-Flow 默认配置文件
+# 命令行传参会覆盖此文件中的值 (data_dir / caption_dir / output_dir 除外)
+
+[paths]
+model_path   = "models/Wan2.1-T2V-1.3B-Diffusers"
+vlm_path     = "models/Qwen2.5-VL-7B-Instruct"
+vlm_provider = "local"
+
+[video]
+height     = 480
+width      = 832
+num_frames = 81
+fps        = 15
+
+[inference]
+seed             = 42
+steps            = 30
+guidance         = 5.0
+inversion_steps  = 50
+dtype            = "bfloat16"
+use_fast_svd     = true
+
+# ── L2: 噪声先验 ──
+[noise_prior]
+inversion = true
+svd       = true
+blend     = true
+alpha     = 0.004
+rho_s     = 0.1
+rho_m     = 0.9
+
+# ── L2: 双向门控 (Floor + CAP) ──
+[std_gate]
+enabled       = true
+low           = 0.32
+floor_alpha   = 0.006
+high          = 0.45
+cap_alpha     = 0.002
+
+# ── L2: 渐进多尺度 SVD ──
+[progressive_svd]
+enabled = true
+
+# ── L3: Feature Injection ──
+[fi]
+enabled            = true
+layers             = "mid"
+lambda             = 0.10
+schedule           = "middle_peak"
+cache_mode         = "attention"
+
+# ── L3: FI 门控 ──
+[fi.quality_gate]
+enabled          = true
+threshold        = 0.05
+k                = 20.0
+min_scale        = 0.1
+skip_threshold   = 0.08
+skip_svd         = true
+
+# ── L3: FI 自适应门控 ──
+[fi.adaptive_gate]
+enabled = true
+temp    = 5.0
+high    = 0.30
+
+# ── L3: FI 累计预算 ──
+[fi.norm_budget]
+max_norm    = 10000
+decay_min   = 0.3
+
+# ── L3: FI 通道选择 (默认关闭) ──
+[fi.sparse]
+ratio = 0.0
+
+# ── L1: Prompt 优化 (默认关闭) ──
+[prompt]
+decompose = false
+llm_api_key = ""
+llm_api_base = "https://token-plan-cn.xiaomimimo.com/v1"
+llm_model    = "mimo-v2.5-pro"

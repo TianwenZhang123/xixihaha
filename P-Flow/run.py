@@ -1,28 +1,21 @@
 #!/usr/bin/env python3
 """
-P-Flow Runner - 通过命令行 flag 控制各改动点。
+P-Flow Runner — 默认使用 configs/default.toml 中的最优配置。
 
 用法:
-    # 纯 baseline (caption + 一次生成)
+    # 最优配置 (ABC + 自适应渐进 SVD)
     python run.py --data_dir data/videos --caption_dir data/captions_qwen
 
-    # L2: 启用噪声先验 (inversion + svd + blend)
-    python run.py --data_dir data/videos --caption_dir data/captions_qwen --inversion --svd --blend --alpha 0.004
+    # 覆盖某个参数
+    python run.py --data_dir data/videos --caption_dir data/captions_qwen --no-svd
 
-    # L2+L3: 噪声先验 + Feature Injection (当前最强配置)
-    python run.py --data_dir data/videos --caption_dir data/captions_qwen \
-        --inversion --svd --blend --alpha 0.004 --svd_mode v1 \
-        --feature_inject --fi_layers mid --fi_lambda 0.05
+    # 纯 baseline
+    python run.py --data_dir data/videos --caption_dir data/captions_qwen --no-inversion --no-svd
 
-改动点 Flag 说明:
-    --inversion       L2: 启用 Flow Matching Inversion (从参考视频反演噪声)
-    --svd             L2: 启用 SVD 两阶段滤波 (空间去内容 + 时间保运动)
-    --blend           L2: 启用噪声混合 (η = sqrt(α)*η_temporal + sqrt(1-α)*η_random)
-    --feature_inject  L3: 启用 Feature Injection (DiT特征空间注入)
-    --iter N          L1: 启用迭代VLM优化 (N轮反馈循环)
+    # 指定输出目录
+    python run.py --data_dir data/videos --caption_dir data/captions_qwen --output_dir outputs/my_exp
 
-快捷组合:
-    --noise_prior  等价于 --inversion --svd --blend
+配置文件: configs/default.toml
 """
 
 import sys
@@ -35,13 +28,44 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.pipeline import PFlowPipeline, PFlowConfig
 
 
+def _load_config() -> dict:
+    """从 configs/default.toml 加载默认配置。"""
+    cfg_path = Path(__file__).parent / "configs" / "default.toml"
+    if not cfg_path.exists():
+        return {}
+    try:
+        import tomllib
+        return tomllib.loads(cfg_path.read_text(encoding="utf-8"))
+    except ImportError:
+        try:
+            # Python < 3.11 使用 tomli
+            import tomli
+            return tomli.loads(cfg_path.read_text(encoding="utf-8"))
+        except ImportError:
+            import json
+            raise RuntimeError("需要 tomli 包: pip install tomli")
+
+
+def _cfg(cfg: dict, *keys, default=None):
+    """安全地从嵌套字典取值."""
+    for k in keys:
+        if isinstance(cfg, dict):
+            cfg = cfg.get(k, {})
+        else:
+            return default
+    return cfg if cfg != {} else default
+
+
 def parse_args():
+    """解析命令行参数，默认值从 configs/default.toml 加载。"""
+    cfg = _load_config()
+
     p = argparse.ArgumentParser(
-        description="P-Flow: 通过 flag 控制各改动点的视频生成管线",
+        description="P-Flow — 默认使用 configs/default.toml 最优配置",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # ── 输入 ──
+    # ── 输入 (不设默认值, 要求显式传入) ──
     p.add_argument("--video", type=str, help="单个参考视频路径")
     p.add_argument("--caption", type=str, default="", help="初始 caption")
     p.add_argument("--data_dir", type=str, help="批量模式: 视频目录")
@@ -50,99 +74,124 @@ def parse_args():
     p.add_argument("--sample_ids", type=int, nargs="+", help="指定样本ID")
     p.add_argument("--limit", type=int, help="最多处理N个样本")
 
-    # ── 改动点开关 ──
-    p.add_argument("--inversion", action="store_true", help="启用 Flow Matching Inversion")
-    p.add_argument("--svd", action="store_true", help="启用 SVD 滤波")
-    p.add_argument("--blend", action="store_true", help="启用噪声混合")
+    # ── 基础参数 ──
+    p.add_argument("--model_path", type=str,
+                   default=_cfg(cfg, "paths", "model_path", default="models/Wan2.1-T2V-1.3B-Diffusers"))
+    p.add_argument("--vlm_path", type=str,
+                   default=_cfg(cfg, "paths", "vlm_path", default="models/Qwen2.5-VL-7B-Instruct"))
+    p.add_argument("--vlm_provider", type=str,
+                   default=_cfg(cfg, "paths", "vlm_provider", default="local"),
+                   choices=["local", "dashscope", "mock"])
+    p.add_argument("--height", type=int, default=_cfg(cfg, "video", "height", default=480))
+    p.add_argument("--width", type=int, default=_cfg(cfg, "video", "width", default=832))
+    p.add_argument("--num_frames", type=int, default=_cfg(cfg, "video", "num_frames", default=81))
+    p.add_argument("--fps", type=int, default=_cfg(cfg, "video", "fps", default=15))
+    p.add_argument("--steps", type=int, default=_cfg(cfg, "inference", "steps", default=30))
+    p.add_argument("--guidance", type=float, default=_cfg(cfg, "inference", "guidance", default=5.0))
+    p.add_argument("--seed", type=int, default=_cfg(cfg, "inference", "seed", default=42))
+    p.add_argument("--inversion_steps", type=int,
+                   default=_cfg(cfg, "inference", "inversion_steps", default=50))
+    p.add_argument("--no_fast_svd", action="store_true",
+                   help=f"禁用 randomized SVD (默认: {_cfg(cfg, 'inference', 'use_fast_svd', default=True)})")
     p.add_argument("--iter", type=int, default=0, help="迭代轮数 (0=不迭代)")
     p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
 
-    # ── 快捷组合 ──
-    p.add_argument("--noise_prior", action="store_true", help="快捷: --inversion --svd --blend")
-    p.add_argument("--full", action="store_true", help="快捷: --inversion --svd --blend --feature_inject")
+    # ── L2: 噪声先验 ──
+    p.add_argument("--inversion", action="store_true",
+                   dest="inversion",
+                   default=_cfg(cfg, "noise_prior", "inversion", default=False))
+    p.add_argument("--no-inversion", action="store_false", dest="inversion",
+                   help="禁用 Inversion")
+    p.add_argument("--svd", action="store_true", dest="svd",
+                   default=_cfg(cfg, "noise_prior", "svd", default=False))
+    p.add_argument("--no-svd", action="store_false", dest="svd",
+                   help="禁用 SVD")
+    p.add_argument("--blend", action="store_true", dest="blend",
+                   default=_cfg(cfg, "noise_prior", "blend", default=False))
+    p.add_argument("--no-blend", action="store_false", dest="blend",
+                   help="禁用 Blend")
+    p.add_argument("--alpha", type=float,
+                   default=_cfg(cfg, "noise_prior", "alpha", default=0.004))
+    p.add_argument("--rho_s", type=float,
+                   default=_cfg(cfg, "noise_prior", "rho_s", default=0.1))
+    p.add_argument("--rho_m", type=float,
+                   default=_cfg(cfg, "noise_prior", "rho_m", default=0.9))
 
-    # ── 参数调节 ──
-    p.add_argument("--alpha", type=float, default=0.004, help="SVD 噪声混合权重 (v5 fixed, 推荐 0.004)")
-    p.add_argument("--rho_s", type=float, default=0.1, help="空间SVD阈值")
-    p.add_argument("--rho_m", type=float, default=0.9, help="时间SVD阈值")
-    p.add_argument("--steps", type=int, default=30, help="推理步数")
-    p.add_argument("--guidance", type=float, default=5.0, help="CFG scale")
-    p.add_argument("--seed", type=int, default=42, help="随机种子")
-    p.add_argument("--inversion_steps", type=int, default=50, help="反演ODE步数 (30=快速, 50=标准)")
-    p.add_argument("--no_fast_svd", action="store_true", help="禁用 randomized SVD (使用精确SVD)")
-    p.add_argument("--svd_progressive", action="store_true", help="渐进多尺度SVD (自适应: 仅k_m非均匀时启用)")
-    p.add_argument("--fi_sparse_ratio", type=float, default=0.0,
-                   help="通道选择性FI, 0=关闭")
-    p.add_argument("--prompt_decompose", action="store_true",
-                   help="L1: 结构化Prompt分解+CLIP择优 (需API key)")
-    p.add_argument("--llm_api_key", type=str, default="",
-                   help="LLM API Key (或设环境变量 LLM_API_KEY)")
-    p.add_argument("--llm_api_base", type=str, default="https://token-plan-cn.xiaomimimo.com/v1",
-                   help="LLM API 地址")
-    p.add_argument("--llm_model", type=str, default="mimo-v2.5-pro",
-                   help="LLM 模型名")
-    # p.add_argument("--svd_alternate", action="store_true", help="方向5: 交替注入 — 已注释")
-    p.add_argument("--height", type=int, default=480)
-    p.add_argument("--width", type=int, default=832)
-    p.add_argument("--num_frames", type=int, default=81)
-    p.add_argument("--fps", type=int, default=15)
+    # ── L2: 双向门控 ──
+    p.add_argument("--no-pna-std-gate", action="store_true",
+                   help="禁用双向门控")
+    p.add_argument("--pna_std_low", type=float,
+                   default=_cfg(cfg, "std_gate", "low", default=0.32))
+    p.add_argument("--pna_std_floor_alpha", type=float,
+                   default=_cfg(cfg, "std_gate", "floor_alpha", default=0.006))
+    p.add_argument("--pna_std_high", type=float,
+                   default=_cfg(cfg, "std_gate", "high", default=0.45))
+    p.add_argument("--pna_std_cap_alpha", type=float,
+                   default=_cfg(cfg, "std_gate", "cap_alpha", default=0.002))
 
-    # ── [已废弃] 旧方案参数已全部移除，详见 pipeline.py PFlowConfig ──
+    # ── L2: 渐进 SVD ──
+    p.add_argument("--svd-progressive", action="store_true", dest="svd_progressive",
+                   default=_cfg(cfg, "progressive_svd", "enabled", default=False))
+    p.add_argument("--no-svd-progressive", action="store_false", dest="svd_progressive",
+                   help="禁用渐进多尺度 SVD")
 
-    # ── L3 V3: Feature Injection (FI) ──
-    p.add_argument("--feature_inject", action="store_true",
-                   help="启用 Feature Injection: 在 DiT 特征空间注入参考信息 (独立于 VDA)")
-    p.add_argument("--fi_layers", type=str, default="mid",
-                   help="FI 注入层: 'all'/'mid'/'last'/逗号分隔层号 (默认 mid=中间1/3层)")
-    p.add_argument("--fi_lambda", type=float, default=0.1,
-                   help="FI 注入强度 λ (推荐 0.01~0.3; 0=无注入, 1=完全替换)")
-    p.add_argument("--fi_schedule", type=str, default="middle_peak",
-                   choices=["constant", "middle_peak", "warmup_decay", "cosine_decay"],
-                   help="FI λ 调度策略")
+    # ── L3: FI ──
+    p.add_argument("--feature-inject", action="store_true", dest="feature_inject",
+                   default=_cfg(cfg, "fi", "enabled", default=False))
+    p.add_argument("--no-feature-inject", action="store_false", dest="feature_inject",
+                   help="禁用 Feature Injection")
+    p.add_argument("--fi_layers", type=str,
+                   default=_cfg(cfg, "fi", "layers", default="mid"))
+    p.add_argument("--fi_lambda", type=float,
+                   default=_cfg(cfg, "fi", "lambda", default=0.1))
+    p.add_argument("--fi_schedule", type=str,
+                   default=_cfg(cfg, "fi", "schedule", default="middle_peak"),
+                   choices=["constant", "middle_peak", "warmup_decay", "cosine_decay"])
+    p.add_argument("--fi_cache_mode", type=str,
+                   default=_cfg(cfg, "fi", "cache_mode", default="attention"),
+                   choices=["attention", "hidden", "mlp"])
+
+    # ── L3: FI 门控 ──
     p.add_argument("--fi_no_quality_gate", action="store_true",
                    help="禁用 FI 质量门控")
-    p.add_argument("--fi_quality_threshold", type=float, default=0.05,
-                   help="FI 质量门控阈值 (mean_cos < threshold → 弱引导; 默认 0.05; 设为 0.00 可基本跳过门控)")
-    p.add_argument("--fi_quality_k", type=float, default=20.0,
-                   help="FI 质量门控 sigmoid 斜率 (越大越陡峭; 默认 20.0)")
-    p.add_argument("--fi_quality_min_scale", type=float, default=0.1,
-                   help="FI 质量门控最低注入比例 (默认 0.1, 即最少保留 10%% 注入)")
-    p.add_argument("--fi_quality_skip_threshold", type=float, default=None,
-                   help="FI 硬跳过阈值: mean_cos > 此值时完全跳过 FI (默认 None 不启用; 推荐 0.08)")
+    p.add_argument("--fi_quality_threshold", type=float,
+                   default=_cfg(cfg, "fi", "quality_gate", "threshold", default=0.05))
+    p.add_argument("--fi_quality_k", type=float,
+                   default=_cfg(cfg, "fi", "quality_gate", "k", default=20.0))
+    p.add_argument("--fi_quality_min_scale", type=float,
+                   default=_cfg(cfg, "fi", "quality_gate", "min_scale", default=0.1))
+    p.add_argument("--fi_quality_skip_threshold", type=float,
+                   default=_cfg(cfg, "fi", "quality_gate", "skip_threshold", default=None))
     p.add_argument("--fi_quality_skip_svd", action="store_true",
-                   help="方向A: 跳过FI时同时关闭SVD blend (默认False)")
-    p.add_argument("--fi_max_injection_norm", type=float, default=None,
-                   help="方向B: Total injection norm 硬上限 (默认 None 不启用; 推荐 10000)")
-    p.add_argument("--fi_norm_decay_min", type=float, default=0.3,
-                   help="方向B: norm超限后最小衰减系数 (默认 0.3)")
-    p.add_argument("--fi_ag_gate_high", type=float, default=None,
-                   help="方向C: AG gate 上限 (默认 None 无上限; 推荐 0.40)")
-    p.add_argument("--fi_cache_mode", type=str, default="attention",
-                   choices=["attention", "hidden", "mlp"],
-                   help="FI 缓存特征类型: attention=cross-attn输出(推荐), hidden=block输出, mlp=ffn输出")
+                   default=_cfg(cfg, "fi", "quality_gate", "skip_svd", default=False))
+
+    # ── L3: FI 自适应门控 ──
     p.add_argument("--fi_no_adaptive_gate", action="store_true",
-                   help="禁用 FI 自适应门控 (默认开启: 特征越接近参考→注入越少)")
-    p.add_argument("--fi_adaptive_temp", type=float, default=5.0,
-                   help="FI 自适应门控温度 (越大越敏感, 推荐 3~10; 默认 5.0)")
+                   help="禁用 FI 自适应门控")
+    p.add_argument("--fi_adaptive_temp", type=float,
+                   default=_cfg(cfg, "fi", "adaptive_gate", "temp", default=5.0))
+    p.add_argument("--fi_ag_gate_high", type=float,
+                   default=_cfg(cfg, "fi", "adaptive_gate", "high", default=None))
 
-    # ── SVD 双向门控 (Floor + CAP) ──
-    p.add_argument("--no_pna_std_gate", action="store_true",
-                   help="禁用双向门控 (默认启用: Floor+CAP)")
-    p.add_argument("--pna_std_low", type=float, default=0.32,
-                   help="Floor 低阈值: η_std < 此值 → 抬升 α (默认 0.32)")
-    p.add_argument("--pna_std_floor_alpha", type=float, default=0.006,
-                   help="Floor 值: 弱信号时 α 至少为此值 (默认 0.006)")
-    p.add_argument("--pna_std_high", type=float, default=0.45,
-                   help="CAP 高阈值: η_std > 此值 → 降低 α (默认 0.45)")
-    p.add_argument("--pna_std_cap_alpha", type=float, default=0.002,
-                   help="CAP 值: 强信号时 α 至多为此值 (默认 0.002)")
+    # ── L3: FI 累计预算 ──
+    p.add_argument("--fi_max_injection_norm", type=float,
+                   default=_cfg(cfg, "fi", "norm_budget", "max_norm", default=None))
+    p.add_argument("--fi_norm_decay_min", type=float,
+                   default=_cfg(cfg, "fi", "norm_budget", "decay_min", default=0.3))
 
-    # ── 模型路径 ──
-    p.add_argument("--model_path", type=str, default="models/Wan2.1-T2V-1.3B-Diffusers",
-                   help="Wan2.1 T2V 模型路径 (默认: 项目内 models/ 目录)")
-    p.add_argument("--vlm_path", type=str, default="models/Qwen2.5-VL-7B-Instruct",
-                   help="VLM 模型路径 (默认: 项目内 models/ 目录)")
-    p.add_argument("--vlm_provider", type=str, default="local", choices=["local", "dashscope", "mock"])
+    # ── L3: 通道选择 ──
+    p.add_argument("--fi_sparse_ratio", type=float,
+                   default=_cfg(cfg, "fi", "sparse", "ratio", default=0.0))
+
+    # ── L1: Prompt ──
+    p.add_argument("--prompt_decompose", action="store_true",
+                   default=_cfg(cfg, "prompt", "decompose", default=False))
+    p.add_argument("--llm_api_key", type=str,
+                   default=_cfg(cfg, "prompt", "llm_api_key", default=""))
+    p.add_argument("--llm_api_base", type=str,
+                   default=_cfg(cfg, "prompt", "llm_api_base", default="https://token-plan-cn.xiaomimimo.com/v1"))
+    p.add_argument("--llm_model", type=str,
+                   default=_cfg(cfg, "prompt", "llm_model", default="mimo-v2.5-pro"))
 
     # ── 执行控制 ──
     p.add_argument("--resume", action="store_true", help="跳过已有输出")
@@ -153,18 +202,6 @@ def parse_args():
 
 def build_config(args) -> PFlowConfig:
     """从命令行参数构建配置。"""
-    # 处理快捷组合
-    if args.full:
-        args.inversion = True
-        args.svd = True
-        args.blend = True
-        args.feature_inject = True
-
-    if args.noise_prior:
-        args.inversion = True
-        args.svd = True
-        args.blend = True
-
     return PFlowConfig(
         t2v_path=args.model_path,
         dtype="bfloat16",
@@ -178,7 +215,6 @@ def build_config(args) -> PFlowConfig:
         use_svd=args.svd,
         use_blend=args.blend,
         use_iter=args.iter > 0,
-        # use_midpoint=args.midpoint,  # 中点法已弃用
         use_composite=args.composite,
         alpha=args.alpha,
         rho_s=args.rho_s,
@@ -191,11 +227,10 @@ def build_config(args) -> PFlowConfig:
         llm_api_key=args.llm_api_key,
         llm_api_base=args.llm_api_base,
         llm_model=args.llm_model,
-        # svd_alternate=args.svd_alternate,  # 已注释
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,
         vlm_model_path=args.vlm_path,
-                   seed=args.seed,
+        seed=args.seed,
         # L3: Feature Injection
         feature_inject=args.feature_inject,
         fi_layers=args.fi_layers,
@@ -209,12 +244,11 @@ def build_config(args) -> PFlowConfig:
         fi_cache_mode=args.fi_cache_mode,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
-        # 方向A/B/C 新增参数
         fi_quality_skip_svd=args.fi_quality_skip_svd,
         fi_max_injection_norm=args.fi_max_injection_norm,
         fi_norm_decay_min=args.fi_norm_decay_min,
         fi_ag_gate_high=args.fi_ag_gate_high,
-        # SVD 双向门控 (Floor + CAP)
+        # SVD 双向门控
         pna_std_gate=not args.no_pna_std_gate,
         pna_std_low=args.pna_std_low,
         pna_std_floor_alpha=args.pna_std_floor_alpha,
