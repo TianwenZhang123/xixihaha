@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-统一评测脚本：6 项指标一次性计算。
+统一评测脚本：7 项指标一次性计算。
 
 指标：
-  1. CLIP  (orig-gen)
-  2. XCLIP (orig-gen)
-  3. FVD   (Fréchet Video Distance — 分布级)
-  4. LPIPS (逐帧感知距离 — 越低越好)
-  5. SSIM  (逐帧结构相似度 — 越高越好)
-  6. OF-EPE (Optical Flow Endpoint Error — 运动一致性)
+  1. CLIP  (orig-gen, 语义)
+  2. XCLIP (orig-gen, 时空语义)
+  3. DINO  (orig-gen, 实例级外观, 越高越好)
+  4. FVD   (Frechet Video Distance — 分布级)
+  5. LPIPS (逐帧感知距离 — 越低越好)
+  6. SSIM  (逐帧结构相似度 — 越高越好)
+  7. OF-EPE (Optical Flow Endpoint Error — 运动一致性)
 
 用法:
   python -m evaluation.run_all_metrics \
@@ -192,6 +193,40 @@ def compute_ssim(ref_frames, gen_frames) -> float:
     return float(np.mean(scores))
 
 
+# ─── DINOv2 Score (实例级外观相似度) ───
+
+_m_dinov2 = None
+
+def _dino_model(device: str, model_name: str = "facebook/dinov2-base"):
+    """懒加载 DINOv2."""
+    global _m_dinov2
+    if _m_dinov2 is None:
+        from transformers import AutoImageProcessor, AutoModel
+        _m_dinov2 = (
+            AutoImageProcessor.from_pretrained(model_name),
+            AutoModel.from_pretrained(model_name).to(device).eval(),
+        )
+    return _m_dinov2
+
+
+def compute_dino(orig_path: Path, gen_path: Path,
+                 num_frames: int, device: str,
+                 model_name: str = "facebook/dinov2-base") -> float:
+    """逐帧 DINOv2 CLS 余弦相似度."""
+    processor, model = _dino_model(device, model_name)
+    of = sample_video_frames(orig_path, num_frames)
+    gf = sample_video_frames(gen_path, num_frames)
+    scores = []
+    with torch.inference_mode():
+        for o, g in zip(of, gf):
+            inputs = processor(images=[o, g], return_tensors="pt")
+            outputs = model(**{k: v.to(device) for k, v in inputs.items()})
+            cls_o, cls_g = outputs.pooler_output[0], outputs.pooler_output[1]
+            scores.append(float(F.cosine_similarity(
+                cls_o.unsqueeze(0), cls_g.unsqueeze(0))))
+    return float(np.mean(scores))
+
+
 # ─── Optical Flow EPE ───
 
 def _gray(f): return cv2.cvtColor(f, cv2.COLOR_RGB2GRAY)
@@ -237,6 +272,10 @@ def main():
     parser.add_argument("--frame-size", type=int, default=256)
     parser.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"])
     parser.add_argument("--skip-fvd", action="store_true")
+    parser.add_argument("--dino-model", default="facebook/dinov2-base",
+                       help="DINOv2 模型名或本地路径")
+    parser.add_argument("--skip-dino", action="store_true",
+                       help="跳过 DINOv2 评分")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -269,6 +308,8 @@ def main():
         row["lpips"] = round(compute_lpips(ref_frames, gen_frames, args.lpips_net, args.device), 6)
         row["ssim"]  = round(compute_ssim(ref_frames, gen_frames), 6)
         row["of_epe"] = round(compute_flow_epe(ref_frames, gen_frames), 6)
+        row["dino"] = round(compute_dino(rp, gp, CLIP_FRAMES, args.device, args.dino_model), 6) \
+            if not args.skip_dino else None
         items.append(row)
 
     fvd = None
@@ -276,7 +317,7 @@ def main():
         print("Computing FVD...")
         fvd = compute_fvd(args.orig_dir, args.gen_dir, args.sample_frames, args.device)
 
-    keys = ["clip_o_g", "xclip_o_g", "lpips", "ssim", "of_epe"]
+    keys = ["clip_o_g", "xclip_o_g", "lpips", "ssim", "of_epe", "dino"]
     means = {}
     for k in keys:
         vals = [it[k] for it in items if it.get(k) is not None]
@@ -289,7 +330,7 @@ def main():
 
     csv_path = args.output_dir / "all_metrics.csv"
     with open(csv_path, "w", newline="") as f:
-        fieldnames = ["sample_id", "clip_o_g", "xclip_o_g", "lpips", "ssim", "of_epe"]
+        fieldnames = ["sample_id", "clip_o_g", "xclip_o_g", "lpips", "ssim", "of_epe", "dino"]
         w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
         w.writerows(items)
