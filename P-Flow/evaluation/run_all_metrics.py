@@ -117,20 +117,19 @@ def _load_r3d18():
 
 def _r3d18_encode(video_path: Path, model, weights,
                   num_frames: int, device: str) -> np.ndarray:
-    size = weights.transforms().crop_size[0]
-    frames = decode_video_frames(video_path)
+    """FVD 特征提取.
+
+    transforms() 期望输入: (T, C, H, W) uint8 [0,255]
+    输出: (C, T, 112, 112) float 已归一化
+    """
+    frames = decode_video_frames(video_path)          # list of (H,W,C) uint8
     idx = sample_idx(len(frames), num_frames)
     imgs = [frames[i] for i in idx]
-    t = torch.stack([
-        torch.from_numpy(f).permute(2, 0, 1).float() / 255.0
-        for f in imgs], dim=1)  # (C, F, H, W)
-    # 逐帧 resize 到 (size, size)，避免 5D interpolate 问题
-    t = F.interpolate(t.permute(1, 0, 2, 3), size=(size, size),
-                       mode="bilinear", align_corners=False).permute(1, 0, 2, 3)
-    # 形状变为 (C, F, size, size)
-    t = weights.transforms()(t.unsqueeze(0))  # → (1, C, F, size, size)
+    t = torch.from_numpy(np.stack(imgs, axis=0))      # (T, H, W, C) uint8
+    t = t.permute(0, 3, 1, 2)                         # (T, C, H, W)
+    t = weights.transforms()(t)                       # (C, T, 112, 112) float
     with torch.inference_mode():
-        feat = model(t.to(device)).cpu().numpy()
+        feat = model(t.unsqueeze(0).to(device)).cpu().numpy()  # (1, C, T, 112, 112)
     return feat.flatten()
 
 
