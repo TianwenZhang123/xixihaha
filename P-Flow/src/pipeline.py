@@ -557,6 +557,7 @@ class PFlowPipeline:
 
         # SVD Filtering V2
         svd_stats = None
+        self._eta_temporal_full = None  # 渐进SVD: 保留全帧SVD用于门控（无SVD时也初始化为None）
         if self.config.use_svd:
             svd_config = SVDFilterConfig(
                 rho_s=self.config.rho_s,
@@ -564,7 +565,6 @@ class PFlowPipeline:
                 use_fast_svd=self.config.use_fast_svd,
             )
             svd_filter = SVDFilter(config=svd_config)
-            self._eta_temporal_full = None  # 渐进SVD: 保留全帧SVD用于门控
 
             logger.info(
                 f"  [SVD] ρ_s={self.config.rho_s}, ρ_m={self.config.rho_m}"
