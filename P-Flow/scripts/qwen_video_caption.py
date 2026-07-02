@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""使用本地 Qwen2.5-VL 对目录中的视频批量生成 caption。"""
+"""使用本地 Qwen2.5-VL 对目录中的视频批量生成 caption（取帧模式）。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,10 @@ import argparse
 import json
 from pathlib import Path
 
+import cv2
+import numpy as np
 import torch
+from PIL import Image
 from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
 
@@ -47,6 +50,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prompt",
         default="Describe the video content in English.",
+    )
+    parser.add_argument(
+        "--num-frames",
+        type=int,
+        default=32,
+        help="从视频中均匀采样的帧数。",
     )
     return parser.parse_args()
 
@@ -92,18 +101,34 @@ def caption_video(
     video_path: Path,
     prompt: str,
     max_new_tokens: int,
+    num_frames: int = 32,
 ) -> str:
+    # 1. 从视频均匀提取 num_frames 帧
+    cap = cv2.VideoCapture(str(video_path))
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    indices = np.linspace(0, max(frame_count - 1, 0), num=num_frames, dtype=int)
+    frames = []
+    for idx in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if ret:
+            frames.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+    cap.release()
+    if not frames:
+        raise RuntimeError(f"Failed to extract any frame from {video_path}")
+
+    # 2. 构造 messages（图像 + 文本）
     messages = [
         {
             "role": "user",
             "content": [
-                {"type": "video", "video": str(video_path)},
+                *[{"type": "image", "image": img} for img in frames],
                 {"type": "text", "text": prompt},
             ],
         }
     ]
     text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    inputs = processor(text=[text], videos=[str(video_path)], padding=True, return_tensors="pt")
+    inputs = processor(text=[text], images=frames, padding=True, return_tensors="pt")
 
     model_device = str(model.device)
     model_dtype = next(model.parameters()).dtype
@@ -164,6 +189,7 @@ def main() -> None:
                     video_path=video_path,
                     prompt=args.prompt,
                     max_new_tokens=args.max_new_tokens,
+                    num_frames=args.num_frames,
                 )
             )
             write_text(text_path, caption)
