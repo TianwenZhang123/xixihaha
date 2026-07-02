@@ -123,12 +123,10 @@ class PFlowConfig:
     vlm_provider: str = "local"
     vlm_model_path: str = "models/Qwen2.5-VL-7B-Instruct"
 
-    # ── SVD 双向门控 (Floor + CAP) ──
-    pna_std_gate: bool = True          # 门控开关 (opt-out: --no_pna_std_gate 关闭)
-    pna_std_low: float = 0.32          # Floor: η_std 低于此值 → 抬升 α 到 floor_alpha
-    pna_std_floor_alpha: float = 0.006 # floor 值: 弱信号时 α 至少为此值
-    pna_std_high: float = 0.45         # CAP:  η_std 高于此值 → 降低 α 到 cap_alpha
-    pna_std_cap_alpha: float = 0.002   # cap 值:  强信号时 α 至多为此值
+    # ── SVD 自适应 α (sigmoid 门控) ──
+    pna_std_gate: bool = True          # 门控开关
+    pna_std_eta0: float = 0.38         # sigmoid 中点 (η_std 均值)
+    pna_std_kappa: float = 20.0        # sigmoid 斜率 (越大越接近阶跃)
 
     # ── 其他 ──
     seed: int = 42
@@ -633,32 +631,22 @@ class PFlowPipeline:
             generator=generator,
         )
 
-        # ── Determine α (v5 fixed: 固定 α + 双向门控) ──
+        # ── Determine α (sigmoid 自适应门控) ──
         cfg = self.config
         alpha = cfg.alpha
-        # ── 双向门控: Floor(防欠注入) + CAP(防过注入) ──
-        # opt-out: --no_pna_std_gate 即可关闭全部
         if getattr(cfg, 'pna_std_gate', False) and eta_temporal is not None:
+            import math
             eta_std = eta_temporal.std().item()
-            std_low = getattr(cfg, 'pna_std_low', 0.32)
-            floor_alpha = getattr(cfg, 'pna_std_floor_alpha', 0.006)
-            std_high = getattr(cfg, 'pna_std_high', 0.45)
-            cap_alpha = getattr(cfg, 'pna_std_cap_alpha', 0.002)
-
-            if eta_std < std_low and alpha < floor_alpha:
-                # Floor: 弱信号 → 抬升 α 防欠注入
-                logger.info(
-                    f"  [SVD-Floor] η_std={eta_std:.4f} < {std_low}, "
-                    f"α {alpha:.6f} → {floor_alpha:.6f}"
-                )
-                alpha = floor_alpha
-            elif eta_std > std_high and alpha > cap_alpha:
-                # CAP: 强信号 → 降低 α 防过注入
-                logger.info(
-                    f"  [SVD-CAP] η_std={eta_std:.4f} > {std_high}, "
-                    f"α {alpha:.6f} → {cap_alpha:.6f}"
-                )
-                alpha = cap_alpha
+            eta0 = getattr(cfg, 'pna_std_eta0', 0.38)
+            kappa = getattr(cfg, 'pna_std_kappa', 20.0)
+            # sigmoid: α(η) = α_min + (α_max - α_min) · σ(-κ·(η - η₀))
+            alpha_min, alpha_max = 0.002, 0.006
+            gate = 1.0 / (1.0 + math.exp(kappa * (eta_std - eta0)))
+            alpha = alpha_min + (alpha_max - alpha_min) * gate
+            logger.info(
+                f"  [SVD-Gate] η_std={eta_std:.4f}, "
+                f"gate={gate:.4f}, α {cfg.alpha:.4f} → {alpha:.6f}"
+            )
 
         # ── 方向A: SVD联动跳过 ──
         # 当 mean_cos > skip_threshold 时, 不仅跳过 FI, 还强制关闭 SVD blend

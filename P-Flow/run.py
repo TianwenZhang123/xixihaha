@@ -117,17 +117,13 @@ def parse_args():
     p.add_argument("--rho_m", type=float,
                    default=_cfg(cfg, "noise_prior", "rho_m", default=0.9))
 
-    # ── L2: 双向门控 ──
+    # ── L2: sigmoid 自适应 α ──
     p.add_argument("--no-pna-std-gate", action="store_true",
-                   help="禁用双向门控")
-    p.add_argument("--pna_std_low", type=float,
-                   default=_cfg(cfg, "std_gate", "low", default=0.32))
-    p.add_argument("--pna_std_floor_alpha", type=float,
-                   default=_cfg(cfg, "std_gate", "floor_alpha", default=0.006))
-    p.add_argument("--pna_std_high", type=float,
-                   default=_cfg(cfg, "std_gate", "high", default=0.45))
-    p.add_argument("--pna_std_cap_alpha", type=float,
-                   default=_cfg(cfg, "std_gate", "cap_alpha", default=0.002))
+                   help="禁用 sigmoid 门控")
+    p.add_argument("--pna_std_eta0", type=float,
+                   default=_cfg(cfg, "std_gate", "eta0", default=0.38))
+    p.add_argument("--pna_std_kappa", type=float,
+                   default=_cfg(cfg, "std_gate", "kappa", default=20.0))
 
     # ── L2: 渐进 SVD ──
     p.add_argument("--svd-progressive", action="store_true", dest="svd_progressive",
@@ -248,12 +244,10 @@ def build_config(args) -> PFlowConfig:
         fi_max_injection_norm=args.fi_max_injection_norm,
         fi_norm_decay_min=args.fi_norm_decay_min,
         fi_ag_gate_high=args.fi_ag_gate_high,
-        # SVD 双向门控
+        # SVD sigmoid 自适应 α
         pna_std_gate=not args.no_pna_std_gate,
-        pna_std_low=args.pna_std_low,
-        pna_std_floor_alpha=args.pna_std_floor_alpha,
-        pna_std_high=args.pna_std_high,
-        pna_std_cap_alpha=args.pna_std_cap_alpha,
+        pna_std_eta0=args.pna_std_eta0,
+        pna_std_kappa=args.pna_std_kappa,
     )
 
 

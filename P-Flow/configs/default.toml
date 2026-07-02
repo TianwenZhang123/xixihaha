@@ -29,13 +29,11 @@ alpha     = 0.004
 rho_s     = 0.1
 rho_m     = 0.9
 
-# ── L2: 双向门控 (Floor + CAP) ──
+# ── L2: sigmoid 自适应 α ──
 [std_gate]
-enabled       = true
-low           = 0.32
-floor_alpha   = 0.006
-high          = 0.45
-cap_alpha     = 0.002
+enabled = true
+eta0    = 0.38    # sigmoid 中点 (η_std 均值)
+kappa   = 20.0    # 斜率 (越大越陡)
 
 # ── L2: 渐进多尺度 SVD ──
 [progressive_svd]
