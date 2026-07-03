@@ -640,7 +640,9 @@ class PFlowPipeline:
             eta0 = getattr(cfg, 'pna_std_eta0', 0.38)
             kappa = getattr(cfg, 'pna_std_kappa', 20.0)
             # sigmoid: α(η) = α_min + (α_max - α_min) · σ(-κ·(η - η₀))
-            alpha_min, alpha_max = 0.002, 0.006
+            # 基点以 cfg.alpha 为中心: floor=0.25×, cap=2×
+            alpha_min = 0.25 * cfg.alpha
+            alpha_max = 2.0 * cfg.alpha
             gate = 1.0 / (1.0 + math.exp(kappa * (eta_std - eta0)))
             alpha = alpha_min + (alpha_max - alpha_min) * gate
             logger.info(
