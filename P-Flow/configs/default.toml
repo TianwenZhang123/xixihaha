@@ -53,8 +53,6 @@ enabled          = true
 threshold        = 0.05
 k                = 20.0
 min_scale        = 0.1
-skip_threshold   = 0.08
-skip_svd         = true
 
 # ── L3: FI 自适应门控 ──
 [fi.adaptive_gate]

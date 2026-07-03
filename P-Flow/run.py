@@ -156,10 +156,6 @@ def parse_args():
                    default=_cfg(cfg, "fi", "quality_gate", "k", default=20.0))
     p.add_argument("--fi_quality_min_scale", type=float,
                    default=_cfg(cfg, "fi", "quality_gate", "min_scale", default=0.1))
-    p.add_argument("--fi_quality_skip_threshold", type=float,
-                   default=_cfg(cfg, "fi", "quality_gate", "skip_threshold", default=None))
-    p.add_argument("--fi_quality_skip_svd", action="store_true",
-                   default=_cfg(cfg, "fi", "quality_gate", "skip_svd", default=False))
 
     # ── L3: FI 自适应门控 ──
     p.add_argument("--fi_no_adaptive_gate", action="store_true",
@@ -236,11 +232,9 @@ def build_config(args) -> PFlowConfig:
         fi_quality_threshold=args.fi_quality_threshold,
         fi_quality_k=args.fi_quality_k,
         fi_quality_min_scale=args.fi_quality_min_scale,
-        fi_quality_skip_threshold=args.fi_quality_skip_threshold,
         fi_cache_mode=args.fi_cache_mode,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
-        fi_quality_skip_svd=args.fi_quality_skip_svd,
         fi_max_injection_norm=args.fi_max_injection_norm,
         fi_norm_decay_min=args.fi_norm_decay_min,
         fi_ag_gate_high=args.fi_ag_gate_high,

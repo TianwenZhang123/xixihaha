@@ -90,10 +90,6 @@ lambda      = 0.10
 schedule    = "middle_peak"
 cache_mode  = "attention"
 
-[fi.quality_gate]
-skip_threshold = 0.08
-skip_svd       = true
-
 [fi.adaptive_gate]
 enabled = true
 temp    = 5.0

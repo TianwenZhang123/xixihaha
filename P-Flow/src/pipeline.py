@@ -106,9 +106,7 @@ class PFlowConfig:
     fi_quality_threshold: float = 0.05    # 质量门控阈值 (mean_cos < threshold → 弱引导)
     fi_quality_k: float = 20.0            # 质量门控 sigmoid 斜率 (越大越陡峭)
     fi_quality_min_scale: float = 0.1     # 质量门控最低注入比例 (保留的最小引导量)
-    fi_quality_skip_threshold: Optional[float] = None  # 硬跳过阈值: mean_cos > 此值时完全跳过 FI (None=不启用)
-    fi_quality_skip_svd: bool = False  # 方向A: 跳过FI时同时关闭SVD blend (默认False)
-    fi_max_injection_norm: Optional[float] = None  # 方向B: Total injection norm 硬上限 (None=不启用)
+    fi_max_injection_norm: Optional[float] = None  # Total injection norm 硬上限 (None=不启用)
     fi_norm_decay_min: float = 0.3  # 方向B: norm超限后最小衰减系数
     fi_ag_gate_high: Optional[float] = None  # 方向C: AG gate 上限 (默认None=无上限)
     fi_cache_mode: str = "attention"      # 缓存什么特征:
@@ -650,21 +648,6 @@ class PFlowPipeline:
                 f"gate={gate:.4f}, α {cfg.alpha:.4f} → {alpha:.6f}"
             )
 
-        # ── 方向A: SVD联动跳过 ──
-        # 当 mean_cos > skip_threshold 时, 不仅跳过 FI, 还强制关闭 SVD blend
-        # 渐进SVD模式: 用全帧SVD的mean_cos做判断, 避免渐进版稀疏导致的假阳性
-        svd_skip = getattr(cfg, 'fi_quality_skip_svd', False)
-        if svd_skip and eta_temporal is not None:
-            eta_for_check = self._eta_temporal_full if self._eta_temporal_full is not None else eta_temporal
-            mean_cos = self._compute_mean_cos(eta_for_check)
-            skip_threshold = getattr(cfg, 'fi_quality_skip_threshold', None)
-            if mean_cos is not None and skip_threshold is not None and mean_cos > skip_threshold:
-                logger.info(
-                    f"  [SVD-Skip] mean_cos={mean_cos:.4f} > skip_threshold={skip_threshold}, "
-                    f"SVD blend DISABLED (α {alpha:.6f} → 0.0000)"
-                )
-                alpha = 0.0
-
         remaining = max(0.0, 1.0 - alpha)
 
         sqrt_alpha = torch.sqrt(torch.tensor(alpha, device=self.device))
@@ -853,17 +836,6 @@ class PFlowPipeline:
         mean_cos = self._compute_mean_cos(eta_temporal)
         if mean_cos is None:
             return 1.0
-
-        # ── 硬跳过门控: 运动单调的样本不注入 ──
-        # 实证发现: mean_cos > skip_threshold 的 case 注入后大概率受害
-        # 因为高 mean_cos 表示 η_temporal 帧间高度相似, 携带的引导信号贫乏且冗余
-        skip_threshold = getattr(self.config, 'fi_quality_skip_threshold', None)
-        if skip_threshold is not None and mean_cos > skip_threshold:
-            logger.info(
-                f"  [Quality Scale] mean_cos={mean_cos:.4f} > skip_threshold={skip_threshold}, "
-                f"FI SKIPPED (motion-too-coherent)"
-            )
-            return 0.0  # 完全跳过 FI
 
         # ── 软门控: sigmoid 映射 ──
         min_scale = self.config.fi_quality_min_scale
