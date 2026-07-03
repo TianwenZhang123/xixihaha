@@ -16,13 +16,27 @@ import sys
 import json
 import logging
 from pathlib import Path
+from datetime import datetime
 
+# 日志目录
+LOG_DIR = Path(__file__).parent.parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+# 日志文件名带时间戳
+log_file = LOG_DIR / f"rewrite_decompose_noclip_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+# 配置日志：同时输出到控制台和文件
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),  # 控制台
+        logging.FileHandler(log_file, encoding="utf-8"),  # 文件
+    ]
 )
 logger = logging.getLogger(__name__)
+logger.info(f"日志文件: {log_file}")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -175,6 +189,8 @@ def main():
 
     success = 0
     failed = 0
+    skipped = 0
+    results = []  # 收集详细结果
 
     for idx, cap_file in enumerate(caption_files, 1):
         sample_id = cap_file.stem
@@ -182,10 +198,14 @@ def main():
 
         if args.skip_existing and out_file.exists():
             logger.info(f"  [{idx}/{len(caption_files)}] 跳过 {sample_id}")
+            skipped += 1
+            results.append({"sample_id": sample_id, "status": "skipped", "reason": "exists"})
             continue
 
         original = cap_file.read_text(encoding="utf-8").strip()
         if not original:
+            skipped += 1
+            results.append({"sample_id": sample_id, "status": "skipped", "reason": "empty"})
             continue
 
         logger.info(f"\n  [{idx}/{len(caption_files)}] {sample_id}")
@@ -196,14 +216,50 @@ def main():
             out_file.write_text(optimized + "\n", encoding="utf-8")
             logger.info(f"    优化: {optimized[:80]}...")
             success += 1
+            results.append({
+                "sample_id": sample_id,
+                "status": "success",
+                "original": original,
+                "optimized": optimized,
+                "orig_words": len(original.split()),
+                "opt_words": len(optimized.split()),
+            })
         except Exception as e:
             logger.error(f"    失败: {e}")
             out_file.write_text(original + "\n", encoding="utf-8")
             failed += 1
+            results.append({
+                "sample_id": sample_id,
+                "status": "failed",
+                "error": str(e),
+                "original": original,
+            })
 
     logger.info(f"\n{'='*60}")
-    logger.info(f"完成! success={success}, failed={failed}")
+    logger.info(f"完成! success={success}, failed={failed}, skipped={skipped}")
     logger.info(f"输出: {output_dir}")
+
+    # 保存详细JSON日志
+    json_log = output_dir / "rewrite_log.json"
+    log_data = {
+        "version": "decompose_no_clip",
+        "timestamp": datetime.now().isoformat(),
+        "config": {
+            "llm_api_base": args.llm_api_base,
+            "llm_model": args.llm_model,
+            "n_variants": args.n_variants,
+        },
+        "summary": {
+            "total": len(caption_files),
+            "success": success,
+            "failed": failed,
+            "skipped": skipped,
+        },
+        "results": results,
+    }
+    json_log.write_text(json.dumps(log_data, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info(f"详细日志: {json_log}")
+    logger.info(f"文本日志: {log_file}")
 
 
 if __name__ == "__main__":
