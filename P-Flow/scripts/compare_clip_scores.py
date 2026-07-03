@@ -18,9 +18,12 @@ Usage:
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 
 import torch
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from evaluation.clip_utils import (
     cosine_similarity,
