@@ -141,12 +141,8 @@ def parse_args():
     # ── L3: FI 门控 ──
     p.add_argument("--fi_no_quality_gate", action="store_true",
                    help="禁用 FI 质量门控")
-    p.add_argument("--fi_quality_threshold", type=float,
-                   default=_cfg(cfg, "fi", "quality_gate", "threshold", default=0.05))
     p.add_argument("--fi_quality_k", type=float,
                    default=_cfg(cfg, "fi", "quality_gate", "k", default=20.0))
-    p.add_argument("--fi_quality_min_scale", type=float,
-                   default=_cfg(cfg, "fi", "quality_gate", "min_scale", default=0.1))
 
     # ── L3: FI 自适应门控 ──
     p.add_argument("--fi_no_adaptive_gate", action="store_true",
@@ -156,15 +152,7 @@ def parse_args():
     p.add_argument("--fi_ag_gate_high", type=float,
                    default=_cfg(cfg, "fi", "adaptive_gate", "high", default=None))
 
-    # ── L3: FI 累计预算 ──
-    p.add_argument("--fi_max_injection_norm", type=float,
-                   default=_cfg(cfg, "fi", "norm_budget", "max_norm", default=None))
-    p.add_argument("--fi_norm_decay_min", type=float,
-                   default=_cfg(cfg, "fi", "norm_budget", "decay_min", default=0.3))
-    p.add_argument("--fi_gate_mode", type=str,
-                   default=_cfg(cfg, "fi", "gate_mode", default="full"),
-                   choices=["full", "simple", "minimal"],
-                   help="FI gating mode: full(4-layer), simple(QS+const-cos), minimal(QS only)")
+
 
     # ── 执行控制 ──
     p.add_argument("--resume", action="store_true", help="跳过已有输出")
@@ -203,16 +191,11 @@ def build_config(args) -> PFlowConfig:
         fi_lambda=args.fi_lambda,
         fi_schedule=args.fi_schedule,
         fi_quality_gate=not args.fi_no_quality_gate,
-        fi_quality_threshold=args.fi_quality_threshold,
         fi_quality_k=args.fi_quality_k,
-        fi_quality_min_scale=args.fi_quality_min_scale,
         fi_cache_mode=args.fi_cache_mode,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
-        fi_max_injection_norm=args.fi_max_injection_norm,
-        fi_norm_decay_min=args.fi_norm_decay_min,
         fi_ag_gate_high=args.fi_ag_gate_high,
-        fi_gate_mode=args.fi_gate_mode,
         # SVD sigmoid 自适应 α
         pna_std_gate=not args.no_pna_std_gate,
         pna_std_eta0=args.pna_std_eta0,

@@ -44,25 +44,16 @@ layers             = "mid"
 lambda             = 0.10
 schedule           = "middle_peak"
 cache_mode         = "attention"
-# gate_mode: "full"=4层门控(默认), "simple"=二值QS+常数cos, "minimal"=仅QS
-gate_mode          = "full"
 
-# ── L3: FI 门控（gate_mode=full 时生效）───
+# ── L3: FI 门控 ──
 [fi.quality_gate]
-enabled          = true
-threshold        = 0.05
-k                = 20.0
-min_scale        = 0.1
+enabled = true
+k       = 20.0
 
 # ── L3: FI 自适应门控 ──
 [fi.adaptive_gate]
 enabled = true
 temp    = 5.0
 high    = 0.30
-
-# ── L3: FI 累计预算 ──
-[fi.norm_budget]
-max_norm    = 10000
-decay_min   = 0.3
 
 # ── LLM Prompt 改写已移除，caption 由外部预处理 ──

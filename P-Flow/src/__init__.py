@@ -1,12 +1,12 @@
 """
-P-Flow: Video Reproduction via Prompt Optimization + Noise Prior.
+P-Flow: Video Reproduction via Orthogonal Three-Layer Decomposition.
 
 通过命令行 flag 控制各改动点，一个管线搞定所有配置。
 
     ┌─────────────────────────────────────────────────────────────────────┐
     │                         Entry Point                                  │
     ├─────────────────────────────────────────────────────────────────────┤
-    │  run.py              — CLI 入口 (--svd --inversion --blend ...)     │
+    │  run.py              — CLI 入口 (--svd --feature-inject ...)        │
     ├─────────────────────────────────────────────────────────────────────┤
     │                         Core Modules                                 │
     ├─────────────────────────────────────────────────────────────────────┤
@@ -14,36 +14,29 @@ P-Flow: Video Reproduction via Prompt Optimization + Noise Prior.
     ├─────────────────────────────────────────────────────────────────────┤
     │                    Shared Infrastructure                              │
     ├─────────────────────────────────────────────────────────────────────┤
-    │  flow_matching.py    — FlowMatchingInverter (Euler + Midpoint)       │
-    │  svd_filter.py       — SVDFilter V2 (空间去内容 + 时间保运动 + 频段分离)│
+    │  flow_matching.py    — FlowMatchingInverter (Euler ODE反演)         │
+    │  svd_filter.py       — SVDFilter (空间去内容 + 时间保运动 + 渐进多尺度)│
     │  vlm_client.py       — Local/DashScope/Mock VLM 客户端              │
     │  video_utils.py      — 视频 I/O 和处理工具                          │
-    │  shot_detect.py      — 镜头边界检测 (TransNetV2 / PySceneDetect)   │
+    │  shot_detect.py      — 镜头边界检测 (TransNetV2 / PySceneDetect)    │
     │  distributed.py      — 单 GPU 推理工具                              │
     └─────────────────────────────────────────────────────────────────────┘
 
-改动点 (L1 + L2):
-    L1 (Prompt Optimization):
-        --iter N       迭代 VLM 优化 (N轮反馈循环)
-        --composite    三面板垂直拼接 (ref|prev|current 送 VLM 对比)
-
-    L2 (Noise Prior):
-        --inversion    Flow Matching Inversion (从参考视频反演噪声)
-        --svd          SVD V2 两阶段滤波 (空间去内容 + 时间保运动 + 频段分离)
-        --blend        噪声混合 (η = √α·η_temporal + √(1-α)·η_random)
-        --midpoint     二阶中点法 ODE 求解器 (替代 Euler)
+三层架构:
+    L1 (Prompt): 外部预处理 (首尾替换 + 三版本择优), 可选 --iter/--composite
+    L2 (Noise Prior): --svd 一键开启 (反演 + 两阶段SVD + sigmoid自适应α混合 + 渐进多尺度)
+    L3 (Feature Injection): --feature-inject 开启 (三层自适应门控: 中峰调度 + 余弦门控 + QS)
 
 组合示例:
-    baseline:     无任何 flag → caption + 一次生成
-    +noise_prior: --inversion --svd --blend → 噪声先验引导
-    +iteration:   --iter 10 → 迭代优化
-    full:         --inversion --svd --blend --iter 10 --composite
+    baseline:     无 flag → caption + 一次生成
+    +L2:          --svd → 噪声先验引导
+    +L2+L3:       --svd --feature-inject → 完整 P-Flow
 
 用法:
-    python run.py --video ref.mp4 --caption "..." --inversion --svd --blend
+    python run.py --data_dir data/videos --caption_dir data/captions
 """
 
-__version__ = "8.0.0"
+__version__ = "8.1.0"
 __task__ = "video_reproduction"
 
 from .pipeline import PFlowConfig, PFlowPipeline

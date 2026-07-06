@@ -2,26 +2,22 @@
 P-Flow Unified Pipeline.
 
 3层架构：
-    L1: Prompt Rewrite (VLM)
-    L2: SVD Noise Prior (Inversion + SVD Filtering + Blend)
-    L3: Feature Injection (DiT特征空间信息注入)
+    L1: Prompt Rewrite (外部预处理: 首尾替换 + 三版本择优)
+    L2: SVD Noise Prior (Inversion + SVD Filtering + Blend, 统一由 --svd 控制)
+    L3: Feature Injection (DiT特征空间注入, --feature-inject 控制)
 
 开关：
     Flag              层级   效果
     ─────────────────────────────────────────────
-    --inversion       L2    从参考视频反演噪声
-    --svd             L2    SVD空间去内容+时间保运动
-    --blend           L2    混合运动噪声与随机噪声
-    --feature_inject  L3    DiT特征空间注入
+    --svd             L2    反演+SVD滤波+噪声混合 (一体)
+    --feature-inject  L3    DiT特征空间注入 (含三层自适应门控)
     --iter N          L1    N轮VLM反馈优化prompt
-    --midpoint        -     二阶中点法(替代Euler)
     --composite       L1    三面板拼接送VLM对比
 
 组合示例：
     baseline:       无flag → caption + 一次生成
-    +noise_prior:   --inversion --svd --blend → L2噪声先验
-    +FI:            --inversion --svd --blend --feature_inject → L2+L3
-    full pflow:     --inversion --svd --blend --feature_inject --iter 10 --composite
+    +L2:            --svd → L2噪声先验
+    +L2+L3:         --svd --feature-inject → 完整P-Flow
 """
 
 import json
@@ -95,13 +91,8 @@ class PFlowConfig:
     fi_quality_gate: bool = True          # 是否启用质量门控 (基于 mean_cos)
     fi_adaptive_gate: bool = True         # 是否启用特征对齐自适应门控
     fi_adaptive_temp: float = 5.0          # 自适应门控温度 (越大越敏感, 推荐 3~10)
-    fi_quality_threshold: float = 0.05    # 质量门控阈值 (mean_cos < threshold → 弱引导)
     fi_quality_k: float = 20.0            # 质量门控 sigmoid 斜率 (越大越陡峭)
-    fi_quality_min_scale: float = 0.1     # 质量门控最低注入比例 (保留的最小引导量)
-    fi_max_injection_norm: Optional[float] = None  # Total injection norm 硬上限 (None=不启用)
-    fi_norm_decay_min: float = 0.3  # 方向B: norm超限后最小衰减系数
-    fi_ag_gate_high: Optional[float] = None  # 方向C: AG gate 上限 (默认None=无上限)
-    fi_gate_mode: str = "full"               # gating mode: full/simple/minimal
+    fi_ag_gate_high: Optional[float] = None  # AG gate 上限 (默认None=无上限)
     fi_cache_mode: str = "attention"      # 缓存什么特征:
     #   attention: cross-attention 输出 (语义对齐, 推荐)
     #   hidden: 完整 hidden_states (信息丰富但维度大)
@@ -451,7 +442,7 @@ class PFlowPipeline:
         fi_config: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """
-        L1/L2: Inversion + SVD → η_temporal
+        L2: Inversion + SVD → η_temporal
 
         流程: V_ref → VAE encode → Flow Inversion → SVD Filtering → η_temporal
 
@@ -544,7 +535,7 @@ class PFlowPipeline:
                 f"  [SVD] η_temporal std={eta_temporal.std():.4f}"
             )
 
-            # ── 方向2: 渐进多尺度SVD ──
+            # ── 渐进多尺度SVD ──
             if getattr(self.config, 'svd_progressive', False):
                 eta_temporal_prog = svd_filter.filter_progressive(eta_inv)
                 if eta_temporal_prog is not None:
@@ -806,8 +797,8 @@ class PFlowPipeline:
             return 1.0
 
         # ── 软门控: sigmoid 映射 ──
-        min_scale = self.config.fi_quality_min_scale
-        threshold = self.config.fi_quality_threshold
+        min_scale = 0.1
+        threshold = 0.05
         k = self.config.fi_quality_k
         exp_arg = -k * (mean_cos - threshold)
         exp_arg = max(min(exp_arg, 500.0), -500.0)
@@ -1037,10 +1028,9 @@ class PFlowPipeline:
         meta = ref_features.get("_meta", {})
         target_layers = meta.get("target_layers", [])
 
-        # ── FI 独立门控 ──
-        gate_mode = getattr(cfg, 'fi_gate_mode', 'full')
+        # ── FI 门控 ──
         logger.info(
-            f"  [FI gate] λ_max={cfg.fi_lambda:.4f}, mode={gate_mode}, "
+            f"  [FI gate] λ_max={cfg.fi_lambda:.4f}, "
             f"quality_gate={'ON' if cfg.fi_quality_gate else 'OFF'}"
         )
 
@@ -1079,11 +1069,6 @@ class PFlowPipeline:
             "per_step": [],
         }
 
-        # ── 方向B: Norm 硬上限衰减 ──
-        max_norm = getattr(cfg, 'fi_max_injection_norm', None)
-        norm_decay_min = getattr(cfg, 'fi_norm_decay_min', 0.3)
-        running_norm = 0.0
-
         # ── 注册注入 hook ──
         transformer = self.pipe.transformer
         blocks = transformer.blocks if hasattr(transformer, 'blocks') else []
@@ -1100,7 +1085,6 @@ class PFlowPipeline:
         def make_injection_hook(layer_idx):
             """创建注入 hook: h_injected = (1-λ)*h_current + λ*h_ref"""
             def hook_fn(module, input, output):
-                nonlocal running_norm
                 if layer_idx not in current_ref[0]:
                     return output
 
@@ -1128,66 +1112,42 @@ class PFlowPipeline:
                         )
                     return output
 
-                # ── 门控模式 ──
-                gate_mode = getattr(cfg, 'fi_gate_mode', 'full')
-                lam_eff = lam
+                # ── 余弦自适应门控 ──
                 cos_sim = 0.0
                 gate = 0.0
                 gate_raw = 0.0
                 gate_high = 0.0
-                norm_triggered = False
-                decay = 1.0
+                lam_eff = lam
 
-                if gate_mode == "full":
-                    # 4层门控: 中峰调度 + 余弦自适应 + 质量尺度 + 累计预算
-                    if cfg.fi_adaptive_gate and lam > 1e-8:
-                        h_cur_flat = h_current.flatten()
-                        h_ref_flat = h_ref_dev.flatten()
-                        cos_sim = torch.nn.functional.cosine_similarity(
-                            h_cur_flat.unsqueeze(0), h_ref_flat.unsqueeze(0)
-                        ).item()
-                        gate = 1.0 - torch.sigmoid(
-                            torch.tensor(cfg.fi_adaptive_temp * (cos_sim - 0.5))
-                        ).item()
-                        gate_raw = gate
-                        gate_high = getattr(cfg, 'fi_ag_gate_high', None)
-                        if gate_high is not None and gate > gate_high:
-                            gate = gate_high
-                        lam_eff = lam * gate
-                    if max_norm is not None and running_norm > max_norm:
-                        decay = max(norm_decay_min, 1.0 - (running_norm - max_norm) / max_norm)
-                        lam_eff *= decay
-                        norm_triggered = True
+                if cfg.fi_adaptive_gate and lam > 1e-8:
+                    h_cur_flat = h_current.flatten()
+                    h_ref_flat = h_ref_dev.flatten()
+                    cos_sim = torch.nn.functional.cosine_similarity(
+                        h_cur_flat.unsqueeze(0), h_ref_flat.unsqueeze(0)
+                    ).item()
+                    gate = 1.0 - torch.sigmoid(
+                        torch.tensor(cfg.fi_adaptive_temp * (cos_sim - 0.5))
+                    ).item()
+                    gate_raw = gate
+                    gate_high = getattr(cfg, 'fi_ag_gate_high', None)
+                    if gate_high is not None and gate > gate_high:
+                        gate = gate_high
+                    lam_eff = lam * gate
 
-                elif gate_mode == "simple":
-                    # 简化: 余弦门控替换为常数 0.26 + 累计预算
-                    lam_eff = lam * 0.26
-                    if max_norm is not None and running_norm > max_norm:
-                        decay = max(norm_decay_min, 1.0 - (running_norm - max_norm) / max_norm)
-                        lam_eff *= decay
-                        norm_triggered = True
-
-                elif gate_mode == "minimal":
-                    # 最小: 仅中峰调度 × 质量尺度, 无余弦门控, 无累计预算
-                    lam_eff = lam
-
-                # v5: 门控统计 (每5步输出一次, info级别)
-                    if step_idx_ref[0] % 5 == 0 and layer_idx == target_layers[0]:
-                        parts = [
-                            f"[FI step={step_idx_ref[0]}]",
-                            f"L={layer_idx}",
-                            f"cos={cos_sim:.4f}",
-                        ]
-                        # 方向C日志：gate截断
-                        if gate_high is not None and gate_raw != gate:
-                            parts.append(f"gate={gate_raw:.3f}→{gate:.3f}(cap)")
-                        else:
-                            parts.append(f"gate={gate:.3f}")
-                        # 方向B日志：norm衰减
-                        if norm_triggered:
-                            parts.append(f"norm={running_norm:.0f}/{max_norm:.0f} decay={decay:.3f}")
-                        parts.append(f"λ={lam:.5f}→{lam_eff:.5f}")
-                        logger.info("    " + " ".join(parts))
+                # 门控统计 (每5步输出一次, info级别)
+                if step_idx_ref[0] % 5 == 0 and layer_idx == target_layers[0]:
+                    parts = [
+                        f"[FI step={step_idx_ref[0]}]",
+                        f"L={layer_idx}",
+                        f"cos={cos_sim:.4f}",
+                    ]
+                    # 日志：gate截断
+                    if gate_high is not None and gate_raw != gate:
+                        parts.append(f"gate={gate_raw:.3f}->{gate:.3f}(cap)")
+                    else:
+                        parts.append(f"gate={gate:.3f}")
+                    parts.append(f"lam={lam:.5f}->{lam_eff:.5f}")
+                    logger.info("    " + " ".join(parts))
 
                 # 残差注入: h_injected = (1-λ_eff)*h_current + λ_eff*h_ref
                 h_injected = (1.0 - lam_eff) * h_current + lam_eff * h_ref_dev
@@ -1195,8 +1155,6 @@ class PFlowPipeline:
                 # 记录注入统计
                 injection_norm = (h_injected - h_current).norm().item()
                 injection_stats_per_step[0][layer_idx] = injection_norm
-                if max_norm is not None:
-                    running_norm += injection_norm
 
                 if isinstance(output, tuple):
                     return (h_injected,) + output[1:]
