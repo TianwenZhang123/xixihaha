@@ -20,11 +20,9 @@ inversion_steps  = 50
 dtype            = "bfloat16"
 use_fast_svd     = true
 
-# ── L2: 噪声先验 ──
+# ── L2: 噪声先验（svd=true 时自动开启 inversion + two-stage SVD + blend）──
 [noise_prior]
-inversion = true
 svd       = true
-blend     = true
 alpha     = 0.004
 rho_s     = 0.1
 rho_m     = 0.9
@@ -46,8 +44,10 @@ layers             = "mid"
 lambda             = 0.10
 schedule           = "middle_peak"
 cache_mode         = "attention"
+# gate_mode: "full"=4层门控(默认), "simple"=二值QS+常数cos, "minimal"=仅QS
+gate_mode          = "full"
 
-# ── L3: FI 门控 ──
+# ── L3: FI 门控（gate_mode=full 时生效）───
 [fi.quality_gate]
 enabled          = true
 threshold        = 0.05
@@ -65,13 +65,4 @@ high    = 0.30
 max_norm    = 10000
 decay_min   = 0.3
 
-# ── L3: FI 通道选择 (默认关闭) ──
-[fi.sparse]
-ratio = 0.0
-
-# ── L1: Prompt 优化 (默认关闭) ──
-[prompt]
-decompose = false
-llm_api_key = ""
-llm_api_base = "https://token-plan-cn.xiaomimimo.com/v1"
-llm_model    = "mimo-v2.5-pro"
+# ── LLM Prompt 改写已移除，caption 由外部预处理 ──

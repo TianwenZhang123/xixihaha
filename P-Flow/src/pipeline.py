@@ -64,22 +64,14 @@ class PFlowConfig:
     num_inference_steps: int = 30
 
     # ── 改动点开关 ──
-    use_inversion: bool = False    # Flow Matching Inversion
-    use_svd: bool = False          # SVD Filtering
-    use_blend: bool = False        # Noise Blending (α mixing)
+    use_svd: bool = False          # SVD (含 inversion + two-stage SVD + blend)
     use_iter: bool = False         # Iterative VLM Optimization
     use_composite: bool = False    # Vertical Composite for VLM
     # ── Noise Prior 参数 ──
-    alpha: float = 0.004           # SVD 混合权重 (v5 fixed, 推荐 0.004)
-                                  # η = √α·η_temporal + √(1-α)·η_random
+    alpha: float = 0.004           # SVD 混合权重
     rho_s: float = 0.1            # 空间SVD阈值 (去内容)
     rho_m: float = 0.9            # 时间SVD阈值 (保运动)
-    svd_progressive: bool = False     # 方向2: 渐进多尺度SVD (自适应: 仅k_m非均匀时启用)
-    fi_sparse_ratio: float = 0.0       # 方向3: 通道选择性FI, 0=关闭
-    prompt_decompose: bool = False     # L1: 结构化分解+CLIP择优
-    llm_api_key: str = ""              # LLM API key
-    llm_api_base: str = "https://token-plan-cn.xiaomimimo.com/v1"
-    llm_model: str = "mimo-v2.5-pro"
+    svd_progressive: bool = False     # 渐进多尺度SVD (自适应: 仅k_m非均匀时启用)
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
 
@@ -109,6 +101,7 @@ class PFlowConfig:
     fi_max_injection_norm: Optional[float] = None  # Total injection norm 硬上限 (None=不启用)
     fi_norm_decay_min: float = 0.3  # 方向B: norm超限后最小衰减系数
     fi_ag_gate_high: Optional[float] = None  # 方向C: AG gate 上限 (默认None=无上限)
+    fi_gate_mode: str = "full"               # gating mode: full/simple/minimal
     fi_cache_mode: str = "attention"      # 缓存什么特征:
     #   attention: cross-attention 输出 (语义对齐, 推荐)
     #   hidden: 完整 hidden_states (信息丰富但维度大)
@@ -132,12 +125,8 @@ class PFlowConfig:
     def active_flags(self) -> List[str]:
         """返回当前启用的改动点列表。"""
         flags = []
-        if self.use_inversion:
-            flags.append("inversion")
         if self.use_svd:
-            flags.append("svd")
-        if self.use_blend:
-            flags.append(f"blend(α={self.alpha})")
+            flags.append(f"SVD(α={self.alpha})")
         if self.feature_inject:
             fi_desc = f"feature_inject(λ={self.fi_lambda}, layers={self.fi_layers}, sched={self.fi_schedule}, mode={self.fi_cache_mode}"
             if self.fi_adaptive_gate:
@@ -259,34 +248,14 @@ class PFlowPipeline:
             caption_file = out / "vlm_caption.txt"
             caption_file.write_text(caption, encoding="utf-8")
 
-        # ── L1: Prompt 结构化分解 + CLIP 择优 ──
-        if getattr(cfg, 'prompt_decompose', False):
-            api_key = getattr(cfg, 'llm_api_key', '') or os.environ.get('LLM_API_KEY', '')
-            if not api_key:
-                logger.warning("  [PromptDecompose] 无 API key, 跳过 (set --llm_api_key or LLM_API_KEY)")
-            else:
-                try:
-                    from .prompt_decompose import create_prompt_decomposer
-                    decomposer = create_prompt_decomposer(
-                        api_key=api_key,
-                        api_base=getattr(cfg, 'llm_api_base', 'https://token-plan-cn.xiaomimimo.com/v1'),
-                        model=getattr(cfg, 'llm_model', 'mimo-v2.5-pro'),
-                        device=self.device,
-                    )
-                    caption = decomposer.optimize(caption, video_path)
-                    # 保存优化后的 prompt
-                    (out / "optimized_prompt.txt").write_text(caption, encoding="utf-8")
-                except Exception as e:
-                    logger.warning(f"  [PromptDecompose] 失败: {e}, 使用原始 caption")
-
         # ── Step 3: 计算噪声先验 (如果启用) ──
         eta_temporal = None
         prompt_embeds = None
         ref_latents_enc = None
-        ref_trajectory_from_inversion = None  # 合并模式：反演时同时缓存的轨迹
-        fi_ref_features_from_inversion = None  # 合并模式：反演时同时缓存的FI特征
-        svd_stats = None  # SVD 统计信息, 非SVD模式为None
-        if cfg.use_inversion:
+        ref_trajectory_from_inversion = None
+        fi_ref_features_from_inversion = None
+        svd_stats = None
+        if cfg.use_svd:
             # 判断是否需要在反演时同时缓存轨迹/FI特征
             need_trajectory = cfg.feature_inject
             cache_every_n = 1
@@ -328,9 +297,9 @@ class PFlowPipeline:
         ref_trajectory = None
         fi_ref_features = None
         if cfg.feature_inject:
-            if not cfg.use_inversion:
+            if not cfg.use_svd:
                 logger.warning(
-                    "  [FI] feature_inject=True 但 use_inversion=False, "
+                    "  [FI] feature_inject=True 但 SVD=False, "
                     "自动启用 inversion 以获取参考特征"
                 )
 
@@ -401,14 +370,13 @@ class PFlowPipeline:
 
         # ── 诊断: 噪声决策状态总结 ──
         _diag_fi = cfg.feature_inject and fi_ref_features is not None
-        _diag_svd_blend = cfg.use_blend and cfg.use_svd
+        _diag_svd_blend = cfg.use_svd
         _diag_eta_available = eta_temporal is not None
         logger.info(
             f"  [Noise Decision Summary] "
             f"feature_inject={'ACTIVE' if _diag_fi else 'OFF'}, "
             f"svd_blend={'ENABLED' if _diag_svd_blend else 'DISABLED'}, "
-            f"eta_temporal={'AVAILABLE' if _diag_eta_available else 'NONE'}, "
-            f"use_blend={cfg.use_blend}"
+            f"eta_temporal={'AVAILABLE' if _diag_eta_available else 'NONE'}"
         )
 
         for i in range(1, num_iters + 1):
@@ -614,11 +582,11 @@ class PFlowPipeline:
           CAP:   η_std过高 → 降低 α 防止过注入
         opt-out: --no_pna_std_gate 关闭全部门控
         """
-        if eta_temporal is None or not self.config.use_blend:
+        if eta_temporal is None or not self.config.use_svd:
             logger.info(
                 f"  [_get_latents] 返回 None → diffusers 纯随机噪声 "
                 f"(eta_temporal={'None' if eta_temporal is None else 'EXISTS'}, "
-                f"use_blend={self.config.use_blend})"
+                f"use_svd={self.config.use_svd})"
             )
             return None  # 让 diffusers 自己采样随机噪声
 
@@ -1071,9 +1039,8 @@ class PFlowPipeline:
 
         # ── FI 独立门控: λ 由 fi_lambda + schedule + quality_scale 决定, 与 SVD α 完全解耦 ──
         logger.info(
-            f"  [FI 独立门控] λ_max={cfg.fi_lambda:.4f}, "
-            f"quality_gate={'ON' if cfg.fi_quality_gate else 'OFF'}, "
-            f"adaptive_gate={'ON' if cfg.fi_adaptive_gate else 'OFF'}"
+            f"  [FI gate] λ_max={cfg.fi_lambda:.4f}, mode={gate_mode}, "
+            f"quality_gate={'ON' if cfg.fi_quality_gate else 'OFF'}"
         )
 
         # ── 预计算 λ 调度 ──
@@ -1160,36 +1127,48 @@ class PFlowPipeline:
                         )
                     return output
 
-                # ── 自适应门控: 基于特征对齐度调节 λ ──
+                # ── 门控模式 ──
+                gate_mode = getattr(cfg, 'fi_gate_mode', 'full')
                 lam_eff = lam
-                if cfg.fi_adaptive_gate and lam > 1e-8:
-                    # 计算当前特征与参考特征的余弦相似度
-                    h_cur_flat = h_current.flatten()
-                    h_ref_flat = h_ref_dev.flatten()
-                    cos_sim = torch.nn.functional.cosine_similarity(
-                        h_cur_flat.unsqueeze(0), h_ref_flat.unsqueeze(0)
-                    ).item()
-                    # cos_sim 高 → 特征已对齐 → 不需要注入 → gate 小
-                    # cos_sim 低 → 特征偏离 → 需要注入 → gate 大
-                    # gate = 1 - sigmoid(temp * (cos_sim - 0.5))
-                    # 当 cos_sim=0.5 时 gate=0.5, cos_sim=1 时 gate→0, cos_sim=0 时 gate→1
-                    gate = 1.0 - torch.sigmoid(
-                        torch.tensor(cfg.fi_adaptive_temp * (cos_sim - 0.5))
-                    ).item()
-                    # ── 方向C: AG gate 上限 ──
-                    gate_high = getattr(cfg, 'fi_ag_gate_high', None)
-                    gate_raw = gate  # 保存原始gate用于日志
-                    if gate_high is not None and gate > gate_high:
-                        gate = gate_high
-                    lam_eff = lam * gate
-
-                # ── 方向B: Norm 硬上限衰减 ─_
-                decay = 1.0
+                cos_sim = 0.0
+                gate = 0.0
+                gate_raw = 0.0
+                gate_high = 0.0
                 norm_triggered = False
-                if max_norm is not None and running_norm > max_norm:
-                    decay = max(norm_decay_min, 1.0 - (running_norm - max_norm) / max_norm)
-                    lam_eff *= decay
-                    norm_triggered = True
+                decay = 1.0
+
+                if gate_mode == "full":
+                    # 4层门控: 中峰调度 + 余弦自适应 + 质量尺度 + 累计预算
+                    if cfg.fi_adaptive_gate and lam > 1e-8:
+                        h_cur_flat = h_current.flatten()
+                        h_ref_flat = h_ref_dev.flatten()
+                        cos_sim = torch.nn.functional.cosine_similarity(
+                            h_cur_flat.unsqueeze(0), h_ref_flat.unsqueeze(0)
+                        ).item()
+                        gate = 1.0 - torch.sigmoid(
+                            torch.tensor(cfg.fi_adaptive_temp * (cos_sim - 0.5))
+                        ).item()
+                        gate_raw = gate
+                        gate_high = getattr(cfg, 'fi_ag_gate_high', None)
+                        if gate_high is not None and gate > gate_high:
+                            gate = gate_high
+                        lam_eff = lam * gate
+                    if max_norm is not None and running_norm > max_norm:
+                        decay = max(norm_decay_min, 1.0 - (running_norm - max_norm) / max_norm)
+                        lam_eff *= decay
+                        norm_triggered = True
+
+                elif gate_mode == "simple":
+                    # 简化: 余弦门控替换为常数 0.26 + 累计预算
+                    lam_eff = lam * 0.26
+                    if max_norm is not None and running_norm > max_norm:
+                        decay = max(norm_decay_min, 1.0 - (running_norm - max_norm) / max_norm)
+                        lam_eff *= decay
+                        norm_triggered = True
+
+                elif gate_mode == "minimal":
+                    # 最小: 仅中峰调度 × 质量尺度, 无余弦门控, 无累计预算
+                    lam_eff = lam
 
                 # v5: 门控统计 (每5步输出一次, info级别)
                     if step_idx_ref[0] % 5 == 0 and layer_idx == target_layers[0]:
@@ -1211,18 +1190,6 @@ class PFlowPipeline:
 
                 # 残差注入: h_injected = (1-λ_eff)*h_current + λ_eff*h_ref
                 h_injected = (1.0 - lam_eff) * h_current + lam_eff * h_ref_dev
-
-                # ── 方向3: 通道选择性FI ──
-                sparse_ratio = getattr(cfg, 'fi_sparse_ratio', 0.0)
-                if sparse_ratio > 0:
-                    diff = h_ref_dev - h_current  # (B, N, D)
-                    # 通道重要性 = |diff| 在 token 维度上的均值
-                    ch_importance = diff.abs().mean(dim=1)  # (B, D)
-                    top_k = max(1, int(ch_importance.shape[-1] * sparse_ratio))
-                    _, top_idx = ch_importance.topk(top_k, dim=-1)  # (B, K)
-                    mask = torch.zeros_like(h_current)
-                    mask.scatter_(-1, top_idx.unsqueeze(1).expand(-1, h_current.shape[1], -1), 1.0)
-                    h_injected = h_current + lam_eff * mask * diff
 
                 # 记录注入统计
                 injection_norm = (h_injected - h_current).norm().item()

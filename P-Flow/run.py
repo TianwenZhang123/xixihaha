@@ -10,7 +10,7 @@ P-Flow Runner — 默认使用 configs/default.toml 中的最优配置。
     python run.py --data_dir data/videos --caption_dir data/captions_qwen --no-svd
 
     # 纯 baseline
-    python run.py --data_dir data/videos --caption_dir data/captions_qwen --no-inversion --no-svd
+    python run.py --data_dir data/videos --caption_dir data/captions_qwen --no-svd
 
     # 指定输出目录
     python run.py --data_dir data/videos --caption_dir data/captions_qwen --output_dir outputs/my_exp
@@ -97,19 +97,10 @@ def parse_args():
     p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
 
     # ── L2: 噪声先验 ──
-    p.add_argument("--inversion", action="store_true",
-                   dest="inversion",
-                   default=_cfg(cfg, "noise_prior", "inversion", default=False))
-    p.add_argument("--no-inversion", action="store_false", dest="inversion",
-                   help="禁用 Inversion")
     p.add_argument("--svd", action="store_true", dest="svd",
                    default=_cfg(cfg, "noise_prior", "svd", default=False))
     p.add_argument("--no-svd", action="store_false", dest="svd",
-                   help="禁用 SVD")
-    p.add_argument("--blend", action="store_true", dest="blend",
-                   default=_cfg(cfg, "noise_prior", "blend", default=False))
-    p.add_argument("--no-blend", action="store_false", dest="blend",
-                   help="禁用 Blend")
+                   help="禁用 SVD (含 inversion + two-stage SVD + blend)")
     p.add_argument("--alpha", type=float,
                    default=_cfg(cfg, "noise_prior", "alpha", default=0.004))
     p.add_argument("--rho_s", type=float,
@@ -170,20 +161,10 @@ def parse_args():
                    default=_cfg(cfg, "fi", "norm_budget", "max_norm", default=None))
     p.add_argument("--fi_norm_decay_min", type=float,
                    default=_cfg(cfg, "fi", "norm_budget", "decay_min", default=0.3))
-
-    # ── L3: 通道选择 ──
-    p.add_argument("--fi_sparse_ratio", type=float,
-                   default=_cfg(cfg, "fi", "sparse", "ratio", default=0.0))
-
-    # ── L1: Prompt ──
-    p.add_argument("--prompt_decompose", action="store_true",
-                   default=_cfg(cfg, "prompt", "decompose", default=False))
-    p.add_argument("--llm_api_key", type=str,
-                   default=_cfg(cfg, "prompt", "llm_api_key", default=""))
-    p.add_argument("--llm_api_base", type=str,
-                   default=_cfg(cfg, "prompt", "llm_api_base", default="https://token-plan-cn.xiaomimimo.com/v1"))
-    p.add_argument("--llm_model", type=str,
-                   default=_cfg(cfg, "prompt", "llm_model", default="mimo-v2.5-pro"))
+    p.add_argument("--fi_gate_mode", type=str,
+                   default=_cfg(cfg, "fi", "gate_mode", default="full"),
+                   choices=["full", "simple", "minimal"],
+                   help="FI gating mode: full(4-layer), simple(QS+const-cos), minimal(QS only)")
 
     # ── 执行控制 ──
     p.add_argument("--resume", action="store_true", help="跳过已有输出")
@@ -203,9 +184,9 @@ def build_config(args) -> PFlowConfig:
         fps=args.fps,
         guidance_scale=args.guidance,
         num_inference_steps=args.steps,
-        use_inversion=args.inversion,
+        use_inversion=args.svd,
         use_svd=args.svd,
-        use_blend=args.blend,
+        use_blend=args.svd,
         use_iter=args.iter > 0,
         use_composite=args.composite,
         alpha=args.alpha,
@@ -214,11 +195,6 @@ def build_config(args) -> PFlowConfig:
         inversion_steps=args.inversion_steps,
         use_fast_svd=not args.no_fast_svd,
         svd_progressive=args.svd_progressive,
-        fi_sparse_ratio=args.fi_sparse_ratio,
-        prompt_decompose=args.prompt_decompose,
-        llm_api_key=args.llm_api_key,
-        llm_api_base=args.llm_api_base,
-        llm_model=args.llm_model,
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,
         vlm_model_path=args.vlm_path,
@@ -238,6 +214,7 @@ def build_config(args) -> PFlowConfig:
         fi_max_injection_norm=args.fi_max_injection_norm,
         fi_norm_decay_min=args.fi_norm_decay_min,
         fi_ag_gate_high=args.fi_ag_gate_high,
+        fi_gate_mode=args.fi_gate_mode,
         # SVD sigmoid 自适应 α
         pna_std_gate=not args.no_pna_std_gate,
         pna_std_eta0=args.pna_std_eta0,
@@ -347,7 +324,7 @@ def main():
     flags = config.active_flags()
     print(f"P-Flow | {config.experiment_name()}")
     print(f"  Flags: {flags or ['baseline (无改动)']}")
-    if config.use_blend:
+    if config.use_svd:
         print(f"  alpha={config.alpha}, rho_s={config.rho_s}, rho_m={config.rho_m}")
     if config.feature_inject:
         fi_adapt_str = f", adaptive(temp={config.fi_adaptive_temp})" if config.fi_adaptive_gate else ""
