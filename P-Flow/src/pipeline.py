@@ -1037,7 +1037,8 @@ class PFlowPipeline:
         meta = ref_features.get("_meta", {})
         target_layers = meta.get("target_layers", [])
 
-        # ── FI 独立门控: λ 由 fi_lambda + schedule + quality_scale 决定, 与 SVD α 完全解耦 ──
+        # ── FI 独立门控 ──
+        gate_mode = getattr(cfg, 'fi_gate_mode', 'full')
         logger.info(
             f"  [FI gate] λ_max={cfg.fi_lambda:.4f}, mode={gate_mode}, "
             f"quality_gate={'ON' if cfg.fi_quality_gate else 'OFF'}"
