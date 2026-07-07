@@ -276,12 +276,16 @@ class PFlowPipeline:
                     "num_layers": num_layers,
                 }
 
+            # 磁盘缓存目录（大模型FI特征落盘用）
+            fi_disk_dir = str(Path(out) / "fi_disk_cache") if cfg.feature_inject else ""
+
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion, svd_stats = \
                 self._compute_noise_prior(
                     ref_video, caption,
                     cache_trajectory=need_trajectory,
                     cache_every_n=cache_every_n,
                     fi_config=fi_config_for_inv,
+                    fi_cache_dir=fi_disk_dir,
                 )
 
         # ── Step 3.5: 轨迹/FI特征缓存 ──
@@ -332,24 +336,18 @@ class PFlowPipeline:
                 )
 
             # ── Feature Injection: 优先复用反演时 inline 缓存的特征 ──
-            fi_ref_file = None  # 磁盘缓存路径
             if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
                 fi_ref_features = fi_ref_features_from_inversion
-                n_steps = len([k for k in fi_ref_features if k != '_meta'])
-                fi_size = sum(v.element_size() * v.numel() for k, v in fi_ref_features.items() if k != '_meta' for v in v.values())
+                n_steps = sum(1 for k in fi_ref_features if isinstance(k, int))
+                meta = fi_ref_features.get("_meta", {})
+                on_disk = meta.get("disk_cache", False)
                 logger.info(
                     f"  [FI] ✅ 复用反演时 inline 缓存的特征 "
-                    f"({n_steps} steps, {fi_size/1e9:.1f}GB on CPU)"
+                    f"({n_steps} steps"
+                    f"{' 💾' if on_disk else ''})"
                 )
-                # 超大缓存写入磁盘，释放CPU内存
-                if fi_size > 10e9:  # >10GB 则落盘
-                    fi_ref_file = Path(out) / "fi_cache.pt"
-                    torch.save(fi_ref_features, fi_ref_file)
-                    fi_ref_features = None
-                    del fi_ref_features_from_inversion
-                    fi_ref_features_from_inversion = None
-                    logger.info(f"  [FI] 💾 FI cache saved to disk ({fi_size/1e9:.1f}GB), RAM freed")
             elif ref_trajectory is not None:
+                # Fallback: 用反演轨迹事后缓存特征
                 logger.info("  [FI] inline 缓存不可用，使用反演轨迹事后缓存特征...")
                 fi_ref_features = self._cache_fi_ref_features(
                     ref_trajectory,
@@ -393,11 +391,20 @@ class PFlowPipeline:
         for i in range(1, num_iters + 1):
             logger.info(f"  iter {i}/{num_iters}: {current_prompt[:60]}...")
 
-            # 从磁盘加载FI特征（如需要）
+            # 从磁盘加载FI特征（如 _meta.disk_cache=True）
             cur_fi_ref = fi_ref_features
-            if cur_fi_ref is None and fi_ref_file is not None and fi_ref_file.exists():
-                cur_fi_ref = torch.load(fi_ref_file, map_location='cpu', weights_only=False)
-                logger.info(f"  [FI] 📂 Loaded FI cache from disk ({fi_ref_file.stat().st_size/1e9:.1f}GB)")
+            if cur_fi_ref is not None:
+                meta = cur_fi_ref.get("_meta", {})
+                if meta.get("disk_cache") and meta.get("cache_dir"):
+                    cache_dir = meta["cache_dir"]
+                    loaded = {}
+                    for k in cur_fi_ref:
+                        if isinstance(k, int) and isinstance(cur_fi_ref[k], str):
+                            loaded[k] = torch.load(f"{cache_dir}/{cur_fi_ref[k]}", map_location='cpu', weights_only=False)
+                    if loaded:
+                        loaded["_meta"] = meta
+                        cur_fi_ref = loaded
+                        logger.info(f"  [FI] 📂 Loaded {len(loaded)-1} steps from disk")
 
             # 获取噪声
             latents = self._get_latents(
@@ -452,9 +459,12 @@ class PFlowPipeline:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
 
         # 清理磁盘缓存
-        if fi_ref_file and fi_ref_file.exists():
-            fi_ref_file.unlink()
-            logger.info(f"  [FI] 🗑️ Disk cache deleted")
+        if fi_disk_dir:
+            import shutil, os
+            disk_path = Path(fi_disk_dir)
+            if disk_path.exists():
+                shutil.rmtree(disk_path)
+                logger.info(f"  [FI] 🗑️ Disk cache deleted")
 
         mem_free, mem_total = torch.cuda.mem_get_info()
         logger.info(
@@ -475,6 +485,7 @@ class PFlowPipeline:
         self, ref_video: torch.Tensor, prompt: str,
         cache_trajectory: bool = False, cache_every_n: int = 1,
         fi_config: Optional[Dict[str, Any]] = None,
+        fi_cache_dir: str = "",
     ) -> tuple:
         """
         L2: Inversion + SVD → η_temporal
@@ -514,6 +525,7 @@ class PFlowPipeline:
                 ref_latents, prompt_embeds, prompt_embeds,
                 cache_every_n=cache_every_n,
                 fi_config=fi_config,
+                fi_cache_dir=fi_cache_dir,
             )
         else:
             logger.info("  [Inversion] euler (1st-order)...")

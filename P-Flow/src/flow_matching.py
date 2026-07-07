@@ -10,6 +10,7 @@ Adapted for Wan 2.1-1.3B single-GPU inference.
 Reference: Section 3.2-3.3, Algorithm 1 line 2.
 """
 
+import os
 import torch
 import torch.nn.functional as F
 from typing import Optional, Dict, Any, List
@@ -100,6 +101,7 @@ class FlowMatchingInverter:
         negative_prompt_embeds: Optional[torch.Tensor] = None,
         cache_every_n: int = 1,
         fi_config: Optional[Dict[str, Any]] = None,
+        fi_cache_dir: str = "",
     ) -> tuple:
         """
         Perform flow matching inversion with trajectory caching: x_1 → x_0.
@@ -213,15 +215,13 @@ class FlowMatchingInverter:
                 if (i + 1) % 10 == 0:
                     mem_used = torch.cuda.memory_allocated() / 1e9
                     mem_reserved = torch.cuda.memory_reserved() / 1e9
-                    fi_mem = sum(
-                        f.element_size() * f.numel() for step_feats in fi_ref_features.values()
-                        if isinstance(step_feats, dict) for f in step_feats.values()
-                    ) / 1e9 if fi_ref_features else 0
+                    fi_count = sum(1 for k in fi_ref_features if isinstance(k, int))
+                    fi_disk = fi_cache_dir and os.path.isdir(fi_cache_dir)
                     logger.info(
                         f"    [Inversion+Traj step {i+1}/{self.num_inversion_steps}] "
                         f"t={t_next:.3f}, x_t: mean={x_t.mean().item():.4f}, "
                         f"std={x_t.std().item():.4f}, cached={len(trajectory)} points, "
-                        f"FI_cache={fi_mem:.2f}GB(CPU), GPU={mem_used:.1f}/{mem_reserved:.1f}GB"
+                        f"FI_steps={fi_count}{'💾' if fi_disk else ''}, GPU={mem_used:.1f}/{mem_reserved:.1f}GB"
                     )
 
                 # 按 cache_every_n 间隔缓存（存 CPU 节省显存）
@@ -248,9 +248,14 @@ class FlowMatchingInverter:
 
                     # 避免重复覆盖（如果多个反演步映射到同一生成步，取最近的）
                     if gen_step_idx not in fi_ref_features:
-                        fi_ref_features[gen_step_idx] = {}
-                        for layer_idx, feat in fi_captured.items():
-                            fi_ref_features[gen_step_idx][layer_idx] = feat.clone().cpu()  # 存CPU省显存
+                        step_features = {layer_idx: feat.clone().cpu() for layer_idx, feat in fi_captured.items()}
+                        if fi_cache_dir:
+                            # 直接落盘，不占CPU内存
+                            os.makedirs(fi_cache_dir, exist_ok=True)
+                            torch.save(step_features, f"{fi_cache_dir}/step_{gen_step_idx}.pt")
+                            fi_ref_features[gen_step_idx] = f"step_{gen_step_idx}.pt"  # 存路径
+                        else:
+                            fi_ref_features[gen_step_idx] = step_features  # 存CPU
 
                     fi_captured.clear()
 
@@ -268,19 +273,19 @@ class FlowMatchingInverter:
 
         if fi_config is not None and fi_ref_features:
             # 保存元信息
+            n_steps = sum(1 for k in fi_ref_features if isinstance(k, int))
             fi_ref_features["_meta"] = {
                 "target_layers": fi_config["target_layers"],
                 "num_layers": fi_config.get("num_layers", 30),
                 "cache_mode": fi_config.get("cache_mode", "attention"),
                 "num_steps": fi_config["gen_num_steps"],
+                "disk_cache": bool(fi_cache_dir),
+                "cache_dir": fi_cache_dir if fi_cache_dir else "",
             }
-            total_cached = sum(
-                len(v) for k, v in fi_ref_features.items() if k != "_meta"
-            )
             logger.info(
                 f"  [FI Inline] 特征缓存完成: "
-                f"{len([k for k in fi_ref_features if k != '_meta'])} steps × "
-                f"{len(fi_config['target_layers'])} layers = {total_cached} tensors"
+                f"{n_steps} steps × {len(fi_config['target_layers'])} layers"
+                f"{' 💾' if fi_cache_dir else ''}"
             )
 
         return x_t, trajectory, fi_ref_features
