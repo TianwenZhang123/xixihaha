@@ -70,18 +70,52 @@ def load_model_single_gpu(
     Returns:
         Loaded pipeline ready for inference.
     """
-    logger.info(f"Loading Wan 2.1-1.3B ({model_type}) from: {model_path}")
+    from pathlib import Path
+    model_dir = Path(model_path)
+
+    # 检查 Diffusers 格式组件
+    has_index = (model_dir / "model_index.json").exists()
+    has_config = (model_dir / "config.json").exists()
+    has_vae = (model_dir / "Wan2.1_VAE.pth").exists() or (model_dir / "vae" / "diffusion_pytorch_model.safetensors").exists()
+    has_t5 = any((model_dir / "models_t5_umt5-xxl-enc-bf16.pth").exists(),
+                 (model_dir / "text_encoder").exists())
+
+    if has_index:
+        logger.info(f"Loading Wan ({model_type}) [full Diffusers] from: {model_path}")
+        from diffusers import WanPipeline
+        pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
+    elif has_config and has_vae and has_t5:
+        # 部分 Diffusers 格式: 有 DiT/VAE/T5 但缺 model_index.json
+        logger.info(f"Loading Wan ({model_type}) [partial Diffusers, auto-build] from: {model_path}")
+        from diffusers import WanPipeline, WanTransformer3DModel, AutoencoderKLWan, WanT5EncoderModel
+        from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+
+        subfolder = "transformer" if (model_dir / "transformer").exists() else ""
+        pipe = WanPipeline(
+            transformer=WanTransformer3DModel.from_pretrained(model_path / "transformer" if subfolder else model_path, torch_dtype=dtype),
+            vae=AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype) if (model_dir / "vae").exists()
+                 else AutoencoderKLWan.from_single_file(str(model_dir / "Wan2.1_VAE.pth"), torch_dtype=dtype),
+            text_encoder=WanT5EncoderModel.from_pretrained(model_path, subfolder="text_encoder", torch_dtype=dtype) if (model_dir / "text_encoder").exists()
+                         else WanT5EncoderModel.from_single_file(str(model_dir / "models_t5_umt5-xxl-enc-bf16.pth"), torch_dtype=dtype),
+            scheduler=FlowMatchEulerDiscreteScheduler(),
+            tokenizer=None,
+        )
+    else:
+        missing = []
+        if not has_config: missing.append("config.json 或 diffusion_pytorch_model*.safetensors")
+        if not has_vae: missing.append("vae/ 或 Wan2.1_VAE.pth")
+        if not has_t5: missing.append("text_encoder/ 或 models_t5_umt5-xxl-enc-bf16.pth")
+        raise RuntimeError(
+            f"模型路径 {model_path} 缺少必要组件: {missing}。\n"
+            f"请使用 Diffusers 完整版本: huggingface-cli download Wan-AI/Wan2.1-T2V-14B-Diffusers --local-dir {model_path}"
+        )
+
     logger.info(f"  Mode: single GPU (full model on VRAM), dtype={dtype}")
 
-    from diffusers import WanPipeline
-    pipe = WanPipeline.from_pretrained(
-        model_path,
-        torch_dtype=dtype,
-    )
-
-    # Move entire model to GPU — 1.3B fits comfortably
+    # Move entire model to GPU
     pipe = pipe.to("cuda")
-    logger.info("  Model loaded to GPU (no CPU offload needed for 1.3B)")
+    mem_free, mem_total = torch.cuda.mem_get_info()
+    logger.info(f"  Model loaded: {mem_free/1e9:.1f}GB free / {mem_total/1e9:.1f}GB total")
 
     # Memory optimizations for video decoding
     if enable_vae_slicing and hasattr(pipe, "enable_vae_slicing"):
