@@ -352,6 +352,13 @@ class PFlowPipeline:
                     "  [FI] ⚠️ feature_inject=True 但无反演轨迹，FI 将不生效"
                 )
 
+        # ── 反演完成，清理碎片化显存 ──
+        torch.cuda.empty_cache()
+
+
+
+
+
 
         # ── Step 4: 生成循环 ──
         num_iters = cfg.i_max if cfg.use_iter else 1

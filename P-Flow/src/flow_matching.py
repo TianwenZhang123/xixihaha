@@ -202,7 +202,12 @@ class FlowMatchingInverter:
                 velocity = self._predict_velocity(
                     x_t, t_tensor, prompt_embeds, negative_prompt_embeds
                 )
-                x_t = x_t + dt * velocity
+                x_t.add_(velocity, alpha=dt)  # 原地更新，避免显存碎片化
+                del velocity  # 立即释放 forward 输出的引用
+
+                # 每 5 步清理一次 CUDA 缓存，防止碎片累积
+                if (i + 1) % 5 == 0:
+                    torch.cuda.empty_cache()
 
                 # 按 cache_every_n 间隔缓存（存 CPU 节省显存）
                 t_next = timesteps[i + 1].item()
