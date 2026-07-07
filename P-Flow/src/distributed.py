@@ -79,9 +79,34 @@ def load_model_single_gpu(
         torch_dtype=dtype,
     )
 
-    # Move entire model to GPU — 1.3B fits comfortably
+    # Move entire model to GPU
     pipe = pipe.to("cuda")
-    logger.info("  Model loaded to GPU (no CPU offload needed for 1.3B)")
+
+    # Memory optimizations for large models (14B)
+    mem_opts = []
+    try:
+        pipe.enable_attention_slicing(slice_size="auto")
+        mem_opts.append("attention_slicing")
+    except Exception:
+        pass
+    if hasattr(pipe, "enable_vae_slicing"):
+        try:
+            pipe.enable_vae_slicing()
+            mem_opts.append("vae_slicing")
+        except Exception:
+            pass
+    if hasattr(pipe, "enable_vae_tiling"):
+        try:
+            pipe.enable_vae_tiling()
+            mem_opts.append("vae_tiling")
+        except Exception:
+            pass
+
+    mem_free, mem_total = torch.cuda.mem_get_info()
+    logger.info(
+        f"  Model loaded: {mem_free/1e9:.1f}GB free / {mem_total/1e9:.1f}GB total, "
+        f"mem_opts=[{','.join(mem_opts) if mem_opts else 'none'}]"
+    )
 
     # Memory optimizations for video decoding
     if enable_vae_slicing and hasattr(pipe, "enable_vae_slicing"):

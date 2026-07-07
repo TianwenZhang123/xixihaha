@@ -354,6 +354,11 @@ class PFlowPipeline:
 
         # ── 反演完成，清理碎片化显存 ──
         torch.cuda.empty_cache()
+        mem_free, mem_total = torch.cuda.mem_get_info()
+        logger.info(
+            f"  [Memory] Inversion done, cache cleared. "
+            f"GPU free={mem_free/1e9:.1f}GB / total={mem_total/1e9:.1f}GB"
+        )
 
 
 
@@ -432,12 +437,16 @@ class PFlowPipeline:
         with open(out / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-        logger.info(f"[P-Flow] Done in {elapsed:.1f}s → {final_path}")
-        # ── 样本完成总结 (便于后续与指标关联分析) ──
-        logger.info(f"  [SAMPLE SUMMARY] sample_id={sample_id}")
-        logger.info(f"  [SAMPLE SUMMARY] full_caption={caption}")
-        logger.info(f"  [SAMPLE SUMMARY] caption_length={len(caption)} chars, word_count={len(caption.split())}")
-        logger.info(f"  [SAMPLE SUMMARY] elapsed={elapsed:.1f}s, output={final_path}")
+        mem_free, mem_total = torch.cuda.mem_get_info()
+        logger.info(
+            f"[P-Flow] Done in {elapsed:.1f}s → {final_path}, "
+            f"GPU free={mem_free/1e9:.1f}GB"
+        )
+        # ── 样本完成总结 ──
+        logger.info(f"  [SAMPLE SUMMARY] sample_id={sample_id}, elapsed={elapsed:.1f}s")
+        logger.info(f"  [SAMPLE SUMMARY] caption: {len(caption)} chars, {len(caption.split())} words")
+        logger.info(f"  [SAMPLE SUMMARY] output={final_path}")
+        logger.info(f"  [SAMPLE SUMMARY] GPU={mem_free/1e9:.1f}GB free / {mem_total/1e9:.1f}GB total")
         return metadata
 
     # ─────────────────────────────────────────────────────────────

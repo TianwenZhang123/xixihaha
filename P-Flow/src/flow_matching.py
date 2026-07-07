@@ -209,6 +209,21 @@ class FlowMatchingInverter:
                 if (i + 1) % 5 == 0:
                     torch.cuda.empty_cache()
 
+                # 每 10 步打印显存状态
+                if (i + 1) % 10 == 0:
+                    mem_used = torch.cuda.memory_allocated() / 1e9
+                    mem_reserved = torch.cuda.memory_reserved() / 1e9
+                    fi_mem = sum(
+                        f.element_size() * f.numel() for step_feats in fi_ref_features.values()
+                        if isinstance(step_feats, dict) for f in step_feats.values()
+                    ) / 1e9 if fi_ref_features else 0
+                    logger.info(
+                        f"    [Inversion+Traj step {i+1}/{self.num_inversion_steps}] "
+                        f"t={t_next:.3f}, x_t: mean={x_t.mean().item():.4f}, "
+                        f"std={x_t.std().item():.4f}, cached={len(trajectory)} points, "
+                        f"FI_cache={fi_mem:.2f}GB(CPU), GPU={mem_used:.1f}/{mem_reserved:.1f}GB"
+                    )
+
                 # 按 cache_every_n 间隔缓存（存 CPU 节省显存）
                 t_next = timesteps[i + 1].item()
                 if (i + 1) % cache_every_n == 0 or i == self.num_inversion_steps - 1:
