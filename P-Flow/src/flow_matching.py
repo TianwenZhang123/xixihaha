@@ -10,7 +10,6 @@ Adapted for Wan 2.1-1.3B single-GPU inference.
 Reference: Section 3.2-3.3, Algorithm 1 line 2.
 """
 
-import os
 import torch
 import torch.nn.functional as F
 from typing import Optional, Dict, Any, List
@@ -101,7 +100,6 @@ class FlowMatchingInverter:
         negative_prompt_embeds: Optional[torch.Tensor] = None,
         cache_every_n: int = 1,
         fi_config: Optional[Dict[str, Any]] = None,
-        fi_cache_dir: str = "",
     ) -> tuple:
         """
         Perform flow matching inversion with trajectory caching: x_1 → x_0.
@@ -194,6 +192,7 @@ class FlowMatchingInverter:
         # 缓存起点 t=1.0 (原始数据 latent)
         trajectory[1.0] = x_t.cpu().clone()
 
+        fi_ram_limited = False
         try:
             for i in tqdm(range(self.num_inversion_steps), desc="Inversion + Trajectory", leave=False):
                 t = timesteps[i]
@@ -204,62 +203,46 @@ class FlowMatchingInverter:
                 velocity = self._predict_velocity(
                     x_t, t_tensor, prompt_embeds, negative_prompt_embeds
                 )
-                x_t.add_(velocity, alpha=dt)  # 原地更新，避免显存碎片化
-                del velocity  # 立即释放 forward 输出的引用
-
-                # 每 5 步清理一次 CUDA 缓存，防止碎片累积
-                if (i + 1) % 5 == 0:
-                    torch.cuda.empty_cache()
-
-                # 每 10 步打印显存状态
-                if (i + 1) % 10 == 0:
-                    mem_used = torch.cuda.memory_allocated() / 1e9
-                    mem_reserved = torch.cuda.memory_reserved() / 1e9
-                    fi_count = sum(1 for k in fi_ref_features if isinstance(k, int))
-                    fi_disk = fi_cache_dir and os.path.isdir(fi_cache_dir)
-                    logger.info(
-                        f"    [Inversion+Traj step {i+1}/{self.num_inversion_steps}] "
-                        f"t={t_next:.3f}, x_t: mean={x_t.mean().item():.4f}, "
-                        f"std={x_t.std().item():.4f}, cached={len(trajectory)} points, "
-                        f"FI_steps={fi_count}{'💾' if fi_disk else ''}, GPU={mem_used:.1f}/{mem_reserved:.1f}GB"
-                    )
+                x_t = x_t + dt * velocity
 
                 # 按 cache_every_n 间隔缓存（存 CPU 节省显存）
                 t_next = timesteps[i + 1].item()
                 if (i + 1) % cache_every_n == 0 or i == self.num_inversion_steps - 1:
                     trajectory[t_next] = x_t.cpu().clone()
 
-                # FI inline: 捕获当前步的 DiT 特征
-                # 注意: _predict_velocity 内部的 _model_forward 已经触发了 hook
-                # fi_captured 此时应已填充
-                # 关键: forward 用的是 t=timesteps[i] (当前步的 x_t),
-                #        不是 t_next (下一步的 x_t+dt)
-                # 所以映射时也必须用 t (不是 t_next)
-                if fi_config is not None and fi_captured:
-                    t_current = t.item()  # 当前 forward 的 timestep
-                    # 找最近的生成 step_index
-                    # 生成 step_idx 对应的 t_gen_traj = (step_idx + 1) / gen_num_steps
-                    # 反演 t_current 对应同一进度
+                # FI inline: 捕获当前步的 DiT 特征 (RAM 预算内)
+                if fi_config is not None and fi_captured and not fi_ram_limited:
+                    t_current = t.item()
                     nearest_gen_step = min(
                         inv_t_to_gen_step.keys(),
                         key=lambda t_key: abs(t_key - round(t_current, 6))
                     )
                     gen_step_idx = inv_t_to_gen_step[nearest_gen_step]
 
-                    # 避免重复覆盖（如果多个反演步映射到同一生成步，取最近的）
                     if gen_step_idx not in fi_ref_features:
-                        step_features = {layer_idx: feat.clone().cpu() for layer_idx, feat in fi_captured.items()}
-                        if fi_cache_dir:
-                            # 直接落盘，不占CPU内存
-                            os.makedirs(fi_cache_dir, exist_ok=True)
-                            torch.save(step_features, f"{fi_cache_dir}/step_{gen_step_idx}.pt")
-                            fi_ref_features[gen_step_idx] = f"step_{gen_step_idx}.pt"  # 存路径
-                        else:
-                            fi_ref_features[gen_step_idx] = step_features  # 存CPU
+                        fi_ref_features[gen_step_idx] = {}
+                        for layer_idx, feat in fi_captured.items():
+                            fi_ref_features[gen_step_idx][layer_idx] = feat.clone()
+
+                        # RAM 预算: >85GB 停止, 后续步用轨迹回放补齐
+                        fi_ram = sum(
+                            v.element_size() * v.numel()
+                            for sf in fi_ref_features.values() if isinstance(sf, dict)
+                            for v in sf.values()
+                        )
+                        if fi_ram > 85e9:
+                            fi_ram_limited = True
+                            logger.info(f"  [FI] RAM budget {fi_ram/1e9:.1f}GB hit, fallback to replay for remaining")
 
                     fi_captured.clear()
 
-
+                # 每 10 步打印一次进度
+                if (i + 1) % 10 == 0:
+                    logger.info(
+                        f"    [Inversion+Traj step {i+1}/{self.num_inversion_steps}] "
+                        f"t={t_next:.3f}, x_t: mean={x_t.mean().item():.4f}, "
+                        f"std={x_t.std().item():.4f}, cached={len(trajectory)} points"
+                    )
 
         finally:
             # 移除 FI hook
@@ -273,20 +256,16 @@ class FlowMatchingInverter:
 
         if fi_config is not None and fi_ref_features:
             # 保存元信息
-            n_steps = sum(1 for k in fi_ref_features if isinstance(k, int))
             fi_ref_features["_meta"] = {
                 "target_layers": fi_config["target_layers"],
                 "num_layers": fi_config.get("num_layers", 30),
                 "cache_mode": fi_config.get("cache_mode", "attention"),
                 "num_steps": fi_config["gen_num_steps"],
-                "disk_cache": bool(fi_cache_dir),
-                "cache_dir": fi_cache_dir if fi_cache_dir else "",
+                "ram_limited": fi_ram_limited,
             }
-            logger.info(
-                f"  [FI Inline] 特征缓存完成: "
-                f"{n_steps} steps × {len(fi_config['target_layers'])} layers"
-                f"{' 💾' if fi_cache_dir else ''}"
-            )
+            n_steps = sum(1 for k in fi_ref_features if isinstance(k, int))
+            cache_str = f"{n_steps}/{fi_config['gen_num_steps']} (+replay)" if fi_ram_limited else "full"
+            logger.info(f"  [FI Inline] 特征缓存: {cache_str}, {len(fi_config['target_layers'])} layers")
 
         return x_t, trajectory, fi_ref_features
 

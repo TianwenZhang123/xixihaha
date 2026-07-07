@@ -276,16 +276,12 @@ class PFlowPipeline:
                     "num_layers": num_layers,
                 }
 
-            # 磁盘缓存目录（大模型FI特征落盘用）
-            fi_disk_dir = str(Path(out) / "fi_disk_cache") if cfg.feature_inject else ""
-
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion, svd_stats = \
                 self._compute_noise_prior(
                     ref_video, caption,
                     cache_trajectory=need_trajectory,
                     cache_every_n=cache_every_n,
                     fi_config=fi_config_for_inv,
-                    fi_cache_dir=fi_disk_dir,
                 )
 
         # ── Step 3.5: 轨迹/FI特征缓存 ──
@@ -338,17 +334,27 @@ class PFlowPipeline:
             # ── Feature Injection: 优先复用反演时 inline 缓存的特征 ──
             if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
                 fi_ref_features = fi_ref_features_from_inversion
-                n_steps = sum(1 for k in fi_ref_features if isinstance(k, int))
                 meta = fi_ref_features.get("_meta", {})
-                on_disk = meta.get("disk_cache", False)
                 logger.info(
                     f"  [FI] ✅ 复用反演时 inline 缓存的特征 "
-                    f"({n_steps} steps"
-                    f"{' 💾' if on_disk else ''})"
+                    f"({len([k for k in fi_ref_features if k != '_meta'])} steps)"
                 )
+                # 补齐: RAM 预算触发时，对缺失步用轨迹回放补全
+                if meta.get("ram_limited") and ref_trajectory is not None:
+                    gen_steps = meta.get("num_steps", 30)
+                    missing = [s for s in range(gen_steps) if s not in fi_ref_features]
+                    if missing and prompt_embeds is not None:
+                        logger.info(f"  [FI] Trajectory replay for {len(missing)} missing steps...")
+                        replay = self._cache_fi_ref_features_missing(
+                            ref_trajectory, prompt_embeds, missing, meta
+                        )
+                        fi_ref_features.update(replay)
+                        logger.info(f"  [FI] Full cache: {len([k for k in fi_ref_features if k != '_meta'])} steps")
             elif ref_trajectory is not None:
                 # Fallback: 用反演轨迹事后缓存特征
-                logger.info("  [FI] inline 缓存不可用，使用反演轨迹事后缓存特征...")
+                logger.info(
+                    f"  [FI] inline 缓存不可用，使用反演轨迹事后缓存特征..."
+                )
                 fi_ref_features = self._cache_fi_ref_features(
                     ref_trajectory,
                     prompt_embeds if prompt_embeds is not None else self._encode_prompt(caption)
@@ -357,18 +363,6 @@ class PFlowPipeline:
                 logger.warning(
                     "  [FI] ⚠️ feature_inject=True 但无反演轨迹，FI 将不生效"
                 )
-
-        # ── 反演完成，清理碎片化显存 ──
-        torch.cuda.empty_cache()
-        mem_free, mem_total = torch.cuda.mem_get_info()
-        logger.info(
-            f"  [Memory] Inversion done, cache cleared. "
-            f"GPU free={mem_free/1e9:.1f}GB / total={mem_total/1e9:.1f}GB"
-        )
-
-
-
-
 
 
         # ── Step 4: 生成循环 ──
@@ -391,33 +385,18 @@ class PFlowPipeline:
         for i in range(1, num_iters + 1):
             logger.info(f"  iter {i}/{num_iters}: {current_prompt[:60]}...")
 
-            # 从磁盘加载FI特征（如 _meta.disk_cache=True）
-            cur_fi_ref = fi_ref_features
-            if cur_fi_ref is not None:
-                meta = cur_fi_ref.get("_meta", {})
-                if meta.get("disk_cache") and meta.get("cache_dir"):
-                    cache_dir = meta["cache_dir"]
-                    loaded = {}
-                    for k in cur_fi_ref:
-                        if isinstance(k, int) and isinstance(cur_fi_ref[k], str):
-                            loaded[k] = torch.load(f"{cache_dir}/{cur_fi_ref[k]}", map_location='cpu', weights_only=False)
-                    if loaded:
-                        loaded["_meta"] = meta
-                        cur_fi_ref = loaded
-                        logger.info(f"  [FI] 📂 Loaded {len(loaded)-1} steps from disk")
-
             # 获取噪声
             latents = self._get_latents(
                 eta_temporal, generator,
                 svd_stats=svd_stats,
-                fi_ref_features=cur_fi_ref,
+                fi_ref_features=fi_ref_features,
             )
 
             # 生成视频（FI / 标准）
-            if cfg.feature_inject and cur_fi_ref is not None:
+            if cfg.feature_inject and fi_ref_features is not None:
                 gen_video = self._generate_with_fi(
                     current_prompt, latents, generator,
-                    ref_features=cur_fi_ref,
+                    ref_features=fi_ref_features,
                     eta_temporal=eta_temporal,
                 )
             else:
@@ -458,24 +437,12 @@ class PFlowPipeline:
         with open(out / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-        # 清理磁盘缓存
-        if fi_disk_dir:
-            import shutil, os
-            disk_path = Path(fi_disk_dir)
-            if disk_path.exists():
-                shutil.rmtree(disk_path)
-                logger.info(f"  [FI] 🗑️ Disk cache deleted")
-
-        mem_free, mem_total = torch.cuda.mem_get_info()
-        logger.info(
-            f"[P-Flow] Done in {elapsed:.1f}s → {final_path}, "
-            f"GPU free={mem_free/1e9:.1f}GB"
-        )
-        # ── 样本完成总结 ──
-        logger.info(f"  [SAMPLE SUMMARY] sample_id={sample_id}, elapsed={elapsed:.1f}s")
-        logger.info(f"  [SAMPLE SUMMARY] caption: {len(caption)} chars, {len(caption.split())} words")
-        logger.info(f"  [SAMPLE SUMMARY] output={final_path}")
-        logger.info(f"  [SAMPLE SUMMARY] GPU={mem_free/1e9:.1f}GB free / {mem_total/1e9:.1f}GB total")
+        logger.info(f"[P-Flow] Done in {elapsed:.1f}s → {final_path}")
+        # ── 样本完成总结 (便于后续与指标关联分析) ──
+        logger.info(f"  [SAMPLE SUMMARY] sample_id={sample_id}")
+        logger.info(f"  [SAMPLE SUMMARY] full_caption={caption}")
+        logger.info(f"  [SAMPLE SUMMARY] caption_length={len(caption)} chars, word_count={len(caption.split())}")
+        logger.info(f"  [SAMPLE SUMMARY] elapsed={elapsed:.1f}s, output={final_path}")
         return metadata
 
     # ─────────────────────────────────────────────────────────────
@@ -485,7 +452,6 @@ class PFlowPipeline:
         self, ref_video: torch.Tensor, prompt: str,
         cache_trajectory: bool = False, cache_every_n: int = 1,
         fi_config: Optional[Dict[str, Any]] = None,
-        fi_cache_dir: str = "",
     ) -> tuple:
         """
         L2: Inversion + SVD → η_temporal
@@ -525,7 +491,6 @@ class PFlowPipeline:
                 ref_latents, prompt_embeds, prompt_embeds,
                 cache_every_n=cache_every_n,
                 fi_config=fi_config,
-                fi_cache_dir=fi_cache_dir,
             )
         else:
             logger.info("  [Inversion] euler (1st-order)...")
@@ -1003,7 +968,7 @@ class PFlowPipeline:
                 # 保存捕获的特征
                 ref_features[step_idx] = {}
                 for layer_idx, feat in captured_features.items():
-                    ref_features[step_idx][layer_idx] = feat.clone().cpu()  # 存CPU省显存
+                    ref_features[step_idx][layer_idx] = feat
 
                 if step_idx % 5 == 0:
                     logger.info(
@@ -1030,6 +995,66 @@ class PFlowPipeline:
             "cache_mode": cfg.fi_cache_mode,
             "num_steps": num_steps,
         }
+
+        return ref_features
+
+    @torch.no_grad()
+    def _cache_fi_ref_features_missing(
+        self,
+        ref_trajectory: Dict[float, torch.Tensor],
+        prompt_embeds: torch.Tensor,
+        missing_steps: List[int],
+        meta: dict,
+    ) -> Dict[int, Dict[int, torch.Tensor]]:
+        """仅回放轨迹补充缺失步的FI特征，与反演时缓存的特征值完全一致。"""
+        cfg = self.config
+        num_steps = meta.get("num_steps", 30)
+        target_layers = meta.get("target_layers", [])
+        cache_mode = meta.get("cache_mode", "attention")
+
+        ref_features = {}
+        transformer = self.pipe.transformer
+        blocks = transformer.blocks if hasattr(transformer, 'blocks') else []
+
+        # 构建 t 值映射
+        traj_keys = sorted(ref_trajectory.keys())
+        dt_gen = 1.0 / num_steps
+
+        captured = {}
+        hooks = []
+
+        def make_hook(layer_idx):
+            def hook_fn(module, input, output):
+                if isinstance(output, tuple):
+                    captured[layer_idx] = output[0].detach().cpu()
+                else:
+                    captured[layer_idx] = output.detach().cpu()
+            return hook_fn
+
+        for layer_idx in target_layers:
+            if layer_idx < len(blocks):
+                block = blocks[layer_idx]
+                if cache_mode == "attention" and hasattr(block, 'cross_attn'):
+                    hooks.append(block.cross_attn.register_forward_hook(make_hook(layer_idx)))
+                else:
+                    hooks.append(block.register_forward_hook(make_hook(layer_idx)))
+
+        try:
+            for step_idx in sorted(missing_steps):
+                t_traj = (step_idx + 1) / num_steps
+                nearest_t = min(traj_keys, key=lambda t: abs(t - t_traj))
+                z_ref = ref_trajectory[nearest_t].to(device=self.device, dtype=self.dtype)
+                t_tensor = torch.full((z_ref.shape[0],), nearest_t, device=self.device, dtype=z_ref.dtype)
+
+                captured.clear()
+                with torch.no_grad():
+                    _ = transformer(hidden_states=z_ref, timestep=t_tensor, encoder_hidden_states=prompt_embeds, return_dict=False)
+
+                ref_features[step_idx] = {l: captured[l].clone() for l in captured}
+                torch.cuda.empty_cache()
+        finally:
+            for h in hooks:
+                h.remove()
 
         return ref_features
 
