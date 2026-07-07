@@ -230,7 +230,7 @@ class FlowMatchingInverter:
                     if gen_step_idx not in fi_ref_features:
                         fi_ref_features[gen_step_idx] = {}
                         for layer_idx, feat in fi_captured.items():
-                            fi_ref_features[gen_step_idx][layer_idx] = feat.clone()
+                            fi_ref_features[gen_step_idx][layer_idx] = feat.clone().cpu()  # 存CPU省显存
 
                     fi_captured.clear()
 

@@ -956,7 +956,7 @@ class PFlowPipeline:
                 # 保存捕获的特征
                 ref_features[step_idx] = {}
                 for layer_idx, feat in captured_features.items():
-                    ref_features[step_idx][layer_idx] = feat
+                    ref_features[step_idx][layer_idx] = feat.clone().cpu()  # 存CPU省显存
 
                 if step_idx % 5 == 0:
                     logger.info(
