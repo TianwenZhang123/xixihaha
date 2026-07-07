@@ -192,7 +192,6 @@ class FlowMatchingInverter:
         # 缓存起点 t=1.0 (原始数据 latent)
         trajectory[1.0] = x_t.cpu().clone()
 
-        fi_ram_limited = False
         try:
             for i in tqdm(range(self.num_inversion_steps), desc="Inversion + Trajectory", leave=False):
                 t = timesteps[i]
@@ -210,29 +209,34 @@ class FlowMatchingInverter:
                 if (i + 1) % cache_every_n == 0 or i == self.num_inversion_steps - 1:
                     trajectory[t_next] = x_t.cpu().clone()
 
-                # FI inline: 捕获当前步的 DiT 特征 (RAM 预算内)
-                if fi_config is not None and fi_captured and not fi_ram_limited:
-                    t_current = t.item()
+                # FI inline: 捕获当前步的 DiT 特征
+                # 注意: _predict_velocity 内部的 _model_forward 已经触发了 hook
+                # fi_captured 此时应已填充
+                # 关键: forward 用的是 t=timesteps[i] (当前步的 x_t),
+                #        不是 t_next (下一步的 x_t+dt)
+                # 所以映射时也必须用 t (不是 t_next)
+                if fi_config is not None and fi_captured:
+                    t_current = t.item()  # 当前 forward 的 timestep
+                    # 找最近的生成 step_index
+                    # 生成 step_idx 对应的 t_gen_traj = (step_idx + 1) / gen_num_steps
+                    # 反演 t_current 对应同一进度
                     nearest_gen_step = min(
                         inv_t_to_gen_step.keys(),
                         key=lambda t_key: abs(t_key - round(t_current, 6))
                     )
                     gen_step_idx = inv_t_to_gen_step[nearest_gen_step]
 
+                    # 内存优化：只缓存前 max_cache_step 个生成步 (默认30=全缓存)
+                    max_step = fi_config.get("max_cache_step", gen_num_steps) if fi_config else gen_num_steps
+                    if gen_step_idx >= max_step:
+                        fi_captured.clear()
+                        continue
+
+                    # 避免重复覆盖（如果多个反演步映射到同一生成步，取最近的）
                     if gen_step_idx not in fi_ref_features:
                         fi_ref_features[gen_step_idx] = {}
                         for layer_idx, feat in fi_captured.items():
                             fi_ref_features[gen_step_idx][layer_idx] = feat.clone()
-
-                        # RAM 预算: >85GB 停止, 后续步用轨迹回放补齐
-                        fi_ram = sum(
-                            v.element_size() * v.numel()
-                            for sf in fi_ref_features.values() if isinstance(sf, dict)
-                            for v in sf.values()
-                        )
-                        if fi_ram > 85e9:
-                            fi_ram_limited = True
-                            logger.info(f"  [FI] RAM budget {fi_ram/1e9:.1f}GB hit, fallback to replay for remaining")
 
                     fi_captured.clear()
 
@@ -261,11 +265,15 @@ class FlowMatchingInverter:
                 "num_layers": fi_config.get("num_layers", 30),
                 "cache_mode": fi_config.get("cache_mode", "attention"),
                 "num_steps": fi_config["gen_num_steps"],
-                "ram_limited": fi_ram_limited,
             }
-            n_steps = sum(1 for k in fi_ref_features if isinstance(k, int))
-            cache_str = f"{n_steps}/{fi_config['gen_num_steps']} (+replay)" if fi_ram_limited else "full"
-            logger.info(f"  [FI Inline] 特征缓存: {cache_str}, {len(fi_config['target_layers'])} layers")
+            total_cached = sum(
+                len(v) for k, v in fi_ref_features.items() if k != "_meta"
+            )
+            logger.info(
+                f"  [FI Inline] 特征缓存完成: "
+                f"{len([k for k in fi_ref_features if k != '_meta'])} steps × "
+                f"{len(fi_config['target_layers'])} layers = {total_cached} tensors"
+            )
 
         return x_t, trajectory, fi_ref_features
 

@@ -98,6 +98,9 @@ class PFlowConfig:
     #   hidden: 完整 hidden_states (信息丰富但维度大)
     #   mlp: MLP 输出 (更高级语义)
 
+    # ── FI 内存优化 ──
+    fi_max_cache_step: int = 30   # 缓存步数上限 (30=全缓存, 14B建议23)
+
     # ── 迭代优化参数 ──
     i_max: int = 10               # 迭代轮数
 
@@ -274,6 +277,7 @@ class PFlowPipeline:
                     "cache_mode": cfg.fi_cache_mode,
                     "gen_num_steps": cfg.num_inference_steps,
                     "num_layers": num_layers,
+                    "max_cache_step": cfg.fi_max_cache_step,
                 }
 
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion, svd_stats = \
@@ -334,24 +338,12 @@ class PFlowPipeline:
             # ── Feature Injection: 优先复用反演时 inline 缓存的特征 ──
             if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
                 fi_ref_features = fi_ref_features_from_inversion
-                meta = fi_ref_features.get("_meta", {})
                 logger.info(
                     f"  [FI] ✅ 复用反演时 inline 缓存的特征 "
                     f"({len([k for k in fi_ref_features if k != '_meta'])} steps)"
                 )
-                # 补齐: RAM 预算触发时，对缺失步用轨迹回放补全
-                if meta.get("ram_limited") and ref_trajectory is not None:
-                    gen_steps = meta.get("num_steps", 30)
-                    missing = [s for s in range(gen_steps) if s not in fi_ref_features]
-                    if missing and prompt_embeds is not None:
-                        logger.info(f"  [FI] Trajectory replay for {len(missing)} missing steps...")
-                        replay = self._cache_fi_ref_features_missing(
-                            ref_trajectory, prompt_embeds, missing, meta
-                        )
-                        fi_ref_features.update(replay)
-                        logger.info(f"  [FI] Full cache: {len([k for k in fi_ref_features if k != '_meta'])} steps")
             elif ref_trajectory is not None:
-                # Fallback: 用反演轨迹事后缓存特征
+                # Fallback: 用反演轨迹事后缓存特征 (多耗时 ~77s)
                 logger.info(
                     f"  [FI] inline 缓存不可用，使用反演轨迹事后缓存特征..."
                 )
@@ -995,66 +987,6 @@ class PFlowPipeline:
             "cache_mode": cfg.fi_cache_mode,
             "num_steps": num_steps,
         }
-
-        return ref_features
-
-    @torch.no_grad()
-    def _cache_fi_ref_features_missing(
-        self,
-        ref_trajectory: Dict[float, torch.Tensor],
-        prompt_embeds: torch.Tensor,
-        missing_steps: List[int],
-        meta: dict,
-    ) -> Dict[int, Dict[int, torch.Tensor]]:
-        """仅回放轨迹补充缺失步的FI特征，与反演时缓存的特征值完全一致。"""
-        cfg = self.config
-        num_steps = meta.get("num_steps", 30)
-        target_layers = meta.get("target_layers", [])
-        cache_mode = meta.get("cache_mode", "attention")
-
-        ref_features = {}
-        transformer = self.pipe.transformer
-        blocks = transformer.blocks if hasattr(transformer, 'blocks') else []
-
-        # 构建 t 值映射
-        traj_keys = sorted(ref_trajectory.keys())
-        dt_gen = 1.0 / num_steps
-
-        captured = {}
-        hooks = []
-
-        def make_hook(layer_idx):
-            def hook_fn(module, input, output):
-                if isinstance(output, tuple):
-                    captured[layer_idx] = output[0].detach().cpu()
-                else:
-                    captured[layer_idx] = output.detach().cpu()
-            return hook_fn
-
-        for layer_idx in target_layers:
-            if layer_idx < len(blocks):
-                block = blocks[layer_idx]
-                if cache_mode == "attention" and hasattr(block, 'cross_attn'):
-                    hooks.append(block.cross_attn.register_forward_hook(make_hook(layer_idx)))
-                else:
-                    hooks.append(block.register_forward_hook(make_hook(layer_idx)))
-
-        try:
-            for step_idx in sorted(missing_steps):
-                t_traj = (step_idx + 1) / num_steps
-                nearest_t = min(traj_keys, key=lambda t: abs(t - t_traj))
-                z_ref = ref_trajectory[nearest_t].to(device=self.device, dtype=self.dtype)
-                t_tensor = torch.full((z_ref.shape[0],), nearest_t, device=self.device, dtype=z_ref.dtype)
-
-                captured.clear()
-                with torch.no_grad():
-                    _ = transformer(hidden_states=z_ref, timestep=t_tensor, encoder_hidden_states=prompt_embeds, return_dict=False)
-
-                ref_features[step_idx] = {l: captured[l].clone() for l in captured}
-                torch.cuda.empty_cache()
-        finally:
-            for h in hooks:
-                h.remove()
 
         return ref_features
 

@@ -44,6 +44,7 @@ layers             = "mid"
 lambda             = 0.10
 schedule           = "middle_peak"
 cache_mode         = "attention"
+max_cache_step     = 30     # FI 缓存步数上限 (30=全, 14B建议23)
 
 # ── L3: FI 门控 ──
 [fi.quality_gate]

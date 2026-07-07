@@ -137,6 +137,9 @@ def parse_args():
     p.add_argument("--fi_cache_mode", type=str,
                    default=_cfg(cfg, "fi", "cache_mode", default="attention"),
                    choices=["attention", "hidden", "mlp"])
+    p.add_argument("--fi_max_cache_step", type=int,
+                   default=_cfg(cfg, "fi", "max_cache_step", default=30),
+                   help="FI 缓存步数上限 (30=全, 14B建议23)")
 
     # ── L3: FI 门控 ──
     p.add_argument("--fi_no_quality_gate", action="store_true",
@@ -193,6 +196,7 @@ def build_config(args) -> PFlowConfig:
         fi_quality_gate=not args.fi_no_quality_gate,
         fi_quality_k=args.fi_quality_k,
         fi_cache_mode=args.fi_cache_mode,
+        fi_max_cache_step=args.fi_max_cache_step,
         fi_adaptive_gate=not args.fi_no_adaptive_gate,
         fi_adaptive_temp=args.fi_adaptive_temp,
         fi_ag_gate_high=args.fi_ag_gate_high,
