@@ -254,13 +254,7 @@ class FlowMatchingInverter:
 
                     fi_captured.clear()
 
-                # 每 10 步打印一次进度
-                if (i + 1) % 10 == 0:
-                    logger.info(
-                        f"    [Inversion+Traj step {i+1}/{self.num_inversion_steps}] "
-                        f"t={t_next:.3f}, x_t: mean={x_t.mean().item():.4f}, "
-                        f"std={x_t.std().item():.4f}, cached={len(trajectory)} points"
-                    )
+
 
         finally:
             # 移除 FI hook

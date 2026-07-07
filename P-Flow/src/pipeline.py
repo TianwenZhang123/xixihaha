@@ -332,17 +332,25 @@ class PFlowPipeline:
                 )
 
             # ── Feature Injection: 优先复用反演时 inline 缓存的特征 ──
+            fi_ref_file = None  # 磁盘缓存路径
             if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
                 fi_ref_features = fi_ref_features_from_inversion
+                n_steps = len([k for k in fi_ref_features if k != '_meta'])
+                fi_size = sum(v.element_size() * v.numel() for k, v in fi_ref_features.items() if k != '_meta' for v in v.values())
                 logger.info(
                     f"  [FI] ✅ 复用反演时 inline 缓存的特征 "
-                    f"({len([k for k in fi_ref_features if k != '_meta'])} steps)"
+                    f"({n_steps} steps, {fi_size/1e9:.1f}GB on CPU)"
                 )
+                # 超大缓存写入磁盘，释放CPU内存
+                if fi_size > 10e9:  # >10GB 则落盘
+                    fi_ref_file = Path(out) / "fi_cache.pt"
+                    torch.save(fi_ref_features, fi_ref_file)
+                    fi_ref_features = None
+                    del fi_ref_features_from_inversion
+                    fi_ref_features_from_inversion = None
+                    logger.info(f"  [FI] 💾 FI cache saved to disk ({fi_size/1e9:.1f}GB), RAM freed")
             elif ref_trajectory is not None:
-                # Fallback: 用反演轨迹事后缓存特征 (多耗时 ~77s)
-                logger.info(
-                    f"  [FI] inline 缓存不可用，使用反演轨迹事后缓存特征..."
-                )
+                logger.info("  [FI] inline 缓存不可用，使用反演轨迹事后缓存特征...")
                 fi_ref_features = self._cache_fi_ref_features(
                     ref_trajectory,
                     prompt_embeds if prompt_embeds is not None else self._encode_prompt(caption)
@@ -385,18 +393,24 @@ class PFlowPipeline:
         for i in range(1, num_iters + 1):
             logger.info(f"  iter {i}/{num_iters}: {current_prompt[:60]}...")
 
+            # 从磁盘加载FI特征（如需要）
+            cur_fi_ref = fi_ref_features
+            if cur_fi_ref is None and fi_ref_file is not None and fi_ref_file.exists():
+                cur_fi_ref = torch.load(fi_ref_file, map_location='cpu', weights_only=False)
+                logger.info(f"  [FI] 📂 Loaded FI cache from disk ({fi_ref_file.stat().st_size/1e9:.1f}GB)")
+
             # 获取噪声
             latents = self._get_latents(
                 eta_temporal, generator,
                 svd_stats=svd_stats,
-                fi_ref_features=fi_ref_features,
+                fi_ref_features=cur_fi_ref,
             )
 
             # 生成视频（FI / 标准）
-            if cfg.feature_inject and fi_ref_features is not None:
+            if cfg.feature_inject and cur_fi_ref is not None:
                 gen_video = self._generate_with_fi(
                     current_prompt, latents, generator,
-                    ref_features=fi_ref_features,
+                    ref_features=cur_fi_ref,
                     eta_temporal=eta_temporal,
                 )
             else:
@@ -436,6 +450,11 @@ class PFlowPipeline:
         }
         with open(out / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+        # 清理磁盘缓存
+        if fi_ref_file and fi_ref_file.exists():
+            fi_ref_file.unlink()
+            logger.info(f"  [FI] 🗑️ Disk cache deleted")
 
         mem_free, mem_total = torch.cuda.mem_get_info()
         logger.info(
