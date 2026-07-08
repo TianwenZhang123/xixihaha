@@ -115,7 +115,7 @@ class PFlowConfig:
 
     # ── 其他 ──
     seed: int = 42
-    gpu_id: int = 0  # GPU index, -1 for all GPUs
+    gpu_id: str = "0"  # GPU index or "0,1" for multi-GPU, "-1" for all
 
     def active_flags(self) -> List[str]:
         """返回当前启用的改动点列表。"""

@@ -95,8 +95,8 @@ def parse_args():
                    help=f"禁用 randomized SVD (默认: {_cfg(cfg, 'inference', 'use_fast_svd', default=True)})")
     p.add_argument("--iter", type=int, default=0, help="迭代轮数 (0=不迭代)")
     p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
-    p.add_argument("--gpu", type=int, default=0,
-                   help="GPU 索引 (0, 1, ..., -1=全部)")
+    p.add_argument("--gpu", type=str, default="0",
+                   help="GPU 索引, 如 0, 7, 或 6,7 多卡")
 
     # ── L2: 噪声先验 ──
     p.add_argument("--svd", action="store_true", dest="svd",

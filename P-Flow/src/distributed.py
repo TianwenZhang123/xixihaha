@@ -20,7 +20,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def setup_multi_gpu(gpu_id: int = 0):
+def setup_multi_gpu(gpu_id: str = "0"):
     """Setup GPU environment, optionally pin to specific GPU."""
     if not torch.cuda.is_available():
         logger.warning("CUDA not available, falling back to CPU.")
@@ -33,11 +33,15 @@ def setup_multi_gpu(gpu_id: int = 0):
 
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-    if gpu_id >= 0:
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-        logger.info(f"  Pinned to GPU {gpu_id}")
-    else:
+    gid = str(gpu_id)
+    if "," in gid:
+        os.environ["CUDA_VISIBLE_DEVICES"] = gid
+        logger.info(f"  Pinned to GPUs: {gid}")
+    elif gid == "-1":
         logger.info(f"  Using all {num_gpus} GPUs")
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = gid
+        logger.info(f"  Pinned to GPU {gid}")
     return "cuda"
 
 
@@ -74,10 +78,14 @@ def load_model(
     vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.float32)
     pipe = WanPipeline.from_pretrained(model_path, vae=vae, torch_dtype=dtype)
 
-    # GPU loading (L40 44GB 不够时自动退到 CPU offload)
+    # GPU loading (多 GPU 用 device_map，OOM 退到 CPU offload)
+    num_gpus = torch.cuda.device_count()
     try:
-        pipe = pipe.to("cuda")
-    except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+        if num_gpus > 1:
+            pipe = pipe.to("cuda", device_map="balanced" if hasattr(pipe, '_hf_hook') else "auto")
+        else:
+            pipe = pipe.to("cuda")
+    except (torch.cuda.OutOfMemoryError, RuntimeError):
         logger.info("  GPU OOM, enabling model CPU offload...")
         pipe.enable_model_cpu_offload()
     mem_free, mem_total = torch.cuda.mem_get_info()
