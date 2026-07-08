@@ -343,8 +343,9 @@ def encode_video_to_latents(
         Latent tensor (B, C_latent, F_latent, H_latent, W_latent).
     """
     with torch.no_grad():
-        vae_device = pipe.vae.device or device
-        video_tensor = video_tensor.to(device=vae_device, dtype=pipe.vae.dtype)
+        # sequential_cpu_offload 时 pipe.vae.device 可能还是 CPU，
+        # 但 offload hook 会在 forward 时自动搬到 cuda:0，所以直接用 cuda:0
+        video_tensor = video_tensor.to(device="cuda:0", dtype=pipe.vae.dtype)
 
         # Wan 2.1 VAE may process frames in chunks for memory
         latents = pipe.vae.encode(video_tensor).latent_dist.sample()

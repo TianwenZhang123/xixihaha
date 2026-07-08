@@ -78,22 +78,18 @@ def load_model(
     vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype)
     pipe = WanPipeline.from_pretrained(model_path, vae=vae, torch_dtype=dtype)
 
-    # GPU loading: 多卡分片，单卡整体加载，OOM 退到 CPU offload
+    # GPU loading: 多卡用 sequential CPU offload (模型留 CPU，按层搬到 GPU)
+    # 这样 GPU 显存只存 inversion 轨迹缓存，模型本体不占 VRAM
     num_gpus = torch.cuda.device_count()
-    try:
-        if num_gpus > 1:
-            # ── 手动分卡: transformer(text_encoder)+GPU:0, VAE→GPU:1 ──
-            # transformer ~28GB + text_encoder ~5GB 放 GPU 0 (主推理卡)
-            # VAE ~1GB 放 GPU 1，腾出空间给 inversion 轨迹缓存
-            pipe.transformer = pipe.transformer.to("cuda:0")
-            pipe.text_encoder = pipe.text_encoder.to("cuda:0")
-            pipe.vae = pipe.vae.to("cuda:1")
-            logger.info("  Multi-GPU: transformer+text_encoder → cuda:0, VAE → cuda:1")
-        else:
-            pipe = pipe.to("cuda")
-    except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
-        logger.warning(f"  GPU placement failed ({e}), enabling sequential CPU offload...")
+    if num_gpus > 1:
         pipe.enable_sequential_cpu_offload()
+        logger.info("  Multi-GPU: sequential CPU offload (省显存给 inversion 缓存)")
+    else:
+        try:
+            pipe = pipe.to("cuda")
+        except (torch.cuda.OutOfMemoryError, RuntimeError):
+            logger.info("  GPU OOM, enabling sequential CPU offload...")
+            pipe.enable_sequential_cpu_offload()
 
     mem_free, mem_total = torch.cuda.mem_get_info()
     logger.info(f"  Model loaded: {mem_free/1e9:.1f}GB free / {mem_total/1e9:.1f}GB total")
