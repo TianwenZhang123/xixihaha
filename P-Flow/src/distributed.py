@@ -13,8 +13,6 @@ Hardware:
 """
 
 import os
-import json
-import shutil
 import torch
 import logging
 from pathlib import Path
@@ -97,16 +95,10 @@ def load_model(
         from diffusers import WanPipeline
         pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
 
-    # ── 路径2: 散文件 → 尝试直接加载 → 不行则创建索引后加载 ──
+    # ── 路径2: 散文件 → 手动组装 WanPipeline ──
     elif has_transformer and has_vae and has_t5:
-        logger.info(f"Loading Wan ({model_type}) [partial Diffusers] from: {model_path}")
-        from diffusers import WanPipeline
-        try:
-            pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
-        except Exception:
-            logger.info("  Direct load failed, creating model_index.json...")
-            _create_model_index(model_dir)
-            pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
+        logger.info(f"Loading Wan ({model_type}) [manual assembly] from: {model_path}")
+        pipe = _load_wan_from_files(model_dir, dtype)
     else:
         missing = []
         if not has_transformer: missing.append("config.json + safetensors")
@@ -145,73 +137,66 @@ def load_model(
     return pipe
 
 
-def _create_model_index(model_dir: Path):
-    """为散文件模型创建 model_index.json，使 diffusers 能标准加载。
-    
-    模型目录结构:
-        Wan2.1-T2V-14B/
-        ├── config.json                          ← DiT config
-        ├── diffusion_pytorch_model*.safetensors ← DiT weights
-        ├── Wan2.1_VAE.pth                      ← VAE (单文件)
-        └── models_t5_umt5-xxl-enc-bf16.pth     ← T5 (单文件)
-    """
-    index_path = model_dir / "model_index.json"
-    if index_path.exists():
-        return
+def _load_wan_from_files(model_dir: Path, dtype: torch.dtype) -> Any:
+    """从散文件手动组装 WanPipeline（兼容非标准 Diffusers 布局）。"""
+    from diffusers import WanPipeline, WanTransformer3DModel
+    from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 
-    # 创建 vae/ 子目录 (软链接，不占磁盘)
-    vae_dir = model_dir / "vae"
-    if not (vae_dir / "diffusion_pytorch_model.safetensors").exists():
-        vae_dir.mkdir(exist_ok=True)
-        os.symlink(model_dir / "Wan2.1_VAE.pth", vae_dir / "diffusion_pytorch_model.safetensors")
-        vae_config = {
-            "_class_name": "AutoencoderKLWan",
-            "act_fn": "silu", "block_out_channels": [128, 256, 256, 256],
-            "down_block_types": ["WanDownBlock3D"] * 4,
-            "force_upcast": False, "in_channels": 3, "latent_channels": 16,
-            "layers_per_block": 2, "out_channels": 3, "sample_size": 256,
-            "scaling_factor": 0.5960, "shift_factor": 0.0,
-            "up_block_types": ["WanUpBlock3D"] * 4,
-            "use_quant_conv": False, "use_post_quant_conv": False,
-        }
-        json.dump(vae_config, (vae_dir / "config.json").open("w"), indent=2)
+    # ── DiT Transformer ──
+    logger.info("  Loading transformer (DiT)...")
+    transformer = WanTransformer3DModel.from_pretrained(model_dir, torch_dtype=dtype)
 
-    # 创建 text_encoder/ 子目录 (软链接)
-    te_dir = model_dir / "text_encoder"
-    if not (te_dir / "diffusion_pytorch_model.safetensors").exists():
-        te_dir.mkdir(exist_ok=True)
-        os.symlink(model_dir / "models_t5_umt5-xxl-enc-bf16.pth", te_dir / "diffusion_pytorch_model.safetensors")
-        t5_config = {
-            "_class_name": "T5EncoderModel",
-            "d_model": 4096, "d_kv": 64, "d_ff": 10240, "num_layers": 24,
-            "num_heads": 64, "dropout_rate": 0.1, "dense_act_fn": "gelu_pytorch_tanh",
-            "is_gated_act": True, "feed_forward_proj": "gated-gelu",
-            "relative_attention_num_buckets": 32, "relative_attention_max_distance": 128,
-            "tie_word_embeddings": False, "vocab_size": 32128,
-        }
-        json.dump(t5_config, (te_dir / "config.json").open("w"), indent=2)
+    # ── VAE ──
+    logger.info("  Loading VAE...")
+    vae = _load_wan_vae(model_dir, dtype)
 
-    # 创建 transformer/ 子目录 (软链接)
-    tr_dir = model_dir / "transformer"
-    tr_dir.mkdir(exist_ok=True)
-    if not (tr_dir / "config.json").exists():
-        os.symlink(model_dir / "config.json", tr_dir / "config.json")
-    for f in sorted(model_dir.glob("diffusion_pytorch_model*.safetensors")):
-        link = tr_dir / f.name
-        if not link.exists():
-            os.symlink(f, link)
+    # ── T5 Text Encoder ──
+    logger.info("  Loading T5...")
+    text_encoder = _load_wan_t5(model_dir, dtype)
 
-    # 写 model_index.json
-    index = {
-        "_class_name": "WanPipeline",
-        "_diffusers_version": "0.31.0",
-        "transformer": ["transformer"],
-        "vae": ["vae"],
-        "text_encoder": ["text_encoder"],
+    scheduler = FlowMatchEulerDiscreteScheduler()
+    return WanPipeline(
+        transformer=transformer, vae=vae,
+        text_encoder=text_encoder, scheduler=scheduler,
+    )
+
+
+def _load_wan_vae(model_dir: Path, dtype: torch.dtype):
+    """加载 Wan2.1 VAE (单文件 .pth 格式)。"""
+    import safetensors.torch
+    try:
+        from diffusers import AutoencoderKLWan
+    except ImportError:
+        from diffusers.models.autoencoders import AutoencoderKLWan
+
+    vae_config = {
+        "_class_name": "AutoencoderKLWan", "act_fn": "silu",
+        "block_out_channels": [128, 256, 256, 256],
+        "down_block_types": ["WanDownBlock3D"] * 4,
+        "force_upcast": False, "in_channels": 3, "latent_channels": 16,
+        "layers_per_block": 2, "out_channels": 3, "sample_size": 256,
+        "scaling_factor": 0.5960, "shift_factor": 0.0,
+        "up_block_types": ["WanUpBlock3D"] * 4,
+        "use_quant_conv": False, "use_post_quant_conv": False,
     }
-    # diffusers 0.31+ 格式: 类名自动检测，不需要显式指定
-    json.dump(index, index_path.open("w"), indent=2)
-    logger.info("  model_index.json created (VAE/T5/Transformer symlinks)")
+    vae = AutoencoderKLWan(**vae_config).to(dtype)
+    state = safetensors.torch.load_file(str(model_dir / "Wan2.1_VAE.pth"))
+    vae.load_state_dict(state, strict=False)
+    return vae
+
+
+def _load_wan_t5(model_dir: Path, dtype: torch.dtype):
+    """加载 Wan2.1 T5 编码器 (单文件, 实为 safetensors)。"""
+    import tempfile
+    import shutil as _sh
+    from transformers import T5EncoderModel
+    # Wan2.1 T5 即标准 UMT5-XXL encoder，用 HF 加载
+    try:
+        return T5EncoderModel.from_pretrained("google/umt5-xxl", torch_dtype=dtype,
+                                               low_cpu_mem_usage=True, local_files_only=True)
+    except Exception:
+        logger.info("  T5 not cached, downloading (one-time)...")
+        return T5EncoderModel.from_pretrained("google/umt5-xxl", torch_dtype=dtype)
 
 
 def _log_gpu_memory():
