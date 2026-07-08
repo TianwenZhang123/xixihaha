@@ -19,8 +19,10 @@ P-Flow Runner — 默认使用 configs/default.toml 中的最优配置。
 """
 
 import sys
+import gc
 import argparse
 import logging
+import torch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -271,6 +273,11 @@ def run_batch(pipeline, args):
             caption=caption,
             sample_id=sample_id,
         )
+
+        # ── 防止内存泄漏: 清理上一个样本的缓存 ──
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     print(f"\n批量完成! 输出: {args.output_dir}")
 

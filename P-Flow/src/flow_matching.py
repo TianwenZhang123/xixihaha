@@ -269,10 +269,24 @@ class FlowMatchingInverter:
             total_cached = sum(
                 len(v) for k, v in fi_ref_features.items() if k != "_meta"
             )
+            # 真实缓存占用（验证 ~500GB 估算用）
+            real_bytes = 0
+            real_dtype = None
+            for _k, _v in fi_ref_features.items():
+                if _k == "_meta":
+                    continue
+                for _t in _v.values():
+                    real_bytes += _t.numel() * _t.element_size()
+                    if real_dtype is None:
+                        real_dtype = _t.dtype
             logger.info(
                 f"  [FI Inline] 特征缓存完成: "
                 f"{len([k for k in fi_ref_features if k != '_meta'])} steps × "
                 f"{len(fi_config['target_layers'])} layers = {total_cached} tensors"
+            )
+            logger.info(
+                f"  [FI Inline] 真实缓存占用 ≈ {real_bytes/1e9:.1f} GB "
+                f"({real_bytes/1024**3:.2f} GiB), dtype={real_dtype}"
             )
 
         return x_t, trajectory, fi_ref_features
