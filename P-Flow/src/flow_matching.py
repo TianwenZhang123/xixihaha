@@ -343,7 +343,8 @@ def encode_video_to_latents(
         Latent tensor (B, C_latent, F_latent, H_latent, W_latent).
     """
     with torch.no_grad():
-        video_tensor = video_tensor.to(device=device, dtype=pipe.vae.dtype)
+        vae_device = pipe.vae.device or device
+        video_tensor = video_tensor.to(device=vae_device, dtype=pipe.vae.dtype)
 
         # Wan 2.1 VAE may process frames in chunks for memory
         latents = pipe.vae.encode(video_tensor).latent_dist.sample()
@@ -354,7 +355,8 @@ def encode_video_to_latents(
             scaling_factor = getattr(pipe, "vae_scaling_factor", 0.18215)
         latents = latents * scaling_factor
 
-    return latents
+    # 搬到调用方设备 (VAE 可能在 cuda:1, transformer 在 cuda:0)
+    return latents.to(device)
 
 
 
