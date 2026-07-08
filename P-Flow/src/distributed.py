@@ -170,14 +170,13 @@ def _load_wan_vae(model_dir: Path, dtype: torch.dtype):
         from diffusers.models.autoencoders import AutoencoderKLWan
 
     vae_config = {
-        "_class_name": "AutoencoderKLWan", "act_fn": "silu",
-        "block_out_channels": [128, 256, 256, 256],
+        "_class_name": "AutoencoderKLWan",
+        "in_channels": 3, "out_channels": 3, "latent_channels": 16,
         "down_block_types": ["WanDownBlock3D"] * 4,
-        "force_upcast": False, "in_channels": 3, "latent_channels": 16,
-        "layers_per_block": 2, "out_channels": 3, "sample_size": 256,
-        "scaling_factor": 0.5960, "shift_factor": 0.0,
         "up_block_types": ["WanUpBlock3D"] * 4,
-        "use_quant_conv": False, "use_post_quant_conv": False,
+        "block_out_channels": [128, 256, 256, 256],
+        "layers_per_block": 2, "scaling_factor": 0.5960,
+        "sample_size": 256,
     }
     vae = AutoencoderKLWan(**vae_config).to(dtype)
     state = safetensors.torch.load_file(str(model_dir / "Wan2.1_VAE.pth"))
