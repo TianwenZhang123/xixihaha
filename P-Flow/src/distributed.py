@@ -155,12 +155,11 @@ def _create_model_index(model_dir: Path):
     if index_path.exists():
         return
 
-    # 创建 vae/ 子目录
+    # 创建 vae/ 子目录 (软链接，不占磁盘)
     vae_dir = model_dir / "vae"
     if not (vae_dir / "diffusion_pytorch_model.safetensors").exists():
         vae_dir.mkdir(exist_ok=True)
-        import shutil
-        shutil.copy(model_dir / "Wan2.1_VAE.pth", vae_dir / "diffusion_pytorch_model.safetensors")
+        os.symlink(model_dir / "Wan2.1_VAE.pth", vae_dir / "diffusion_pytorch_model.safetensors")
         vae_config = {
             "_class_name": "AutoencoderKLWan",
             "act_fn": "silu", "block_out_channels": [128, 256, 256, 256],
@@ -173,11 +172,11 @@ def _create_model_index(model_dir: Path):
         }
         json.dump(vae_config, (vae_dir / "config.json").open("w"), indent=2)
 
-    # 创建 text_encoder/ 子目录
+    # 创建 text_encoder/ 子目录 (软链接)
     te_dir = model_dir / "text_encoder"
     if not (te_dir / "diffusion_pytorch_model.safetensors").exists():
         te_dir.mkdir(exist_ok=True)
-        shutil.copy(model_dir / "models_t5_umt5-xxl-enc-bf16.pth", te_dir / "diffusion_pytorch_model.safetensors")
+        os.symlink(model_dir / "models_t5_umt5-xxl-enc-bf16.pth", te_dir / "diffusion_pytorch_model.safetensors")
         t5_config = {
             "_class_name": "T5EncoderModel",
             "d_model": 4096, "d_kv": 64, "d_ff": 10240, "num_layers": 24,
@@ -188,14 +187,15 @@ def _create_model_index(model_dir: Path):
         }
         json.dump(t5_config, (te_dir / "config.json").open("w"), indent=2)
 
-    # 创建 transformer/ 子目录
+    # 创建 transformer/ 子目录 (软链接)
     tr_dir = model_dir / "transformer"
     tr_dir.mkdir(exist_ok=True)
     if not (tr_dir / "config.json").exists():
-        shutil.copy(model_dir / "config.json", tr_dir / "config.json")
+        os.symlink(model_dir / "config.json", tr_dir / "config.json")
     for f in sorted(model_dir.glob("diffusion_pytorch_model*.safetensors")):
-        if not (tr_dir / f.name).exists():
-            shutil.copy(f, tr_dir / f.name)
+        link = tr_dir / f.name
+        if not link.exists():
+            os.symlink(f, link)
 
     # 写 model_index.json
     index = {
