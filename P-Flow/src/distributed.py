@@ -74,8 +74,12 @@ def load_model(
     vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.float32)
     pipe = WanPipeline.from_pretrained(model_path, vae=vae, torch_dtype=dtype)
 
-    # GPU loading
-    pipe = pipe.to("cuda")
+    # GPU loading (L40 44GB 不够时自动退到 CPU offload)
+    try:
+        pipe = pipe.to("cuda")
+    except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+        logger.info("  GPU OOM, enabling model CPU offload...")
+        pipe.enable_model_cpu_offload()
     mem_free, mem_total = torch.cuda.mem_get_info()
     logger.info(f"  Model loaded: {mem_free/1e9:.1f}GB free / {mem_total/1e9:.1f}GB total")
     _log_gpu_memory()
