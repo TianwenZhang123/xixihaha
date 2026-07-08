@@ -97,12 +97,16 @@ def load_model(
         from diffusers import WanPipeline
         pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
 
-    # ── 路径2: 散文件 → 创建 model_index.json 后标准加载 ──
+    # ── 路径2: 散文件 → 尝试直接加载 → 不行则创建索引后加载 ──
     elif has_transformer and has_vae and has_t5:
-        logger.info(f"Loading Wan ({model_type}) [partial Diffusers, creating model_index.json] from: {model_path}")
-        _create_model_index(model_dir)
+        logger.info(f"Loading Wan ({model_type}) [partial Diffusers] from: {model_path}")
         from diffusers import WanPipeline
-        pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
+        try:
+            pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
+        except Exception:
+            logger.info("  Direct load failed, creating model_index.json...")
+            _create_model_index(model_dir)
+            pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
     else:
         missing = []
         if not has_transformer: missing.append("config.json + safetensors")
@@ -201,10 +205,11 @@ def _create_model_index(model_dir: Path):
     index = {
         "_class_name": "WanPipeline",
         "_diffusers_version": "0.31.0",
-        "transformer": ["transformer", "WanTransformer3DModel"],
-        "vae": ["vae", "AutoencoderKLWan"],
-        "text_encoder": ["text_encoder", "T5EncoderModel"],
+        "transformer": ["transformer"],
+        "vae": ["vae"],
+        "text_encoder": ["text_encoder"],
     }
+    # diffusers 0.31+ 格式: 类名自动检测，不需要显式指定
     json.dump(index, index_path.open("w"), indent=2)
     logger.info("  model_index.json created (VAE/T5/Transformer symlinks)")
 
