@@ -69,8 +69,10 @@ def load_model(
         )
 
     logger.info(f"Loading Wan ({model_type}) from: {model_path}")
-    from diffusers import WanPipeline
-    pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
+    from diffusers import WanPipeline, AutoencoderKLWan
+    # 官方建议: VAE 用 float32 保证解码质量, 其余 bfloat16
+    vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.float32)
+    pipe = WanPipeline.from_pretrained(model_path, vae=vae, torch_dtype=dtype)
 
     # GPU loading
     pipe = pipe.to("cuda")
