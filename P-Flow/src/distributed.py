@@ -201,12 +201,12 @@ def _create_model_index(model_dir: Path):
     index = {
         "_class_name": "WanPipeline",
         "_diffusers_version": "0.31.0",
-        "transformer": ["transformer"],
-        "vae": ["vae"],
-        "text_encoder": ["text_encoder"],
+        "transformer": ["transformer", "WanTransformer3DModel"],
+        "vae": ["vae", "AutoencoderKLWan"],
+        "text_encoder": ["text_encoder", "T5EncoderModel"],
     }
     json.dump(index, index_path.open("w"), indent=2)
-    logger.info("  model_index.json created (VAE/T5/Transformer subdirs)")
+    logger.info("  model_index.json created (VAE/T5/Transformer symlinks)")
 
 
 def _log_gpu_memory():
