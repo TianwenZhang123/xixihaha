@@ -95,6 +95,8 @@ def parse_args():
                    help=f"禁用 randomized SVD (默认: {_cfg(cfg, 'inference', 'use_fast_svd', default=True)})")
     p.add_argument("--iter", type=int, default=0, help="迭代轮数 (0=不迭代)")
     p.add_argument("--composite", action="store_true", help="启用垂直拼接对比")
+    p.add_argument("--gpu", type=int, default=0,
+                   help="GPU 索引 (0, 1, ..., -1=全部)")
 
     # ── L2: 噪声先验 ──
     p.add_argument("--svd", action="store_true", dest="svd",
@@ -188,6 +190,7 @@ def build_config(args) -> PFlowConfig:
         vlm_provider=args.vlm_provider,
         vlm_model_path=args.vlm_path,
         seed=args.seed,
+        gpu_id=args.gpu,
         # L3: Feature Injection
         feature_inject=args.feature_inject,
         fi_layers=args.fi_layers,

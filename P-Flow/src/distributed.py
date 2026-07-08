@@ -1,53 +1,57 @@
 """
-Single-GPU Inference Utilities for Wan2.1-1.3B on 4090 (24GB).
+Multi-GPU & Format-Agnostic Inference Utilities for Wan2.1.
 
 Supports:
-1. Single 4090 — model fits fully in VRAM (~2.6GB bfloat16)
-2. VAE slicing + tiling for memory efficiency during video decode
-3. Sequential video-by-video processing
+1. Single GPU (4090/A800) — full model on VRAM
+2. Multi-GPU (2x L40) — model parallel via device_map="auto"
+3. Full Diffusers format (model_index.json) or partial (files only)
+4. VAE slicing + tiling for memory efficiency
 
-Hardware: 1x RTX 4090 (24GB)
-- Wan 2.1-1.3B: ~2.6GB in bfloat16
-- No CPU offload needed — full model on GPU
-- Peak VRAM during generation: ~12-16GB (with 81 frames 480p)
-- Video generation: ~30-50s per video
+Hardware:
+  - Wan 2.1-1.3B: ~2.6GB bf16, fits single 24GB
+  - Wan 2.1-14B:  ~28GB bf16, needs 2x48GB or 1x80GB
 """
 
 import os
+import json
 import torch
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def setup_single_gpu():
-    """
-    Setup single-GPU environment for 4090 inference.
-    Call this before loading any models.
+def setup_multi_gpu(gpu_id: int = 0):
+    """Setup GPU environment, optionally pin to specific GPU.
 
-    Returns:
-        Device string ("cuda" or "cpu").
+    Args:
+        gpu_id: GPU index to use (e.g. 0, 1, ..., or -1 for all GPUs).
+                 Default 0.
     """
     if not torch.cuda.is_available():
         logger.warning("CUDA not available, falling back to CPU.")
         return "cpu"
 
     num_gpus = torch.cuda.device_count()
-    props = torch.cuda.get_device_properties(0)
-    logger.info(f"GPU: {props.name} ({props.total_memory / 1024**3:.1f} GB)")
-    if num_gpus > 1:
-        logger.info(f"  {num_gpus} GPUs detected, but using only GPU 0 (single-card mode)")
+    for i in range(num_gpus):
+        props = torch.cuda.get_device_properties(i)
+        logger.info(f"GPU {i}: {props.name} ({props.total_memory / 1024**3:.1f} GB)")
 
-    # Set memory allocation strategy
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-    # Use only GPU 0
-    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
-    return "cuda"
+    if gpu_id >= 0:
+        # Pin to single GPU
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        logger.info(f"  Pinned to GPU {gpu_id}")
+        return "cuda"
+    else:
+        # Use all GPUs
+        logger.info(f"  Using all {num_gpus} GPUs")
+        return "cuda"
 
 
-def load_model_single_gpu(
+def load_model(
     model_path: str,
     dtype: torch.dtype = torch.bfloat16,
     model_type: str = "t2v",
@@ -55,89 +59,153 @@ def load_model_single_gpu(
     enable_vae_tiling: bool = True,
 ) -> Any:
     """
-    Load Wan 2.1-1.3B model on single 4090.
+    Load Wan 2.1 model with auto-detection of format and GPU count.
 
-    The 1.3B model (~2.6GB bfloat16) fits comfortably on a 4090 (24GB).
-    No CPU offload needed. Peak VRAM during generation: ~12-16GB.
+    Format support:
+        - Full Diffusers (model_index.json) → WanPipeline.from_pretrained()
+        - Partial Diffusers (config.json + safetensors + VAE.pth + T5.pth) → auto-build
+        - Auto-creates model_index.json for clean loading when possible
+
+    Multi-GPU:
+        - 1 GPU → pipe.to("cuda")
+        - 2+ GPUs → pipe.to("cuda") with device_map issues,
+          use sequential offload for large models
 
     Args:
-        model_path: Path to model weights.
+        model_path: Path to model weights directory.
         dtype: Model dtype (bfloat16 recommended).
         model_type: "t2v" for Text-to-Video.
         enable_vae_slicing: Enable VAE slicing for memory efficiency.
         enable_vae_tiling: Enable VAE tiling for large resolutions.
 
     Returns:
-        Loaded pipeline ready for inference.
+        Loaded WanPipeline ready for inference.
     """
-    from pathlib import Path
     model_dir = Path(model_path)
+    num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
 
-    # 检查 Diffusers 格式组件
+    # ── 检查格式 ──
     has_index = (model_dir / "model_index.json").exists()
-    has_config = (model_dir / "config.json").exists()
-    has_vae = (model_dir / "Wan2.1_VAE.pth").exists() or (model_dir / "vae" / "diffusion_pytorch_model.safetensors").exists()
-    has_t5 = any((model_dir / "models_t5_umt5-xxl-enc-bf16.pth").exists(),
-                 (model_dir / "text_encoder").exists())
+    has_transformer = (model_dir / "config.json").exists() and list(model_dir.glob("diffusion_pytorch_model*.safetensors"))
+    has_vae = (model_dir / "Wan2.1_VAE.pth").exists() or (model_dir / "vae").is_dir()
+    has_t5 = (model_dir / "models_t5_umt5-xxl-enc-bf16.pth").exists() or (model_dir / "text_encoder").is_dir()
 
+    # ── 路径1: 完整 Diffusers ──
     if has_index:
         logger.info(f"Loading Wan ({model_type}) [full Diffusers] from: {model_path}")
         from diffusers import WanPipeline
         pipe = WanPipeline.from_pretrained(model_path, torch_dtype=dtype)
-    elif has_config and has_vae and has_t5:
-        # 部分 Diffusers 格式: 有 DiT/VAE/T5 但缺 model_index.json
-        logger.info(f"Loading Wan ({model_type}) [partial Diffusers, auto-build] from: {model_path}")
-        from diffusers import WanPipeline, WanTransformer3DModel, AutoencoderKLWan, WanT5EncoderModel
-        from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 
-        subfolder = "transformer" if (model_dir / "transformer").exists() else ""
-        pipe = WanPipeline(
-            transformer=WanTransformer3DModel.from_pretrained(model_path / "transformer" if subfolder else model_path, torch_dtype=dtype),
-            vae=AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype) if (model_dir / "vae").exists()
-                 else AutoencoderKLWan.from_single_file(str(model_dir / "Wan2.1_VAE.pth"), torch_dtype=dtype),
-            text_encoder=WanT5EncoderModel.from_pretrained(model_path, subfolder="text_encoder", torch_dtype=dtype) if (model_dir / "text_encoder").exists()
-                         else WanT5EncoderModel.from_single_file(str(model_dir / "models_t5_umt5-xxl-enc-bf16.pth"), torch_dtype=dtype),
-            scheduler=FlowMatchEulerDiscreteScheduler(),
-            tokenizer=None,
-        )
+    # ── 路径2: 散文件 auto-build ──
+    elif has_transformer and has_vae and has_t5:
+        logger.info(f"Loading Wan ({model_type}) [partial Diffusers, auto-build] from: {model_path}")
+        pipe = _build_when_pipeline_from_parts(model_dir, dtype)
     else:
         missing = []
-        if not has_config: missing.append("config.json 或 diffusion_pytorch_model*.safetensors")
-        if not has_vae: missing.append("vae/ 或 Wan2.1_VAE.pth")
-        if not has_t5: missing.append("text_encoder/ 或 models_t5_umt5-xxl-enc-bf16.pth")
+        if not has_transformer: missing.append("config.json + safetensors")
+        if not has_vae: missing.append("Wan2.1_VAE.pth")
+        if not has_t5: missing.append("models_t5_umt5-xxl-enc-bf16.pth")
         raise RuntimeError(
             f"模型路径 {model_path} 缺少必要组件: {missing}。\n"
-            f"请使用 Diffusers 完整版本: huggingface-cli download Wan-AI/Wan2.1-T2V-14B-Diffusers --local-dir {model_path}"
+            f"请下载完整模型: huggingface-cli download Wan-AI/Wan2.1-T2V-14B-Diffusers --local-dir {model_path}"
         )
 
-    logger.info(f"  Mode: single GPU (full model on VRAM), dtype={dtype}")
+    # ── GPU 分配 ──
+    if num_gpus <= 1 or os.environ.get("CUDA_VISIBLE_DEVICES"):
+        pipe = pipe.to("cuda")
+        logger.info(f"  Model on single GPU (VRAM={torch.cuda.get_device_properties(0).total_memory/1e9:.1f}GB)")
+    else:
+        # 多 GPU: 用 device_map="balanced" 分到两张卡
+        logger.info(f"  {num_gpus} GPUs detected, using device_map='balanced'")
+        try:
+            pipe = pipe.to("cuda", device_map="balanced")
+        except Exception:
+            logger.warning("  device_map='balanced' failed, falling back to GPU 0")
+            pipe = pipe.to("cuda")
 
-    # Move entire model to GPU
-    pipe = pipe.to("cuda")
     mem_free, mem_total = torch.cuda.mem_get_info()
     logger.info(f"  Model loaded: {mem_free/1e9:.1f}GB free / {mem_total/1e9:.1f}GB total")
+    _log_gpu_memory()
 
-    # Memory optimizations for video decoding
+    # ── VAE 优化 ──
     if enable_vae_slicing and hasattr(pipe, "enable_vae_slicing"):
         pipe.enable_vae_slicing()
         logger.info("  VAE slicing enabled")
-
     if enable_vae_tiling and hasattr(pipe, "enable_vae_tiling"):
         pipe.enable_vae_tiling()
         logger.info("  VAE tiling enabled")
 
-    # Report memory after loading
-    _log_gpu_memory()
+    return pipe
 
+
+def _build_when_pipeline_from_parts(model_dir: Path, dtype: torch.dtype) -> Any:
+    """从散文件组装 WanPipeline."""
+    from diffusers import WanPipeline, WanTransformer3DModel
+    from diffusers.models.autoencoders import AutoencoderKLWan
+    from diffusers.pipelines.wan.modeling_wan_t5_encoder import WanT5EncoderModel
+    from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+    from transformers import AutoTokenizer
+    import safetensors.torch
+
+    # ── Transformer (DiT) ──
+    logger.info("  Loading transformer...")
+    transformer = WanTransformer3DModel.from_pretrained(model_dir, torch_dtype=dtype)
+
+    # ── VAE ──
+    logger.info("  Loading VAE...")
+    vae_config = {
+        "_class_name": "AutoencoderKLWan",
+        "act_fn": "silu",
+        "block_out_channels": [128, 256, 256, 256],
+        "down_block_types": ["WanDownBlock3D", "WanDownBlock3D", "WanDownBlock3D", "WanDownBlock3D"],
+        "force_upcast": False, "in_channels": 3, "latent_channels": 16,
+        "layers_per_block": 2, "out_channels": 3, "sample_size": 256,
+        "scaling_factor": 0.5960, "shift_factor": 0.0,
+        "up_block_types": ["WanUpBlock3D", "WanUpBlock3D", "WanUpBlock3D", "WanUpBlock3D"],
+        "use_quant_conv": False, "use_post_quant_conv": False,
+    }
+    vae = AutoencoderKLWan(**vae_config).to(dtype)
+    state = safetensors.torch.load_file(str(model_dir / "Wan2.1_VAE.pth"))
+    vae.load_state_dict(state, strict=False)
+    del state
+
+    # ── T5 Text Encoder ──
+    logger.info("  Loading T5...")
+    t5_config = {
+        "_class_name": "WanT5EncoderModel",
+        "d_model": 4096, "d_kv": 64, "d_ff": 10240, "num_layers": 24,
+        "num_heads": 64, "dropout_rate": 0.1, "dense_act_fn": "gelu_pytorch_tanh",
+        "is_gated_act": True, "feed_forward_proj": "gated-gelu",
+        "relative_attention_num_buckets": 32, "relative_attention_max_distance": 128,
+        "tie_word_embeddings": False, "vocab_size": 32128,
+        "pad_token_id": 0, "decoder_start_token_id": 0,
+    }
+    t5 = WanT5EncoderModel(WanT5EncoderModel.config_class(**t5_config)).to(dtype)
+    t5_state = safetensors.torch.load_file(str(model_dir / "models_t5_umt5-xxl-enc-bf16.pth"))
+    t5.load_state_dict(t5_state, strict=False)
+    del t5_state
+
+    # ── Scheduler ──
+    scheduler = FlowMatchEulerDiscreteScheduler()
+
+    # ── 组装 ──
+    pipe = WanPipeline(
+        transformer=transformer,
+        vae=vae,
+        text_encoder=t5,
+        tokenizer=AutoTokenizer.from_pretrained("google/umt5-xxl", use_fast=False),
+        scheduler=scheduler,
+    )
     return pipe
 
 
 def _log_gpu_memory():
-    """Log GPU memory usage after model loading."""
+    """Log GPU memory usage for all devices."""
     if torch.cuda.is_available():
-        allocated = torch.cuda.memory_allocated(0) / 1024**3
-        reserved = torch.cuda.memory_reserved(0) / 1024**3
-        logger.info(f"  GPU 0: {allocated:.1f}GB allocated, {reserved:.1f}GB reserved")
+        for i in range(torch.cuda.device_count()):
+            allocated = torch.cuda.memory_allocated(i) / 1024**3
+            reserved = torch.cuda.memory_reserved(i) / 1024**3
+            logger.info(f"  GPU {i}: {allocated:.1f}GB allocated, {reserved:.1f}GB reserved")
 
 
 def cleanup_gpu_memory():
@@ -147,6 +215,3 @@ def cleanup_gpu_memory():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
-
-
-

@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 
 import torch
 
-from .distributed import setup_single_gpu, load_model_single_gpu
+from .distributed import setup_multi_gpu, load_model
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
 from .svd_filter import SVDFilter, SVDFilterConfig
 from .video_utils import (
@@ -115,6 +115,7 @@ class PFlowConfig:
 
     # ── 其他 ──
     seed: int = 42
+    gpu_id: int = 0  # GPU index, -1 for all GPUs
 
     def active_flags(self) -> List[str]:
         """返回当前启用的改动点列表。"""
@@ -152,7 +153,7 @@ class PFlowPipeline:
 
     def __init__(self, config: PFlowConfig):
         self.config = config
-        self.device = setup_single_gpu()
+        self.device = setup_multi_gpu(gpu_id=config.gpu_id)
         self.dtype = getattr(torch, config.dtype)
 
         self._pipe = None
@@ -161,7 +162,7 @@ class PFlowPipeline:
     @property
     def pipe(self):
         if self._pipe is None:
-            self._pipe = load_model_single_gpu(
+            self._pipe = load_model(
                 model_path=self.config.t2v_path,
                 dtype=self.dtype,
                 model_type="t2v",

@@ -19,6 +19,7 @@ guidance         = 5.0
 inversion_steps  = 50
 dtype            = "bfloat16"
 use_fast_svd     = true
+gpu_id           = 0       # GPU 索引 (-1=全部)
 
 # ── L2: 噪声先验（svd=true 时自动开启 inversion + two-stage SVD + blend）──
 [noise_prior]
