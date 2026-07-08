@@ -268,6 +268,22 @@ class PFlowPipeline:
                     target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
                 elif cfg.fi_layers in ("last", "late"):
                     target_layers = list(range(2 * num_layers // 3, num_layers))
+                elif cfg.fi_layers.startswith("mid:"):
+                    # mid:N — 从 mid 区间均匀选 N 层 (如 mid:10)
+                    n = int(cfg.fi_layers.split(":")[1])
+                    mid_all = list(range(num_layers // 3, 2 * num_layers // 3))
+                    step = max(1, len(mid_all) // n)
+                    target_layers = mid_all[::step][:n]
+                elif cfg.fi_layers.startswith("early:"):
+                    n = int(cfg.fi_layers.split(":")[1])
+                    early_all = list(range(0, num_layers // 3))
+                    step = max(1, len(early_all) // n)
+                    target_layers = early_all[::step][:n]
+                elif cfg.fi_layers.startswith("last:"):
+                    n = int(cfg.fi_layers.split(":")[1])
+                    last_all = list(range(2 * num_layers // 3, num_layers))
+                    step = max(1, len(last_all) // n)
+                    target_layers = last_all[::step][:n]
                 else:
                     try:
                         target_layers = [int(x.strip()) for x in cfg.fi_layers.split(",")]
@@ -885,6 +901,21 @@ class PFlowPipeline:
             target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
         elif cfg.fi_layers in ("last", "late"):  # late 是 last 的别名
             target_layers = list(range(2 * num_layers // 3, num_layers))
+        elif cfg.fi_layers.startswith("mid:"):
+            n = int(cfg.fi_layers.split(":")[1])
+            mid_all = list(range(num_layers // 3, 2 * num_layers // 3))
+            step = max(1, len(mid_all) // n)
+            target_layers = mid_all[::step][:n]
+        elif cfg.fi_layers.startswith("early:"):
+            n = int(cfg.fi_layers.split(":")[1])
+            early_all = list(range(0, num_layers // 3))
+            step = max(1, len(early_all) // n)
+            target_layers = early_all[::step][:n]
+        elif cfg.fi_layers.startswith("last:"):
+            n = int(cfg.fi_layers.split(":")[1])
+            last_all = list(range(2 * num_layers // 3, num_layers))
+            step = max(1, len(last_all) // n)
+            target_layers = last_all[::step][:n]
         else:
             # 逗号分隔的层号
             try:
