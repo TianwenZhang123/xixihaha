@@ -141,9 +141,15 @@ def load_model(
 def _build_when_pipeline_from_parts(model_dir: Path, dtype: torch.dtype) -> Any:
     """从散文件组装 WanPipeline."""
     from diffusers import WanPipeline, WanTransformer3DModel
-    from diffusers.models.autoencoders import AutoencoderKLWan
-    from diffusers.pipelines.wan.modeling_wan_t5_encoder import WanT5EncoderModel
     from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+    try:
+        from diffusers.models.autoencoders import AutoencoderKLWan
+    except ImportError:
+        from diffusers import AutoencoderKLWan
+    try:
+        from diffusers.pipelines.wan.modeling_wan_t5_encoder import WanT5EncoderModel
+    except ImportError:
+        from diffusers import WanT5EncoderModel
     from transformers import AutoTokenizer
     import safetensors.torch
 
