@@ -75,7 +75,7 @@ def load_model(
     logger.info(f"Loading Wan ({model_type}) from: {model_path}")
     from diffusers import WanPipeline, AutoencoderKLWan
     # 官方建议: VAE 用 float32 保证解码质量, 其余 bfloat16
-    vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=torch.float32)
+    vae = AutoencoderKLWan.from_pretrained(model_path, subfolder="vae", torch_dtype=dtype)
     pipe = WanPipeline.from_pretrained(model_path, vae=vae, torch_dtype=dtype)
 
     # GPU loading (多 GPU 用 device_map，OOM 退到 CPU offload)
