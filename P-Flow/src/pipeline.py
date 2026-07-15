@@ -167,7 +167,46 @@ class PFlowPipeline:
                 dtype=self.dtype,
                 model_type="t2v",
             )
+            # ── VAE 解码显存优化: 解码前将 DiT 卸载到 CPU ──
+            self._patch_vae_decode_for_memory()
         return self._pipe
+
+    def _patch_vae_decode_for_memory(self):
+        """
+        14B 模型在 44GB GPU 上 VAE 解码 OOM 的修复:
+        将 transformer(DiT) 暂时移到 CPU，给 VAE 解码腾出显存。
+        """
+        pipe = self._pipe
+        if pipe is None:
+            return
+
+        original_decode = pipe.vae.decode
+
+        def decode_with_cpu_offload(z, *args, **kwargs):
+            transformer = getattr(pipe, 'transformer', None)
+            moved_to_cpu = False
+            if transformer is not None:
+                try:
+                    # 将 DiT 移到 CPU 释放显存
+                    pipe.transformer = transformer.to("cpu")
+                    moved_to_cpu = True
+                    torch.cuda.empty_cache()
+                    logger.info("  [Memory] DiT offloaded to CPU for VAE decode")
+                except Exception:
+                    pass
+
+            try:
+                result = original_decode(z, *args, **kwargs)
+            finally:
+                # 解码完成后把 DiT 移回 GPU
+                if moved_to_cpu and transformer is not None:
+                    pipe.transformer = transformer.to(self.device)
+                    logger.info("  [Memory] DiT restored to GPU")
+
+            return result
+
+        pipe.vae.decode = decode_with_cpu_offload
+        logger.info("  [Memory] VAE decode patched with DiT CPU offload")
 
     @property
     def vlm_client(self):
@@ -901,21 +940,6 @@ class PFlowPipeline:
             target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
         elif cfg.fi_layers in ("last", "late"):  # late 是 last 的别名
             target_layers = list(range(2 * num_layers // 3, num_layers))
-        elif cfg.fi_layers.startswith("mid:"):
-            n = int(cfg.fi_layers.split(":")[1])
-            mid_all = list(range(num_layers // 3, 2 * num_layers // 3))
-            step = max(1, len(mid_all) // n)
-            target_layers = mid_all[::step][:n]
-        elif cfg.fi_layers.startswith("early:"):
-            n = int(cfg.fi_layers.split(":")[1])
-            early_all = list(range(0, num_layers // 3))
-            step = max(1, len(early_all) // n)
-            target_layers = early_all[::step][:n]
-        elif cfg.fi_layers.startswith("last:"):
-            n = int(cfg.fi_layers.split(":")[1])
-            last_all = list(range(2 * num_layers // 3, num_layers))
-            step = max(1, len(last_all) // n)
-            target_layers = last_all[::step][:n]
         else:
             # 逗号分隔的层号
             try:
