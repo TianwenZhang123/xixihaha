@@ -282,7 +282,11 @@ class PFlowPipeline:
             caption_file = out / "vlm_caption.txt"
             caption_file.write_text(caption, encoding="utf-8")
 
-        # ── Step 3: 计算噪声先验 (如果启用) ──
+        # ── Step 3: 反演 + SVD (如果 SVD 或 FI 任一启用) ──
+        # 统一入口: SVD、FI、SVD+FI 都走反演路径
+        #   - SVD only: 反演→SVD滤波→混合噪声
+        #   - FI only: 反演→inline缓存FI特征→SVD滤波(但不混合)→纯随机噪声生成
+        #   - SVD+FI: 反演→inline缓存FI特征→SVD滤波→混合噪声+FI注入
         eta_temporal = None
         prompt_embeds = None
         ref_latents_enc = None
@@ -290,7 +294,7 @@ class PFlowPipeline:
         fi_ref_features_from_inversion = None
         svd_stats = None
 
-        # ── 构造 FI 配置（SVD+FI 联合 或 FI only 都需要）──
+        # ── 构造 FI 配置 ──
         fi_config_for_inv = None
         if cfg.feature_inject:
             transformer = self.pipe.transformer
@@ -331,10 +335,13 @@ class PFlowPipeline:
                 "max_cache_step": cfg.fi_max_cache_step,
             }
 
-        if cfg.use_svd:
+        # SVD 或 FI 任一启用就走反演（FI only 时 use_svd 标记为 True 仅用于反演入口）
+        need_inversion = cfg.use_svd or cfg.feature_inject
+        if need_inversion:
             need_trajectory = cfg.feature_inject
             cache_every_n = 1
 
+            # 临时启用 SVD 反演路径（FI only 时需要反演但不混合 SVD 噪声）
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion, svd_stats = \
                 self._compute_noise_prior(
                     ref_video, caption,
@@ -343,56 +350,13 @@ class PFlowPipeline:
                     fi_config=fi_config_for_inv,
                 )
 
-        # ── Step 3.5: 轨迹/FI特征缓存 ──
-        ref_trajectory = None
+            # FI only: 反演完成后将 SVD 噪声置空，生成时走纯随机噪声
+            if not cfg.use_svd:
+                eta_temporal = None
+
+        # ── Step 3.5: FI 特征整理（从 inline 缓存中提取，移至CPU） ──
         fi_ref_features = None
         if cfg.feature_inject:
-            if not cfg.use_svd:
-                logger.warning(
-                    "  [FI] feature_inject=True 但 SVD=False, "
-                    "自动启用 inversion 以获取参考特征"
-                )
-
-            # 优先复用反演时已缓存的轨迹（合并模式）
-            if ref_trajectory_from_inversion is not None:
-                ref_trajectory = ref_trajectory_from_inversion
-                logger.info(
-                    f"  [FI] ✅ 复用反演缓存的轨迹 "
-                    f"({len(ref_trajectory)} points), 无需二次反演"
-                )
-            elif ref_latents_enc is not None and prompt_embeds is not None:
-                # 需要单独做反演缓存轨迹（含 inline FI 特征缓存）
-                ref_lat = ref_latents_enc
-                p_emb = prompt_embeds
-                traj_inverter = FlowMatchingInverter(
-                    pipe=self.pipe,
-                    num_inversion_steps=cfg.inversion_steps,
-                    guidance_scale=1.0,
-                    device=self.device,
-                )
-                _, ref_trajectory, fi_ref_features_from_inversion = traj_inverter.invert_with_trajectory(
-                    ref_lat, p_emb, p_emb,
-                    cache_every_n=1,
-                    fi_config=fi_config_for_inv,
-                )
-            else:
-                # 没做过 inversion，现在做一次 encode + embed + 反演（含 inline FI 特征缓存）
-                ref_norm = normalize_video(ref_video).unsqueeze(0)
-                ref_lat = encode_video_to_latents(self.pipe, ref_norm, self.device)
-                p_emb = self._encode_prompt(caption)
-                traj_inverter = FlowMatchingInverter(
-                    pipe=self.pipe,
-                    num_inversion_steps=cfg.inversion_steps,
-                    guidance_scale=1.0,
-                    device=self.device,
-                )
-                _, ref_trajectory, fi_ref_features_from_inversion = traj_inverter.invert_with_trajectory(
-                    ref_lat, p_emb, p_emb,
-                    cache_every_n=1,
-                    fi_config=fi_config_for_inv,
-                )
-
-            # ── Feature Injection: 优先复用反演时 inline 缓存的特征 ──
             if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
                 # 将 inline 缓存的 GPU 特征移到 CPU，释放显存给后续生成
                 fi_ref_features_cpu = {}
@@ -408,18 +372,9 @@ class PFlowPipeline:
                     f"  [FI] ✅ 复用反演时 inline 缓存的特征 (已移至CPU) "
                     f"({len([k for k in fi_ref_features if k != '_meta'])} steps)"
                 )
-            elif ref_trajectory is not None:
-                # Fallback: 用反演轨迹事后缓存特征 (多耗时 ~77s)
-                logger.info(
-                    f"  [FI] inline 缓存不可用，使用反演轨迹事后缓存特征..."
-                )
-                fi_ref_features = self._cache_fi_ref_features(
-                    ref_trajectory,
-                    prompt_embeds if prompt_embeds is not None else self._encode_prompt(caption)
-                )
             else:
                 logger.warning(
-                    "  [FI] ⚠️ feature_inject=True 但无反演轨迹，FI 将不生效"
+                    "  [FI] ⚠️ feature_inject=True 但 inline 缓存为空，FI 将不生效"
                 )
 
 
