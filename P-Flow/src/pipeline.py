@@ -1279,7 +1279,7 @@ class PFlowPipeline:
                         # 第一步: 直接使用原始参考特征
                         # 后续步: h_ref_smooth = ema_decay * prev + (1 - ema_decay) * current
                         if ema_ref_prev[0] is not None and layer_idx in ema_ref_prev[0]:
-                            h_ref_prev = ema_ref_prev[0][layer_idx]
+                            h_ref_prev = ema_ref_prev[0][layer_idx].to(self.device)
                             # 确保形状匹配
                             if h_ref_prev.shape == h_ref_raw.shape:
                                 h_ref_smooth = ema_decay * h_ref_prev + (1.0 - ema_decay) * h_ref_raw
