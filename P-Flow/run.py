@@ -134,7 +134,7 @@ def parse_args():
     p.add_argument("--fi_layers", type=str,
                    default=_cfg(cfg, "fi", "layers", default="mid"))
     p.add_argument("--fi_lambda", type=float,
-                   default=_cfg(cfg, "fi", "lambda", default=0.1))
+                   default=_cfg(cfg, "fi", "lambda", default=0.05))
     p.add_argument("--fi_schedule", type=str,
                    default=_cfg(cfg, "fi", "schedule", default="middle_peak"),
                    choices=["constant", "middle_peak", "warmup_decay", "cosine_decay"])

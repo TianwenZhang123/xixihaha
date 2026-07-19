@@ -84,7 +84,7 @@ class PFlowConfig:
     #   mid: 中间 1/3 层 (layer 10~19, 高语义层)
     #   last: 最后 1/3 层 (layer 20~29, 细节层)
     #   "5,10,15,20": 指定层号
-    fi_lambda: float = 0.1               # FI 注入强度 λ (推荐 0.01~0.3)
+    fi_lambda: float = 0.05              # FI 注入强度 λ (推荐 0.01~0.3)
     # h_injected = h_current + λ * (h_ref - h_current) = (1-λ)*h_current + λ*h_ref
     # λ=0: 无注入, λ=1: 完全替换为参考特征
     fi_schedule: str = "middle_peak"      # λ 调度策略 (同 VDA: middle_peak / warmup_decay / cosine_decay / constant)
