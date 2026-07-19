@@ -289,52 +289,51 @@ class PFlowPipeline:
         ref_trajectory_from_inversion = None
         fi_ref_features_from_inversion = None
         svd_stats = None
+
+        # ── 构造 FI 配置（SVD+FI 联合 或 FI only 都需要）──
+        fi_config_for_inv = None
+        if cfg.feature_inject:
+            transformer = self.pipe.transformer
+            num_layers = len(transformer.blocks) if hasattr(transformer, 'blocks') else 30
+            if cfg.fi_layers == "all":
+                target_layers = list(range(num_layers))
+            elif cfg.fi_layers == "early":
+                target_layers = list(range(0, num_layers // 3))
+            elif cfg.fi_layers == "mid":
+                target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
+            elif cfg.fi_layers in ("last", "late"):
+                target_layers = list(range(2 * num_layers // 3, num_layers))
+            elif cfg.fi_layers.startswith("mid:"):
+                n = int(cfg.fi_layers.split(":")[1])
+                mid_all = list(range(num_layers // 3, 2 * num_layers // 3))
+                step = max(1, len(mid_all) // n)
+                target_layers = mid_all[::step][:n]
+            elif cfg.fi_layers.startswith("early:"):
+                n = int(cfg.fi_layers.split(":")[1])
+                early_all = list(range(0, num_layers // 3))
+                step = max(1, len(early_all) // n)
+                target_layers = early_all[::step][:n]
+            elif cfg.fi_layers.startswith("last:"):
+                n = int(cfg.fi_layers.split(":")[1])
+                last_all = list(range(2 * num_layers // 3, num_layers))
+                step = max(1, len(last_all) // n)
+                target_layers = last_all[::step][:n]
+            else:
+                try:
+                    target_layers = [int(x.strip()) for x in cfg.fi_layers.split(",")]
+                except ValueError:
+                    target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
+            fi_config_for_inv = {
+                "target_layers": target_layers,
+                "cache_mode": cfg.fi_cache_mode,
+                "gen_num_steps": cfg.num_inference_steps,
+                "num_layers": num_layers,
+                "max_cache_step": cfg.fi_max_cache_step,
+            }
+
         if cfg.use_svd:
-            # 判断是否需要在反演时同时缓存轨迹/FI特征
             need_trajectory = cfg.feature_inject
             cache_every_n = 1
-
-            # 构造 FI 配置（如果启用 feature_inject，在反演时同时缓存 DiT 特征）
-            fi_config_for_inv = None
-            if cfg.feature_inject:
-                transformer = self.pipe.transformer
-                num_layers = len(transformer.blocks) if hasattr(transformer, 'blocks') else 30
-                if cfg.fi_layers == "all":
-                    target_layers = list(range(num_layers))
-                elif cfg.fi_layers == "early":
-                    target_layers = list(range(0, num_layers // 3))
-                elif cfg.fi_layers == "mid":
-                    target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
-                elif cfg.fi_layers in ("last", "late"):
-                    target_layers = list(range(2 * num_layers // 3, num_layers))
-                elif cfg.fi_layers.startswith("mid:"):
-                    # mid:N — 从 mid 区间均匀选 N 层 (如 mid:10)
-                    n = int(cfg.fi_layers.split(":")[1])
-                    mid_all = list(range(num_layers // 3, 2 * num_layers // 3))
-                    step = max(1, len(mid_all) // n)
-                    target_layers = mid_all[::step][:n]
-                elif cfg.fi_layers.startswith("early:"):
-                    n = int(cfg.fi_layers.split(":")[1])
-                    early_all = list(range(0, num_layers // 3))
-                    step = max(1, len(early_all) // n)
-                    target_layers = early_all[::step][:n]
-                elif cfg.fi_layers.startswith("last:"):
-                    n = int(cfg.fi_layers.split(":")[1])
-                    last_all = list(range(2 * num_layers // 3, num_layers))
-                    step = max(1, len(last_all) // n)
-                    target_layers = last_all[::step][:n]
-                else:
-                    try:
-                        target_layers = [int(x.strip()) for x in cfg.fi_layers.split(",")]
-                    except ValueError:
-                        target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
-                fi_config_for_inv = {
-                    "target_layers": target_layers,
-                    "cache_mode": cfg.fi_cache_mode,
-                    "gen_num_steps": cfg.num_inference_steps,
-                    "num_layers": num_layers,
-                    "max_cache_step": cfg.fi_max_cache_step,
-                }
 
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion, svd_stats = \
                 self._compute_noise_prior(
@@ -362,7 +361,7 @@ class PFlowPipeline:
                     f"({len(ref_trajectory)} points), 无需二次反演"
                 )
             elif ref_latents_enc is not None and prompt_embeds is not None:
-                # 需要单独做反演缓存轨迹
+                # 需要单独做反演缓存轨迹（含 inline FI 特征缓存）
                 ref_lat = ref_latents_enc
                 p_emb = prompt_embeds
                 traj_inverter = FlowMatchingInverter(
@@ -371,12 +370,13 @@ class PFlowPipeline:
                     guidance_scale=1.0,
                     device=self.device,
                 )
-                _, ref_trajectory, _ = traj_inverter.invert_with_trajectory(
+                _, ref_trajectory, fi_ref_features_from_inversion = traj_inverter.invert_with_trajectory(
                     ref_lat, p_emb, p_emb,
                     cache_every_n=1,
+                    fi_config=fi_config_for_inv,
                 )
             else:
-                # 没做过 inversion，现在做一次 encode + embed + 反演
+                # 没做过 inversion，现在做一次 encode + embed + 反演（含 inline FI 特征缓存）
                 ref_norm = normalize_video(ref_video).unsqueeze(0)
                 ref_lat = encode_video_to_latents(self.pipe, ref_norm, self.device)
                 p_emb = self._encode_prompt(caption)
@@ -386,9 +386,10 @@ class PFlowPipeline:
                     guidance_scale=1.0,
                     device=self.device,
                 )
-                _, ref_trajectory, _ = traj_inverter.invert_with_trajectory(
+                _, ref_trajectory, fi_ref_features_from_inversion = traj_inverter.invert_with_trajectory(
                     ref_lat, p_emb, p_emb,
                     cache_every_n=1,
+                    fi_config=fi_config_for_inv,
                 )
 
             # ── Feature Injection: 优先复用反演时 inline 缓存的特征 ──
@@ -1099,14 +1100,15 @@ class PFlowPipeline:
             num_steps, cfg.fi_lambda, cfg.fi_schedule
         )
 
-        # ── 质量门控 ──
+        # ── 质量门控 (仅在 SVD+FI 联合时生效，依赖 SVD 噪声) ──
         quality_scale = 1.0
-        if cfg.fi_quality_gate:
+        if cfg.fi_quality_gate and cfg.use_svd:
             eta_for_qs = self._eta_temporal_full if self._eta_temporal_full is not None else eta_temporal
-            quality_scale = self._compute_quality_scale(eta_for_qs)
-            if quality_scale < 1e-6:
-                logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
-                return self._generate(prompt, latents, generator)
+            if eta_for_qs is not None:
+                quality_scale = self._compute_quality_scale(eta_for_qs)
+                if quality_scale < 1e-6:
+                    logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
+                    return self._generate(prompt, latents, generator)
 
         logger.info(
             f"  [FI] λ_max={cfg.fi_lambda:.4f}, "
