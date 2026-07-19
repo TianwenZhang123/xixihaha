@@ -394,9 +394,18 @@ class PFlowPipeline:
 
             # ── Feature Injection: 优先复用反演时 inline 缓存的特征 ──
             if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
-                fi_ref_features = fi_ref_features_from_inversion
+                # 将 inline 缓存的 GPU 特征移到 CPU，释放显存给后续生成
+                fi_ref_features_cpu = {}
+                for key, val in fi_ref_features_from_inversion.items():
+                    if key == "_meta":
+                        fi_ref_features_cpu[key] = val
+                    elif isinstance(val, dict):
+                        fi_ref_features_cpu[key] = {
+                            layer: tensor.cpu() for layer, tensor in val.items()
+                        }
+                fi_ref_features = fi_ref_features_cpu
                 logger.info(
-                    f"  [FI] ✅ 复用反演时 inline 缓存的特征 "
+                    f"  [FI] ✅ 复用反演时 inline 缓存的特征 (已移至CPU) "
                     f"({len([k for k in fi_ref_features if k != '_meta'])} steps)"
                 )
             elif ref_trajectory is not None:
