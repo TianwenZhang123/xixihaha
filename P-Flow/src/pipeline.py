@@ -1290,10 +1290,10 @@ class PFlowPipeline:
 
                         current_ref[0][layer_idx] = h_ref_smooth
 
-                # 更新 EMA 缓存 (detach 避免计算图增长)
+                # 更新 EMA 缓存 (detach 避免计算图增长，移至CPU释放显存)
                 if current_ref[0]:
                     ema_ref_prev[0] = {
-                        layer_idx: feat.detach()
+                        layer_idx: feat.detach().cpu()
                         for layer_idx, feat in current_ref[0].items()
                     }
 
