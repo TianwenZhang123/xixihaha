@@ -350,16 +350,30 @@ class PFlowPipeline:
                     fi_config=fi_config_for_inv,
                 )
 
-            # FI only: 反演完成后释放 SVD 噪声和中间变量（FI 特征留 GPU，与 SVD+FI 一致）
+            # FI only: 反演完成后释放 SVD 中间变量，FI 特征移 CPU
             if not cfg.use_svd:
+                logger.info("  [FI only] 开始释放 SVD 中间变量...")
+                gpu_before = torch.cuda.memory_allocated() / 1e9
                 eta_temporal = None
                 svd_stats = None
                 eta_inv_raw = None
                 ref_latents_enc = None
                 ref_trajectory_from_inversion = None
+                # FI 特征移 CPU（A800 80GB 装不下 100GB FI + 38GB 模型）
+                fi_gpu_gb = 0.0
+                if fi_ref_features_from_inversion is not None:
+                    for key, val in fi_ref_features_from_inversion.items():
+                        if key != "_meta" and isinstance(val, dict):
+                            for layer, tensor in val.items():
+                                fi_gpu_gb += tensor.numel() * tensor.element_size() / 1e9
+                                val[layer] = tensor.cpu()
                 import gc; gc.collect()
                 torch.cuda.empty_cache()
-                logger.info("  [FI only] SVD 中间变量已释放，FI 特征留 GPU")
+                gpu_after = torch.cuda.memory_allocated() / 1e9
+                logger.info(
+                    f"  [FI only] 释放完成: GPU {gpu_before:.1f}GB → {gpu_after:.1f}GB "
+                    f"({fi_gpu_gb:.1f}GB FI特征 → CPU, 剩余={gpu_after:.1f}GB)"
+                )
 
         # ── Step 3.5: FI 特征整理 ──
         fi_ref_features = None
@@ -413,7 +427,14 @@ class PFlowPipeline:
             else:
                 gen_video = self._generate(current_prompt, latents, generator)
             video_path_i = str(out / f"iter_{i:02d}.mp4")
+            gpu_before_save = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"  [Save] 开始保存视频，GPU已分配: {gpu_before_save:.1f}GB")
             save_video_tensor(gen_video, video_path_i, fps=cfg.fps)
+            gpu_after_save = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"  [Save] 保存完成，GPU已分配: {gpu_after_save:.1f}GB")
+            # 释放生成视频的 GPU tensor
+            del gen_video
+            torch.cuda.empty_cache()
 
             results.append({
                 "iteration": i,
@@ -1232,7 +1253,7 @@ class PFlowPipeline:
                         # 第一步: 直接使用原始参考特征
                         # 后续步: h_ref_smooth = ema_decay * prev + (1 - ema_decay) * current
                         if ema_ref_prev[0] is not None and layer_idx in ema_ref_prev[0]:
-                            h_ref_prev = ema_ref_prev[0][layer_idx]
+                            h_ref_prev = ema_ref_prev[0][layer_idx].to(self.device)
                             # 确保形状匹配
                             if h_ref_prev.shape == h_ref_raw.shape:
                                 h_ref_smooth = ema_decay * h_ref_prev + (1.0 - ema_decay) * h_ref_raw
@@ -1243,12 +1264,16 @@ class PFlowPipeline:
 
                         current_ref[0][layer_idx] = h_ref_smooth
 
-                # 更新 EMA 缓存 (detach 避免计算图增长)
+                # 更新 EMA 缓存 (detach 避免计算图增长，移CPU节省显存)
                 if current_ref[0]:
                     ema_ref_prev[0] = {
-                        layer_idx: feat.detach()
+                        layer_idx: feat.detach().cpu()
                         for layer_idx, feat in current_ref[0].items()
                     }
+                    # 释放当前步的 GPU 特征（已被 EMA 缓存，不再需要）
+                    for feat in current_ref[0].values():
+                        del feat
+                    current_ref[0] = {}
 
                 # ── 更新 FI 步级统计 ──
                 if current_ref[0]:
@@ -1297,7 +1322,11 @@ class PFlowPipeline:
             if latents is not None:
                 kwargs["latents"] = latents
 
+            gpu_before_gen = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"  [FI Gen] 开始 pipe() 调用，GPU已分配: {gpu_before_gen:.1f}GB")
             output = self.pipe(**kwargs)
+            gpu_after_gen = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"  [FI Gen] pipe() 完成，GPU已分配: {gpu_after_gen:.1f}GB")
 
         finally:
             # 移除所有 hook
