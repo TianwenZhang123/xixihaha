@@ -350,26 +350,24 @@ class PFlowPipeline:
                     fi_config=fi_config_for_inv,
                 )
 
-            # FI only: 反演完成后将 SVD 噪声置空，生成时走纯随机噪声
+            # FI only: 反演完成后释放 SVD 噪声和中间变量（FI 特征留 GPU，与 SVD+FI 一致）
             if not cfg.use_svd:
                 eta_temporal = None
+                svd_stats = None
+                eta_inv_raw = None
+                ref_latents_enc = None
+                ref_trajectory_from_inversion = None
+                import gc; gc.collect()
+                torch.cuda.empty_cache()
+                logger.info("  [FI only] SVD 中间变量已释放，FI 特征留 GPU")
 
-        # ── Step 3.5: FI 特征整理（从 inline 缓存中提取，移至CPU） ──
+        # ── Step 3.5: FI 特征整理 ──
         fi_ref_features = None
         if cfg.feature_inject:
             if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
-                # 将 inline 缓存的 GPU 特征移到 CPU，释放显存给后续生成
-                fi_ref_features_cpu = {}
-                for key, val in fi_ref_features_from_inversion.items():
-                    if key == "_meta":
-                        fi_ref_features_cpu[key] = val
-                    elif isinstance(val, dict):
-                        fi_ref_features_cpu[key] = {
-                            layer: tensor.cpu() for layer, tensor in val.items()
-                        }
-                fi_ref_features = fi_ref_features_cpu
+                fi_ref_features = fi_ref_features_from_inversion
                 logger.info(
-                    f"  [FI] ✅ 复用反演时 inline 缓存的特征 (已移至CPU) "
+                    f"  [FI] ✅ 复用反演时 inline 缓存的特征 "
                     f"({len([k for k in fi_ref_features if k != '_meta'])} steps)"
                 )
             else:
@@ -1234,7 +1232,7 @@ class PFlowPipeline:
                         # 第一步: 直接使用原始参考特征
                         # 后续步: h_ref_smooth = ema_decay * prev + (1 - ema_decay) * current
                         if ema_ref_prev[0] is not None and layer_idx in ema_ref_prev[0]:
-                            h_ref_prev = ema_ref_prev[0][layer_idx].to(self.device)
+                            h_ref_prev = ema_ref_prev[0][layer_idx]
                             # 确保形状匹配
                             if h_ref_prev.shape == h_ref_raw.shape:
                                 h_ref_smooth = ema_decay * h_ref_prev + (1.0 - ema_decay) * h_ref_raw
@@ -1245,10 +1243,10 @@ class PFlowPipeline:
 
                         current_ref[0][layer_idx] = h_ref_smooth
 
-                # 更新 EMA 缓存 (detach 避免计算图增长，移至CPU释放显存)
+                # 更新 EMA 缓存 (detach 避免计算图增长)
                 if current_ref[0]:
                     ema_ref_prev[0] = {
-                        layer_idx: feat.detach().cpu()
+                        layer_idx: feat.detach()
                         for layer_idx, feat in current_ref[0].items()
                     }
 
