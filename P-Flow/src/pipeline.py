@@ -335,22 +335,24 @@ class PFlowPipeline:
                 "max_cache_step": cfg.fi_max_cache_step,
             }
 
-        # SVD 或 FI 任一启用就走反演（FI only 时 use_svd 标记为 True 仅用于反演入口）
+        # SVD 或 FI 任一启用就走反演
         need_inversion = cfg.use_svd or cfg.feature_inject
         if need_inversion:
             need_trajectory = cfg.feature_inject
             cache_every_n = 1
 
-            # 临时启用 SVD 反演路径（FI only 时需要反演但不混合 SVD 噪声）
+            # FI only: 反演时不缓存 inline FI 特征（事后从轨迹缓存到CPU，避免OOM）
+            fi_config_for_inv_only = fi_config_for_inv if cfg.use_svd else None
+
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion, svd_stats = \
                 self._compute_noise_prior(
                     ref_video, caption,
                     cache_trajectory=need_trajectory,
                     cache_every_n=cache_every_n,
-                    fi_config=fi_config_for_inv,
+                    fi_config=fi_config_for_inv_only,
                 )
 
-            # FI only: 反演完成后释放 SVD 中间变量，FI 特征移 CPU
+            # FI only: 释放 SVD 中间变量，走事后缓存（特征直接存CPU）
             if not cfg.use_svd:
                 logger.info("  [FI only] 开始释放 SVD 中间变量...")
                 gpu_before = torch.cuda.memory_allocated() / 1e9
@@ -358,35 +360,43 @@ class PFlowPipeline:
                 svd_stats = None
                 eta_inv_raw = None
                 ref_latents_enc = None
-                ref_trajectory_from_inversion = None
-                # FI 特征移 CPU（A800 80GB 装不下 100GB FI + 38GB 模型）
-                fi_gpu_gb = 0.0
-                if fi_ref_features_from_inversion is not None:
-                    for key, val in fi_ref_features_from_inversion.items():
-                        if key != "_meta" and isinstance(val, dict):
-                            for layer, tensor in val.items():
-                                fi_gpu_gb += tensor.numel() * tensor.element_size() / 1e9
-                                val[layer] = tensor.cpu()
+                # 保留 ref_trajectory_from_inversion 用于事后缓存
                 import gc; gc.collect()
                 torch.cuda.empty_cache()
                 gpu_after = torch.cuda.memory_allocated() / 1e9
                 logger.info(
-                    f"  [FI only] 释放完成: GPU {gpu_before:.1f}GB → {gpu_after:.1f}GB "
-                    f"({fi_gpu_gb:.1f}GB FI特征 → CPU, 剩余={gpu_after:.1f}GB)"
+                    f"  [FI only] SVD释放: GPU {gpu_before:.1f}GB → {gpu_after:.1f}GB"
                 )
 
         # ── Step 3.5: FI 特征整理 ──
         fi_ref_features = None
         if cfg.feature_inject:
+            # SVD+FI: inline 缓存的特征（GPU）
             if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
                 fi_ref_features = fi_ref_features_from_inversion
                 logger.info(
                     f"  [FI] ✅ 复用反演时 inline 缓存的特征 "
                     f"({len([k for k in fi_ref_features if k != '_meta'])} steps)"
                 )
+            # FI only: 事后从轨迹缓存特征（直接存CPU，避免OOM）
+            elif ref_trajectory_from_inversion is not None:
+                logger.info(
+                    f"  [FI only] inline缓存跳过，使用反演轨迹事后缓存特征..."
+                )
+                fi_ref_features = self._cache_fi_ref_features(
+                    ref_trajectory_from_inversion,
+                    prompt_embeds if prompt_embeds is not None else self._encode_prompt(caption)
+                )
+                # 事后缓存的特征已在 CPU，释放轨迹
+                ref_trajectory_from_inversion = None
+                import gc; gc.collect()
+                torch.cuda.empty_cache()
+                logger.info(
+                    f"  [FI only] 事后缓存完成，GPU: {torch.cuda.memory_allocated() / 1e9:.1f}GB"
+                )
             else:
                 logger.warning(
-                    "  [FI] ⚠️ feature_inject=True 但 inline 缓存为空，FI 将不生效"
+                    "  [FI] ⚠️ feature_inject=True 但无特征缓存，FI 将不生效"
                 )
 
 
