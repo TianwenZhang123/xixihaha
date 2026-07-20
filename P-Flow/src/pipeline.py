@@ -934,6 +934,21 @@ class PFlowPipeline:
             target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
         elif cfg.fi_layers in ("last", "late"):  # late 是 last 的别名
             target_layers = list(range(2 * num_layers // 3, num_layers))
+        elif cfg.fi_layers.startswith("mid:"):
+            n = int(cfg.fi_layers.split(":")[1])
+            mid_all = list(range(num_layers // 3, 2 * num_layers // 3))
+            step = max(1, len(mid_all) // n)
+            target_layers = mid_all[::step][:n]
+        elif cfg.fi_layers.startswith("early:"):
+            n = int(cfg.fi_layers.split(":")[1])
+            early_all = list(range(0, num_layers // 3))
+            step = max(1, len(early_all) // n)
+            target_layers = early_all[::step][:n]
+        elif cfg.fi_layers.startswith("last:"):
+            n = int(cfg.fi_layers.split(":")[1])
+            last_all = list(range(2 * num_layers // 3, num_layers))
+            step = max(1, len(last_all) // n)
+            target_layers = last_all[::step][:n]
         else:
             # 逗号分隔的层号
             try:
@@ -1007,10 +1022,13 @@ class PFlowPipeline:
                         return_dict=False,
                     )
 
-                # 保存捕获的特征
+                # 保存捕获的特征（立即移 CPU，避免 GPU OOM）
                 ref_features[step_idx] = {}
                 for layer_idx, feat in captured_features.items():
-                    ref_features[step_idx][layer_idx] = feat
+                    ref_features[step_idx][layer_idx] = feat.cpu()
+                captured_features.clear()
+                del z_ref, t_tensor
+                torch.cuda.empty_cache()
 
                 if step_idx % 5 == 0:
                     logger.info(
