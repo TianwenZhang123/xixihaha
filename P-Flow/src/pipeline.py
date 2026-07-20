@@ -84,7 +84,7 @@ class PFlowConfig:
     #   mid: 中间 1/3 层 (layer 10~19, 高语义层)
     #   last: 最后 1/3 层 (layer 20~29, 细节层)
     #   "5,10,15,20": 指定层号
-    fi_lambda: float = 0.05              # FI 注入强度 λ (推荐 0.01~0.3)
+    fi_lambda: float = 0.1               # FI 注入强度 λ (推荐 0.01~0.3)
     # h_injected = h_current + λ * (h_ref - h_current) = (1-λ)*h_current + λ*h_ref
     # λ=0: 无注入, λ=1: 完全替换为参考特征
     fi_schedule: str = "middle_peak"      # λ 调度策略 (同 VDA: middle_peak / warmup_decay / cosine_decay / constant)
@@ -167,46 +167,7 @@ class PFlowPipeline:
                 dtype=self.dtype,
                 model_type="t2v",
             )
-            # ── VAE 解码显存优化: 解码前将 DiT 卸载到 CPU ──
-            self._patch_vae_decode_for_memory()
         return self._pipe
-
-    def _patch_vae_decode_for_memory(self):
-        """
-        14B 模型在 44GB GPU 上 VAE 解码 OOM 的修复:
-        将 transformer(DiT) 暂时移到 CPU，给 VAE 解码腾出显存。
-        """
-        pipe = self._pipe
-        if pipe is None:
-            return
-
-        original_decode = pipe.vae.decode
-
-        def decode_with_cpu_offload(z, *args, **kwargs):
-            transformer = getattr(pipe, 'transformer', None)
-            moved_to_cpu = False
-            if transformer is not None:
-                try:
-                    # 将 DiT 移到 CPU 释放显存
-                    pipe.transformer = transformer.to("cpu")
-                    moved_to_cpu = True
-                    torch.cuda.empty_cache()
-                    logger.info("  [Memory] DiT offloaded to CPU for VAE decode")
-                except Exception:
-                    pass
-
-            try:
-                result = original_decode(z, *args, **kwargs)
-            finally:
-                # 解码完成后把 DiT 移回 GPU
-                if moved_to_cpu and transformer is not None:
-                    pipe.transformer = transformer.to(self.device)
-                    logger.info("  [Memory] DiT restored to GPU")
-
-            return result
-
-        pipe.vae.decode = decode_with_cpu_offload
-        logger.info("  [Memory] VAE decode patched with DiT CPU offload")
 
     @property
     def vlm_client(self):
@@ -282,11 +243,7 @@ class PFlowPipeline:
             caption_file = out / "vlm_caption.txt"
             caption_file.write_text(caption, encoding="utf-8")
 
-        # ── Step 3: 反演 + SVD (如果 SVD 或 FI 任一启用) ──
-        # 统一入口: SVD、FI、SVD+FI 都走反演路径
-        #   - SVD only: 反演→SVD滤波→混合噪声
-        #   - FI only: 反演→inline缓存FI特征→SVD滤波(但不混合)→纯随机噪声生成
-        #   - SVD+FI: 反演→inline缓存FI特征→SVD滤波→混合噪声+FI注入
+        # ── Step 3: 计算噪声先验 (SVD 或 FI 任一启用就走反演) ──
         eta_temporal = None
         prompt_embeds = None
         ref_latents_enc = None
@@ -294,7 +251,7 @@ class PFlowPipeline:
         fi_ref_features_from_inversion = None
         svd_stats = None
 
-        # ── 构造 FI 配置 ──
+        # 构造 FI 配置
         fi_config_for_inv = None
         if cfg.feature_inject:
             transformer = self.pipe.transformer
@@ -335,68 +292,97 @@ class PFlowPipeline:
                 "max_cache_step": cfg.fi_max_cache_step,
             }
 
-        # SVD 或 FI 任一启用就走反演
+        # SVD 或 FI 任一启用：走反演 + inline FI 缓存（与 SVD+FI 完全一致）
         need_inversion = cfg.use_svd or cfg.feature_inject
         if need_inversion:
             need_trajectory = cfg.feature_inject
             cache_every_n = 1
-
-            # FI only: 反演时不缓存 inline FI 特征（事后从轨迹缓存到CPU，避免OOM）
-            fi_config_for_inv_only = fi_config_for_inv if cfg.use_svd else None
 
             eta_temporal, eta_inv_raw, ref_latents_enc, prompt_embeds, ref_trajectory_from_inversion, fi_ref_features_from_inversion, svd_stats = \
                 self._compute_noise_prior(
                     ref_video, caption,
                     cache_trajectory=need_trajectory,
                     cache_every_n=cache_every_n,
-                    fi_config=fi_config_for_inv_only,
+                    fi_config=fi_config_for_inv,
                 )
 
-            # FI only: 释放 SVD 中间变量，走事后缓存（特征直接存CPU）
+            # FI only: 反演完成后将 SVD 噪声置空，生成时走纯随机噪声
             if not cfg.use_svd:
-                logger.info("  [FI only] 开始释放 SVD 中间变量...")
                 gpu_before = torch.cuda.memory_allocated() / 1e9
+                logger.info(f"  [FI only] 反演完成，GPU已分配: {gpu_before:.1f}GB")
                 eta_temporal = None
-                svd_stats = None
+                # 释放 SVD 中间变量
                 eta_inv_raw = None
                 ref_latents_enc = None
-                # 保留 ref_trajectory_from_inversion 用于事后缓存
+                ref_trajectory_from_inversion = None
+                svd_stats = None
                 import gc; gc.collect()
                 torch.cuda.empty_cache()
                 gpu_after = torch.cuda.memory_allocated() / 1e9
-                logger.info(
-                    f"  [FI only] SVD释放: GPU {gpu_before:.1f}GB → {gpu_after:.1f}GB"
-                )
+                logger.info(f"  [FI only] SVD变量释放后，GPU: {gpu_before:.1f}GB → {gpu_after:.1f}GB")
+            else:
+                logger.info(f"  [SVD+FI] 反演+SVD完成，GPU已分配: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
 
         # ── Step 3.5: FI 特征整理 ──
+        ref_trajectory = None
         fi_ref_features = None
         if cfg.feature_inject:
-            # SVD+FI: inline 缓存的特征（GPU）
+            # 复用反演时 inline 缓存的特征（SVD+FI 和 FI only 统一路径）
+            if ref_trajectory_from_inversion is not None:
+                ref_trajectory = ref_trajectory_from_inversion
+                logger.info(
+                    f"  [FI] ✅ 复用反演缓存的轨迹 "
+                    f"({len(ref_trajectory)} points), 无需二次反演"
+                )
+            elif ref_latents_enc is not None and prompt_embeds is not None:
+                # 需要单独做反演缓存轨迹
+                ref_lat = ref_latents_enc
+                p_emb = prompt_embeds
+                traj_inverter = FlowMatchingInverter(
+                    pipe=self.pipe,
+                    num_inversion_steps=cfg.inversion_steps,
+                    guidance_scale=1.0,
+                    device=self.device,
+                )
+                _, ref_trajectory, _ = traj_inverter.invert_with_trajectory(
+                    ref_lat, p_emb, p_emb,
+                    cache_every_n=1,
+                )
+            else:
+                # 没做过 inversion，现在做一次 encode + embed + 反演
+                ref_norm = normalize_video(ref_video).unsqueeze(0)
+                ref_lat = encode_video_to_latents(self.pipe, ref_norm, self.device)
+                p_emb = self._encode_prompt(caption)
+                traj_inverter = FlowMatchingInverter(
+                    pipe=self.pipe,
+                    num_inversion_steps=cfg.inversion_steps,
+                    guidance_scale=1.0,
+                    device=self.device,
+                )
+                _, ref_trajectory, _ = traj_inverter.invert_with_trajectory(
+                    ref_lat, p_emb, p_emb,
+                    cache_every_n=1,
+                )
+
+            # ── Feature Injection: 优先复用反演时 inline 缓存的特征 ──
             if fi_ref_features_from_inversion is not None and len(fi_ref_features_from_inversion) > 1:
                 fi_ref_features = fi_ref_features_from_inversion
                 logger.info(
                     f"  [FI] ✅ 复用反演时 inline 缓存的特征 "
                     f"({len([k for k in fi_ref_features if k != '_meta'])} steps)"
                 )
-            # FI only: 事后从轨迹缓存特征（直接存CPU，避免OOM）
-            elif ref_trajectory_from_inversion is not None:
+            elif ref_trajectory is not None:
+                # Fallback: 用反演轨迹事后缓存特征 (多耗时 ~77s)
                 logger.info(
-                    f"  [FI only] inline缓存跳过，使用反演轨迹事后缓存特征..."
+                    f"  [FI] inline 缓存不可用，使用反演轨迹事后缓存特征..."
                 )
                 fi_ref_features = self._cache_fi_ref_features(
-                    ref_trajectory_from_inversion,
+                    ref_trajectory,
                     prompt_embeds if prompt_embeds is not None else self._encode_prompt(caption)
-                )
-                # 事后缓存的特征已在 CPU，释放轨迹
-                ref_trajectory_from_inversion = None
-                import gc; gc.collect()
-                torch.cuda.empty_cache()
-                logger.info(
-                    f"  [FI only] 事后缓存完成，GPU: {torch.cuda.memory_allocated() / 1e9:.1f}GB"
                 )
             else:
                 logger.warning(
-                    "  [FI] ⚠️ feature_inject=True 但无特征缓存，FI 将不生效"
+                    "  [FI] ⚠️ feature_inject=True 但无反演轨迹，FI 将不生效"
                 )
 
 
@@ -428,6 +414,8 @@ class PFlowPipeline:
             )
 
             # 生成视频（FI / 标准）
+            gpu_before_gen = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"  [Gen] 开始生成，GPU已分配: {gpu_before_gen:.1f}GB")
             if cfg.feature_inject and fi_ref_features is not None:
                 gen_video = self._generate_with_fi(
                     current_prompt, latents, generator,
@@ -436,13 +424,14 @@ class PFlowPipeline:
                 )
             else:
                 gen_video = self._generate(current_prompt, latents, generator)
+            gpu_after_gen = torch.cuda.memory_allocated() / 1e9
+            logger.info(f"  [Gen] 生成完成，GPU已分配: {gpu_after_gen:.1f}GB")
             video_path_i = str(out / f"iter_{i:02d}.mp4")
             gpu_before_save = torch.cuda.memory_allocated() / 1e9
-            logger.info(f"  [Save] 开始保存视频，GPU已分配: {gpu_before_save:.1f}GB")
+            logger.info(f"  [Save] 开始保存，GPU: {gpu_before_save:.1f}GB")
             save_video_tensor(gen_video, video_path_i, fps=cfg.fps)
             gpu_after_save = torch.cuda.memory_allocated() / 1e9
-            logger.info(f"  [Save] 保存完成，GPU已分配: {gpu_after_save:.1f}GB")
-            # 释放生成视频的 GPU tensor
+            logger.info(f"  [Save] 保存完成，GPU: {gpu_after_save:.1f}GB")
             del gen_video
             torch.cuda.empty_cache()
 
@@ -934,21 +923,6 @@ class PFlowPipeline:
             target_layers = list(range(num_layers // 3, 2 * num_layers // 3))
         elif cfg.fi_layers in ("last", "late"):  # late 是 last 的别名
             target_layers = list(range(2 * num_layers // 3, num_layers))
-        elif cfg.fi_layers.startswith("mid:"):
-            n = int(cfg.fi_layers.split(":")[1])
-            mid_all = list(range(num_layers // 3, 2 * num_layers // 3))
-            step = max(1, len(mid_all) // n)
-            target_layers = mid_all[::step][:n]
-        elif cfg.fi_layers.startswith("early:"):
-            n = int(cfg.fi_layers.split(":")[1])
-            early_all = list(range(0, num_layers // 3))
-            step = max(1, len(early_all) // n)
-            target_layers = early_all[::step][:n]
-        elif cfg.fi_layers.startswith("last:"):
-            n = int(cfg.fi_layers.split(":")[1])
-            last_all = list(range(2 * num_layers // 3, num_layers))
-            step = max(1, len(last_all) // n)
-            target_layers = last_all[::step][:n]
         else:
             # 逗号分隔的层号
             try:
@@ -974,7 +948,6 @@ class PFlowPipeline:
                     captured_features[layer_idx] = output[0].detach().cpu()
                 else:
                     captured_features[layer_idx] = output.detach().cpu()
-                logger.debug(f"  [FI Cache hook] layer={layer_idx}, output type={type(output).__name__}")
             return hook_fn
 
         # 注册 hook
@@ -983,8 +956,17 @@ class PFlowPipeline:
         for layer_idx in target_layers:
             if layer_idx < len(blocks):
                 block = blocks[layer_idx]
-                # Hook block 整体输出（Wan2.1 block 结构复杂，直接 hook block 最可靠）
-                h = block.register_forward_hook(make_hook(layer_idx))
+                # Hook 在 block 的前向传播之后
+                # Wan2.1 DiT block 结构: self-attn → cross-attn → ffn
+                # 我们 hook cross-attn 输出 (如果 cache_mode=attention)
+                # 或者 block 整体输出 (如果 cache_mode=hidden)
+                if cfg.fi_cache_mode == "attention" and hasattr(block, 'cross_attn'):
+                    h = block.cross_attn.register_forward_hook(make_hook(layer_idx))
+                elif cfg.fi_cache_mode == "mlp" and hasattr(block, 'ffn'):
+                    h = block.ffn.register_forward_hook(make_hook(layer_idx))
+                else:
+                    # fallback: hook 整个 block
+                    h = block.register_forward_hook(make_hook(layer_idx))
                 hooks.append(h)
 
         try:
@@ -1014,13 +996,10 @@ class PFlowPipeline:
                         return_dict=False,
                     )
 
-                # 保存捕获的特征（立即移 CPU，避免 GPU OOM）
+                # 保存捕获的特征
                 ref_features[step_idx] = {}
                 for layer_idx, feat in captured_features.items():
-                    ref_features[step_idx][layer_idx] = feat.cpu()
-                captured_features.clear()
-                del z_ref, t_tensor
-                torch.cuda.empty_cache()
+                    ref_features[step_idx][layer_idx] = feat
 
                 if step_idx % 5 == 0:
                     logger.info(
@@ -1103,15 +1082,14 @@ class PFlowPipeline:
             num_steps, cfg.fi_lambda, cfg.fi_schedule
         )
 
-        # ── 质量门控 (仅在 SVD+FI 联合时生效，依赖 SVD 噪声) ──
+        # ── 质量门控 ──
         quality_scale = 1.0
-        if cfg.fi_quality_gate and cfg.use_svd:
+        if cfg.fi_quality_gate:
             eta_for_qs = self._eta_temporal_full if self._eta_temporal_full is not None else eta_temporal
-            if eta_for_qs is not None:
-                quality_scale = self._compute_quality_scale(eta_for_qs)
-                if quality_scale < 1e-6:
-                    logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
-                    return self._generate(prompt, latents, generator)
+            quality_scale = self._compute_quality_scale(eta_for_qs)
+            if quality_scale < 1e-6:
+                logger.info(f"  [FI] 质量门控 scale≈0, 跳过 FI, 走标准生成")
+                return self._generate(prompt, latents, generator)
 
         logger.info(
             f"  [FI] λ_max={cfg.fi_lambda:.4f}, "
@@ -1338,16 +1316,7 @@ class PFlowPipeline:
             if latents is not None:
                 kwargs["latents"] = latents
 
-            gpu_before_gen = torch.cuda.memory_allocated() / 1e9
-            logger.info(f"  [FI Gen] 开始 pipe() 调用，GPU已分配: {gpu_before_gen:.1f}GB")
             output = self.pipe(**kwargs)
-            gpu_after_gen = torch.cuda.memory_allocated() / 1e9
-            logger.info(f"  [FI Gen] pipe() 完成，GPU已分配: {gpu_after_gen:.1f}GB")
-            # 立即释放 FI hook 相关的 GPU 缓存
-            current_ref[0] = {}
-            ema_ref_prev[0] = None
-            torch.cuda.empty_cache()
-            logger.info(f"  [FI Gen] FI缓存释放后，GPU已分配: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
 
         finally:
             # 移除所有 hook
@@ -1377,31 +1346,23 @@ class PFlowPipeline:
         logger.info("  ═══════════════════════════════════════════════")
 
         # 处理输出格式
-        gpu_before_post = torch.cuda.memory_allocated() / 1e9
-        logger.info(f"  [FI Post] 开始处理输出，GPU已分配: {gpu_before_post:.1f}GB, output type: {type(output).__name__}")
         if hasattr(output, "frames"):
             video = output.frames
-            logger.info(f"  [FI Post] output.frames type: {type(video).__name__}")
             if isinstance(video, list):
                 import torchvision.transforms as T
                 frames = [T.ToTensor()(f) for f in video[0]]
                 video = torch.stack(frames, dim=1)
             elif isinstance(video, torch.Tensor):
-                logger.info(f"  [FI Post] video tensor shape: {video.shape}, dtype: {video.dtype}")
                 if video.dim() == 5:
                     video = video[0]
                     if video.shape[0] == cfg.num_frames:
                         video = video.permute(1, 0, 2, 3)
         else:
             video = output[0]
-        logger.info(f"  [FI Post] 输出处理完成，GPU已分配: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
 
         if video.min() < 0:
-            logger.info(f"  [FI Post] denormalizing video...")
             video = denormalize_video(video)
-        video = video.clamp(0, 1)
-        logger.info(f"  [FI Post] 最终 video shape: {video.shape}, GPU: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
-        return video
+        return video.clamp(0, 1)
 
     def _vlm_refine(
         self,
