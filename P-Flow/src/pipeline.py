@@ -974,6 +974,7 @@ class PFlowPipeline:
                     captured_features[layer_idx] = output[0].detach().cpu()
                 else:
                     captured_features[layer_idx] = output.detach().cpu()
+                logger.debug(f"  [FI Cache hook] layer={layer_idx}, output type={type(output).__name__}")
             return hook_fn
 
         # 注册 hook
@@ -982,17 +983,8 @@ class PFlowPipeline:
         for layer_idx in target_layers:
             if layer_idx < len(blocks):
                 block = blocks[layer_idx]
-                # Hook 在 block 的前向传播之后
-                # Wan2.1 DiT block 结构: self-attn → cross-attn → ffn
-                # 我们 hook cross-attn 输出 (如果 cache_mode=attention)
-                # 或者 block 整体输出 (如果 cache_mode=hidden)
-                if cfg.fi_cache_mode == "attention" and hasattr(block, 'cross_attn'):
-                    h = block.cross_attn.register_forward_hook(make_hook(layer_idx))
-                elif cfg.fi_cache_mode == "mlp" and hasattr(block, 'ffn'):
-                    h = block.ffn.register_forward_hook(make_hook(layer_idx))
-                else:
-                    # fallback: hook 整个 block
-                    h = block.register_forward_hook(make_hook(layer_idx))
+                # Hook block 整体输出（Wan2.1 block 结构复杂，直接 hook block 最可靠）
+                h = block.register_forward_hook(make_hook(layer_idx))
                 hooks.append(h)
 
         try:
