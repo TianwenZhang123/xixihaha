@@ -1323,6 +1323,11 @@ class PFlowPipeline:
             output = self.pipe(**kwargs)
             gpu_after_gen = torch.cuda.memory_allocated() / 1e9
             logger.info(f"  [FI Gen] pipe() 完成，GPU已分配: {gpu_after_gen:.1f}GB")
+            # 立即释放 FI hook 相关的 GPU 缓存
+            current_ref[0] = {}
+            ema_ref_prev[0] = None
+            torch.cuda.empty_cache()
+            logger.info(f"  [FI Gen] FI缓存释放后，GPU已分配: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
 
         finally:
             # 移除所有 hook
@@ -1352,23 +1357,31 @@ class PFlowPipeline:
         logger.info("  ═══════════════════════════════════════════════")
 
         # 处理输出格式
+        gpu_before_post = torch.cuda.memory_allocated() / 1e9
+        logger.info(f"  [FI Post] 开始处理输出，GPU已分配: {gpu_before_post:.1f}GB, output type: {type(output).__name__}")
         if hasattr(output, "frames"):
             video = output.frames
+            logger.info(f"  [FI Post] output.frames type: {type(video).__name__}")
             if isinstance(video, list):
                 import torchvision.transforms as T
                 frames = [T.ToTensor()(f) for f in video[0]]
                 video = torch.stack(frames, dim=1)
             elif isinstance(video, torch.Tensor):
+                logger.info(f"  [FI Post] video tensor shape: {video.shape}, dtype: {video.dtype}")
                 if video.dim() == 5:
                     video = video[0]
                     if video.shape[0] == cfg.num_frames:
                         video = video.permute(1, 0, 2, 3)
         else:
             video = output[0]
+        logger.info(f"  [FI Post] 输出处理完成，GPU已分配: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
 
         if video.min() < 0:
+            logger.info(f"  [FI Post] denormalizing video...")
             video = denormalize_video(video)
-        return video.clamp(0, 1)
+        video = video.clamp(0, 1)
+        logger.info(f"  [FI Post] 最终 video shape: {video.shape}, GPU: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
+        return video
 
     def _vlm_refine(
         self,
