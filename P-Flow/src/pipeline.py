@@ -1253,7 +1253,7 @@ class PFlowPipeline:
                         # 第一步: 直接使用原始参考特征
                         # 后续步: h_ref_smooth = ema_decay * prev + (1 - ema_decay) * current
                         if ema_ref_prev[0] is not None and layer_idx in ema_ref_prev[0]:
-                            h_ref_prev = ema_ref_prev[0][layer_idx].to(self.device)
+                            h_ref_prev = ema_ref_prev[0][layer_idx]
                             # 确保形状匹配
                             if h_ref_prev.shape == h_ref_raw.shape:
                                 h_ref_smooth = ema_decay * h_ref_prev + (1.0 - ema_decay) * h_ref_raw
@@ -1264,16 +1264,12 @@ class PFlowPipeline:
 
                         current_ref[0][layer_idx] = h_ref_smooth
 
-                # 更新 EMA 缓存 (detach 避免计算图增长，移CPU节省显存)
+                # 更新 EMA 缓存 (detach 避免计算图增长)
                 if current_ref[0]:
                     ema_ref_prev[0] = {
-                        layer_idx: feat.detach().cpu()
+                        layer_idx: feat.detach()
                         for layer_idx, feat in current_ref[0].items()
                     }
-                    # 释放当前步的 GPU 特征（已被 EMA 缓存，不再需要）
-                    for feat in current_ref[0].values():
-                        del feat
-                    current_ref[0] = {}
 
                 # ── 更新 FI 步级统计 ──
                 if current_ref[0]:
