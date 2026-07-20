@@ -432,8 +432,6 @@ class PFlowPipeline:
             save_video_tensor(gen_video, video_path_i, fps=cfg.fps)
             gpu_after_save = torch.cuda.memory_allocated() / 1e9
             logger.info(f"  [Save] 保存完成，GPU: {gpu_after_save:.1f}GB")
-            del gen_video
-            torch.cuda.empty_cache()
 
             results.append({
                 "iteration": i,
@@ -448,6 +446,8 @@ class PFlowPipeline:
                 )
 
             prev_video = gen_video
+            del gen_video
+            torch.cuda.empty_cache()
 
         # ── Step 5: 输出最终结果 ──
         final_path = str(out / f"{sample_id}.mp4")
