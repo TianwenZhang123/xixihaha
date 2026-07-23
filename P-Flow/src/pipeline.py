@@ -708,8 +708,14 @@ class PFlowPipeline:
             device=eta_temporal.device,
             generator=generator,
         )
+        self._save_latent_slices_png(
+            eta_random,
+            getattr(self, "_latent_png_out_dir", Path(self.config.latent_png_dir)),
+            "eta_random",
+        )
 
         # ── Determine α (sigmoid 自适应门控) ──
+
         cfg = self.config
         alpha = cfg.alpha
         if getattr(cfg, 'pna_std_gate', False) and eta_temporal is not None:
@@ -735,13 +741,20 @@ class PFlowPipeline:
 
         # ── Two-way blend: η_temporal + η_random ──
         eta = sqrt_alpha * eta_temporal + sqrt_remaining * eta_random
+        latent_png_out_dir = getattr(self, "_latent_png_out_dir", Path(self.config.latent_png_dir))
         self._save_latent_slices_png(
             eta,
-            getattr(self, "_latent_png_out_dir", Path(self.config.latent_png_dir)),
+            latent_png_out_dir,
             "z0_sf",
+        )
+        self._save_latent_slices_png(
+            (eta - eta_random).abs(),
+            latent_png_out_dir,
+            "delta_z0_sf",
         )
 
         # ── 诊断: Blend 效果 ──
+
 
         logger.info(
             f"  [Blend] α={alpha:.4f} (√α={sqrt_alpha.item():.4f}), "
