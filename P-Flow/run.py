@@ -111,8 +111,13 @@ def parse_args():
                    default=_cfg(cfg, "noise_prior", "rho_s", default=0.1))
     p.add_argument("--rho_m", type=float,
                    default=_cfg(cfg, "noise_prior", "rho_m", default=0.9))
+    p.add_argument("--save-latent-pngs", action="store_true",
+                   help="保存 eta_inv/eta_temporal/z0_sf 的 early/middle/late latent PNG")
+    p.add_argument("--latent-png-dir", type=str, default="latent_pngs",
+                   help="latent PNG 保存子目录")
 
     # ── L2: sigmoid 自适应 α ──
+
     p.add_argument("--no-pna-std-gate", action="store_true",
                    help="禁用 sigmoid 门控")
     p.add_argument("--pna_std_eta0", type=float,
@@ -187,7 +192,10 @@ def build_config(args) -> PFlowConfig:
         rho_m=args.rho_m,
         inversion_steps=args.inversion_steps,
         use_fast_svd=not args.no_fast_svd,
+        save_latent_pngs=args.save_latent_pngs,
+        latent_png_dir=args.latent_png_dir,
         svd_progressive=args.svd_progressive,
+
         i_max=args.iter if args.iter > 0 else 1,
         vlm_provider=args.vlm_provider,
         vlm_model_path=args.vlm_path,

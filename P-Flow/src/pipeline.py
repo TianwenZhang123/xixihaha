@@ -31,8 +31,10 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 import torch
+import torch.nn.functional as F
 
 from .distributed import setup_multi_gpu, load_model
+
 from .flow_matching import FlowMatchingInverter, encode_video_to_latents
 from .svd_filter import SVDFilter, SVDFilterConfig
 from .video_utils import (
@@ -70,8 +72,11 @@ class PFlowConfig:
     svd_progressive: bool = False     # 渐进多尺度SVD (自适应: 仅k_m非均匀时启用)
     inversion_steps: int = 50     # 反演ODE步数
     use_fast_svd: bool = True     # 使用 randomized SVD 加速滤波 (对大 latent 快 2-3x)
+    save_latent_pngs: bool = False  # 保存 eta_inv/eta_temporal/z0_sf 的 early/middle/late PNG
+    latent_png_dir: str = "latent_pngs"  # latent PNG 输出子目录
 
     # ── L3: Feature Injection (FI) ──
+
     # 核心思想: 不做 latent 空间的方向修正 (VDA), 改做 DiT 特征空间的信息注入
     # 反演过程中缓存 DiT 每步的 cross-attention 输出, 生成时以残差方式注入
     # 优势:
@@ -212,8 +217,10 @@ class PFlowPipeline:
         t0 = time.time()
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
+        self._latent_png_out_dir = out / self.config.latent_png_dir
 
         cfg = self.config
+
         seed = cfg.seed + sample_id
         generator = torch.Generator(device=self.device).manual_seed(seed)
         torch.manual_seed(seed)
@@ -476,10 +483,69 @@ class PFlowPipeline:
         logger.info(f"  [SAMPLE SUMMARY] elapsed={elapsed:.1f}s, output={final_path}")
         return metadata
 
+    def _save_latent_slices_png(self, latent: torch.Tensor, out_dir: Path, prefix: str) -> None:
+        """保存 video latent 时间维 early/middle/late 三张伪 RGB PNG。"""
+        if not getattr(self.config, "save_latent_pngs", False) or latent is None:
+            return
+
+        try:
+            from PIL import Image
+
+            x = latent.detach().float().cpu()
+            if x.dim() == 5:
+                x = x[0]
+            if x.dim() != 4:
+                logger.warning(f"  [Latent PNG] 跳过 {prefix}: unsupported shape={tuple(latent.shape)}")
+                return
+
+            # 支持 C,F,H,W 与 F,C,H,W；Wan latent 通常是 C,F,H,W。
+            if x.shape[0] <= x.shape[1]:
+                x_cf = x
+            else:
+                x_cf = x.permute(1, 0, 2, 3)
+
+            num_frames = x_cf.shape[1]
+            if num_frames <= 0:
+                return
+
+            indices = {
+                "early": 0,
+                "middle": num_frames // 2,
+                "late": num_frames - 1,
+            }
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            for name, frame_idx in indices.items():
+                img = x_cf[:, frame_idx]
+                if img.shape[0] == 1:
+                    img = img.repeat(3, 1, 1)
+                elif img.shape[0] == 2:
+                    pad = torch.zeros(1, img.shape[1], img.shape[2])
+                    img = torch.cat([img, pad], dim=0)
+                elif img.shape[0] > 3:
+                    img = img[:3]
+
+                img_min = img.amin(dim=(1, 2), keepdim=True)
+                img_max = img.amax(dim=(1, 2), keepdim=True)
+                img = (img - img_min) / (img_max - img_min + 1e-6)
+                img = F.interpolate(
+                    img.unsqueeze(0),
+                    size=(256, 256),
+                    mode="bilinear",
+                    align_corners=False,
+                )[0]
+                arr = (img.permute(1, 2, 0).clamp(0, 1).numpy() * 255).astype("uint8")
+                Image.fromarray(arr).save(out_dir / f"{prefix}_{name}.png")
+
+            logger.info(f"  [Latent PNG] saved {prefix}_early/middle/late → {out_dir}")
+        except Exception as e:
+            logger.warning(f"  [Latent PNG] 保存 {prefix} 失败: {e}")
+
     # ─────────────────────────────────────────────────────────────
     # ─────────────────────────────────────────────────────────────
 
     def _compute_noise_prior(
+
         self, ref_video: torch.Tensor, prompt: str,
         cache_trajectory: bool = False, cache_every_n: int = 1,
         fi_config: Optional[Dict[str, Any]] = None,
@@ -554,8 +620,14 @@ class PFlowPipeline:
 
         # 保留原始反演噪声
         eta_inv_raw = eta_inv
+        self._save_latent_slices_png(
+            eta_inv_raw,
+            getattr(self, "_latent_png_out_dir", Path(self.config.latent_png_dir)),
+            "eta_inv",
+        )
 
         # SVD Filtering V2
+
         svd_stats = None
         self._eta_temporal_full = None  # 渐进SVD: 保留全帧SVD用于门控（无SVD时也初始化为None）
         if self.config.use_svd:
@@ -573,8 +645,14 @@ class PFlowPipeline:
 
             # 使用 return_stats 获取 S_temporal
             eta_temporal, svd_stats = svd_filter.filter(eta_inv, return_stats=True)
+            self._save_latent_slices_png(
+                eta_temporal,
+                getattr(self, "_latent_png_out_dir", Path(self.config.latent_png_dir)),
+                "eta_temporal",
+            )
 
             logger.info(
+
                 f"  [SVD] η_temporal std={eta_temporal.std():.4f}"
             )
 
@@ -657,8 +735,14 @@ class PFlowPipeline:
 
         # ── Two-way blend: η_temporal + η_random ──
         eta = sqrt_alpha * eta_temporal + sqrt_remaining * eta_random
+        self._save_latent_slices_png(
+            eta,
+            getattr(self, "_latent_png_out_dir", Path(self.config.latent_png_dir)),
+            "z0_sf",
+        )
 
         # ── 诊断: Blend 效果 ──
+
         logger.info(
             f"  [Blend] α={alpha:.4f} (√α={sqrt_alpha.item():.4f}), "
             f"η_temporal std={eta_temporal.std():.4f}, "
